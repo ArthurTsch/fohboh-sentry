@@ -1,0 +1,237 @@
+import type { Dispatch, SetStateAction } from "react";
+import type {
+  CaarRecord,
+  IntakeState,
+  LocationRecord,
+  LogRecord,
+  Role,
+  SchemaWorkspace,
+  UploadModule,
+  ViewId,
+  WgsAccount,
+  WgsApproval,
+  WgsQueueItem,
+  WgsUser,
+} from "./types";
+import { CaarListView } from "./views/CaarListView";
+import { DashboardView } from "./views/DashboardView";
+import { DiyAccessView } from "./views/DiyAccessView";
+import { FaqView } from "./views/FaqView";
+import { LogView } from "./views/LogView";
+import { OnboardingView } from "./views/OnboardingView";
+import { PermissionsView } from "./views/PermissionsView";
+import { SchemaRegistryView } from "./views/SchemaRegistryView";
+import { UploadCenterView } from "./views/UploadCenterView";
+import { UserGuideView } from "./views/UserGuideView";
+import { WaterfallView } from "./views/WaterfallView";
+import { WgsAdminView } from "./views/WgsAdminView";
+
+export function SentryViewRouter({
+  accounts,
+  activeView,
+  approvals,
+  averageTrust,
+  artifactContractState,
+  artifactIntakeState,
+  caars,
+  completed,
+  expandedLocations,
+  faqOpen,
+  faqQuery,
+  filteredFaq,
+  filteredLogs,
+  locations,
+  logFilter,
+  onAddLocation,
+  onAddUser,
+  onApprove,
+  onArtifactAction,
+  onEnterSupportMode,
+  onExpandAll,
+  onFilterChange,
+  onOpenCaar,
+  onOpenChecklist,
+  onOpenOnboarding,
+  onOpenSchemaEditor,
+  onOpenUploads,
+  onOpenUser,
+  onQueryChange,
+  onResolveQueue,
+  onRunCertification,
+  onSealWorkspace,
+  onToggleChecklist,
+  onToggleLocation,
+  onToggleQuestion,
+  onViewChange,
+  queue,
+  role,
+  schemaWorkspaces,
+  totalCaars,
+  totalRecovery,
+  uploadModules,
+  users,
+}: {
+  accounts: WgsAccount[];
+  activeView: ViewId;
+  approvals: WgsApproval[];
+  averageTrust: number;
+  artifactContractState: Record<string, Record<string, string>>;
+  artifactIntakeState: Record<string, IntakeState>;
+  caars: CaarRecord[];
+  completed: Record<string, boolean[]>;
+  expandedLocations: string[];
+  faqOpen: string | null;
+  faqQuery: string;
+  filteredFaq: { answer: string; question: string; topic: string }[];
+  filteredLogs: LogRecord[];
+  locations: LocationRecord[];
+  logFilter: "all" | "immutable" | "editable";
+  onAddLocation: () => void;
+  onAddUser: () => void;
+  onApprove: (approvalId: string) => void;
+  onArtifactAction: (moduleId: "M01" | "M02", artifactKey: string) => void;
+  onEnterSupportMode: (accountId: string) => void;
+  onExpandAll: () => void;
+  onFilterChange: (filter: "all" | "immutable" | "editable") => void;
+  onOpenCaar: Dispatch<SetStateAction<CaarRecord | null>>;
+  onOpenChecklist: (moduleId: "M01" | "M02", artifactKey: string) => void;
+  onOpenOnboarding: (locationId: string) => void;
+  onOpenSchemaEditor: Dispatch<SetStateAction<SchemaWorkspace | null>>;
+  onOpenUploads: () => void;
+  onOpenUser: Dispatch<SetStateAction<WgsUser | null>>;
+  onQueryChange: Dispatch<SetStateAction<string>>;
+  onResolveQueue: (ticketId: string) => void;
+  onRunCertification: (locationId: string) => void;
+  onSealWorkspace: (workspace: SchemaWorkspace) => void;
+  onToggleChecklist: (stepId: string, itemIndex: number) => void;
+  onToggleLocation: (id: string) => void;
+  onToggleQuestion: (question: string) => void;
+  onViewChange: (view: ViewId) => void;
+  queue: WgsQueueItem[];
+  role: Role;
+  schemaWorkspaces: SchemaWorkspace[];
+  totalCaars: number;
+  totalRecovery: string;
+  uploadModules: UploadModule[];
+  users: WgsUser[];
+}) {
+  if (activeView === "dashboard") {
+    return (
+      <DashboardView
+        averageTrust={averageTrust}
+        locations={locations}
+        logs={filteredLogs}
+        openLog={() => onViewChange("log")}
+        totalRecovery={totalRecovery}
+        totalCaars={totalCaars}
+        openWaterfall={() => onViewChange("waterfall")}
+      />
+    );
+  }
+
+  if (activeView === "waterfall") {
+    return (
+      <WaterfallView
+        caars={caars}
+        expandedLocations={expandedLocations}
+        locations={locations}
+        onAddLocation={onAddLocation}
+        onExpandAll={onExpandAll}
+        onOpenCaar={onOpenCaar}
+        onOpenOnboarding={onOpenOnboarding}
+        onOpenSchema={() => onViewChange("schema")}
+        onRunCertification={onRunCertification}
+        onToggleLocation={onToggleLocation}
+        onOpenUploads={onOpenUploads}
+        role={role}
+      />
+    );
+  }
+
+  if (activeView === "caars") {
+    return <CaarListView onOpenCaar={onOpenCaar} records={caars} />;
+  }
+
+  if (activeView === "log") {
+    return <LogView entries={filteredLogs} filter={logFilter} onFilterChange={onFilterChange} />;
+  }
+
+  if (activeView === "permissions") {
+    return <PermissionsView />;
+  }
+
+  if (activeView === "diy") {
+    return (
+      <DiyAccessView
+        onEditWorkspace={onOpenSchemaEditor}
+        onSealWorkspace={onSealWorkspace}
+        role={role}
+        workspaces={schemaWorkspaces}
+      />
+    );
+  }
+
+  if (activeView === "userguide") {
+    return <UserGuideView />;
+  }
+
+  if (activeView === "faq") {
+    return (
+      <FaqView
+        items={filteredFaq}
+        query={faqQuery}
+        openQuestion={faqOpen}
+        onQueryChange={onQueryChange}
+        onToggleQuestion={onToggleQuestion}
+      />
+    );
+  }
+
+  if (activeView === "uploads") {
+    return (
+      <UploadCenterView
+        contractState={artifactContractState}
+        intakeState={artifactIntakeState}
+        modules={uploadModules}
+        onArtifactAction={onArtifactAction}
+        onOpenChecklist={onOpenChecklist}
+        onOpenSchema={() => onViewChange("schema")}
+      />
+    );
+  }
+
+  if (activeView === "schema") {
+    return (
+      <SchemaRegistryView
+        workspaces={schemaWorkspaces}
+        onEditWorkspace={onOpenSchemaEditor}
+        onSealWorkspace={onSealWorkspace}
+      />
+    );
+  }
+
+  if (activeView === "onboarding") {
+    return (
+      <OnboardingView
+        completed={completed}
+        onToggleChecklist={onToggleChecklist}
+        onOpenSchema={() => onViewChange("schema")}
+        onOpenUploads={() => onViewChange("uploads")}
+      />
+    );
+  }
+
+  return (
+    <WgsAdminView
+      accounts={accounts}
+      approvals={approvals}
+      onAddUser={onAddUser}
+      onApprove={onApprove}
+      onEnterSupportMode={onEnterSupportMode}
+      onOpenUser={onOpenUser}
+      onResolveQueue={onResolveQueue}
+      queue={queue}
+      users={users}
+    />
+  );
+}
