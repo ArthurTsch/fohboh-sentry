@@ -10,7 +10,45 @@ function getUploadCopy(module: "M01" | "M02") {
   if (module === "M01") {
     return "Select the processor below, then upload the exact transaction-level CSV exported from the processor portal.";
   }
-  return "Select each active DSP below, then upload the evidence bundle used for settlement, agreement, POS, and bank reconciliation.";
+  return "Select each active DSP below, then upload all four required documents: settlement CSV, POS summary CSV, signed DSP agreement PDF, and bank statement PDF.";
+}
+
+function downloadOnboardingTemplate(option: WgsVendorOption, module: "M01" | "M02") {
+  if (typeof window === "undefined") return;
+  const templates: Record<string, string> = {
+    heartland:
+      "trans_date,trans_id,card_type,trans_amount,fee_amount,disc_rate,disc_amount,auth_code,terminal_id,batch_id,card_number_last4,trans_type",
+    chase:
+      "transaction_date,transaction_id,card_type,transaction_amount,disc_rate,disc_amount,interchange_fee,service_fee,authorization_number,mid",
+    worldpay:
+      "txn_date,txn_id,card_brand,txn_amount,disc_rate,disc_amount,interchange_amount,assessment,terminal_id,batch_number,auth_number",
+    square:
+      "date,transaction_id,amount,fee,net_total,card_brand,pan_suffix,device_name,location_name,description,refund_id,dispute_id",
+    toast:
+      "date,batch_date,pos_merchant_sales,platform_net_sales,transaction_fees,processing_fees,other_merchant_fees,calculated_recovery_variance,bank_deposit_amount,card_type,entry_method,interchange_rate_applied,transaction_count,notes",
+    doordash:
+      "order_date,store_id,order_id,order_subtotal,dd_commission_rate,dd_commission_amount,dd_marketing_fee,error_charge,consumer_fee,payout_amount,order_status",
+    ubereats:
+      "date,order_id,item_subtotal,commission_charged,commission_rate_applied,platform_gross_sales,order_status,delivery_fee,tip,tax,settlement_date,menu_item_count,channel,notes",
+    grubhub:
+      "date,restaurant_id,order_id,restaurant_food_sales,grubhub_commission,marketing_fee,tax_remitted,adjustment_amount,net_payout,order_type",
+    postmates:
+      "date,order_id,item_subtotal,commission_amount,commission_rate,payout_amount,settlement_date,merchant_id,market,notes",
+    pos_summary:
+      "channel,pos_net_sales,commission_variance,orders,refunds,discounts,net_sales,service_fees,tips,tax,deposit_total,notes",
+  };
+  const templateKey = option.key in templates ? option.key : module === "M02" ? "pos_summary" : option.key;
+  const headers = templates[templateKey];
+  if (!headers) return;
+  const blob = new Blob([`${headers}\n`], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `FohBoh_${module}_${option.name.replace(/\s+/g, "_")}_Template.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 export function WgsOnboardingWizard({
@@ -66,6 +104,10 @@ export function WgsOnboardingWizard({
   }
 
   async function handleFileSelected(file: File, option: WgsVendorOption) {
+    await handleDocumentUpload(file, option, option.key);
+  }
+
+  async function handleDocumentUpload(file: File, option: WgsVendorOption, docKey: string) {
     const buffer = await file.arrayBuffer();
     const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
     const hash = Array.from(new Uint8Array(hashBuffer))
@@ -78,7 +120,8 @@ export function WgsOnboardingWizard({
     patchProgress({
       uploads: {
         ...progress.uploads,
-        [option.key]: {
+        [docKey]: {
+          docKey,
           hash,
           module: option.module,
           name: file.name,
@@ -177,48 +220,169 @@ export function WgsOnboardingWizard({
         <div className="grid gap-3">
           {selectedOptions.length > 0 ? (
             selectedOptions.map((option) => {
-              const upload = progress.uploads[option.key];
-              return (
-                <label
-                  key={option.key}
-                  className={`block cursor-pointer rounded-3xl border-2 border-dashed p-5 transition ${
-                    upload
-                      ? "border-[rgba(0,200,83,0.28)] bg-[rgba(0,200,83,0.05)]"
-                      : "border-[var(--border)] bg-white hover:border-[var(--accent)]"
-                  }`}
-                >
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept={module === "M01" ? ".csv,text/csv,.txt" : ".csv,text/csv,.txt,.pdf,application/pdf"}
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) void handleFileSelected(file, option);
-                    }}
-                  />
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <div className="font-medium text-[var(--text)]">{option.name}</div>
-                      <div className="mt-1 text-sm text-[var(--muted)]">
-                        {module === "M01"
-                          ? "Processor statement intake"
-                          : "DSP evidence bundle for settlement, contract, POS, and bank proof"}
+              if (module === "M01") {
+                const upload = progress.uploads[option.key];
+                return (
+                  <div
+                    key={option.key}
+                    className={`rounded-3xl border-2 border-dashed p-5 transition ${
+                      upload
+                        ? "border-[rgba(0,200,83,0.28)] bg-[rgba(0,200,83,0.05)]"
+                        : "border-[var(--border)] bg-white hover:border-[var(--accent)]"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <div className="font-medium text-[var(--text)]">{option.name}</div>
+                        <div className="mt-1 text-sm text-[var(--muted)]">Processor statement intake</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => downloadOnboardingTemplate(option, "M01")}
+                          className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+                        >
+                          Download Template
+                        </button>
+                        <Badge tone={upload ? "success" : "warning"}>{upload ? "Uploaded" : "Awaiting file"}</Badge>
                       </div>
                     </div>
-                    <Badge tone={upload ? "success" : "warning"}>{upload ? "Uploaded" : "Awaiting file"}</Badge>
+                    <label className="mt-3 block cursor-pointer">
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept=".csv,text/csv,.txt"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) void handleFileSelected(file, option);
+                        }}
+                      />
+                      <div className="rounded-2xl bg-[var(--surface)] px-4 py-5 text-center">
+                        {upload ? (
+                          <div className="text-sm leading-6 text-[var(--muted)]">
+                            <div className="font-semibold text-[var(--success)]">{upload.name}</div>
+                            <div>Rows / pages: {upload.rows || "PDF bundle"}</div>
+                            <div>SHA-256: {upload.hash}</div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="text-[15px] text-[var(--text)]">
+                              Drop {option.name} CSV or <span className="text-[var(--accent)]">browse</span>
+                            </div>
+                            <div className="mt-2 font-[family-name:var(--font-mono)] text-[10px] text-[var(--muted)]">
+                              Transaction-level export | exact portal download
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </label>
                   </div>
-                  <div className="mt-3 text-sm leading-6 text-[var(--muted)]">
-                    {upload ? (
-                      <>
-                        <div>File: {upload.name}</div>
-                        <div>Rows / pages: {upload.rows || "PDF bundle"}</div>
-                        <div>SHA-256: {upload.hash}</div>
-                      </>
-                    ) : (
-                      "Click to choose a file. The wizard will hash the upload and store a lightweight intake record."
-                    )}
+                );
+              }
+
+              const docs = [
+                {
+                  key: `${option.key}-settlement`,
+                  title: "1 | DSP Settlement CSV",
+                  subtitle: "Order-level export from DSP merchant portal",
+                  accept: ".csv,text/csv,.txt",
+                },
+                {
+                  key: `${option.key}-pos`,
+                  title: "2 | POS Summary by Channel CSV",
+                  subtitle: "Matching-period POS net sales by channel",
+                  accept: ".csv,text/csv,.txt",
+                },
+                {
+                  key: `${option.key}-agreement`,
+                  title: "3 | DSP Agreement PDF",
+                  subtitle: "Signed executed agreement with commission schedule",
+                  accept: ".pdf,application/pdf",
+                },
+                {
+                  key: `${option.key}-bank`,
+                  title: "4 | Bank Statement PDF",
+                  subtitle: "Matching-period bank deposit evidence",
+                  accept: ".pdf,application/pdf",
+                },
+              ];
+
+              return (
+                <div key={option.key} className="rounded-3xl border border-[var(--border)] bg-white p-5">
+                  <div className="mb-4 font-medium text-[var(--text)]">{option.name}</div>
+                  <div className="space-y-3">
+                    {docs.map((doc) => {
+                      const upload = progress.uploads[doc.key];
+                      return (
+                        <div
+                          key={doc.key}
+                          className={`rounded-2xl border p-4 transition ${
+                            upload
+                              ? "border-[rgba(0,200,83,0.28)] bg-[rgba(0,200,83,0.05)]"
+                              : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--accent)]"
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]">
+                                {doc.title}
+                              </div>
+                              <div className="mt-1 text-sm text-[var(--muted)]">{doc.subtitle}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {doc.key.endsWith("settlement") || doc.key.endsWith("pos") ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    downloadOnboardingTemplate(
+                                      doc.key.endsWith("pos") ? { ...option, key: "pos_summary" } : option,
+                                      "M02",
+                                    )
+                                  }
+                                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-[11px] text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+                                >
+                                  Download Template
+                                </button>
+                              ) : null}
+                              <Badge tone={upload ? "success" : "warning"}>{upload ? "Uploaded" : "Awaiting file"}</Badge>
+                            </div>
+                          </div>
+                          <label className="mt-3 block cursor-pointer">
+                            <input
+                              type="file"
+                              className="hidden"
+                              accept={doc.accept}
+                              onChange={(event) => {
+                                const file = event.target.files?.[0];
+                                if (file) void handleDocumentUpload(file, option, doc.key);
+                              }}
+                            />
+                            <div className="rounded-2xl bg-white px-4 py-5 text-center">
+                              {upload ? (
+                                <div className="text-sm leading-6 text-[var(--muted)]">
+                                  <div className="font-semibold text-[var(--success)]">{upload.name}</div>
+                                  <div>Rows / pages: {upload.rows || "PDF"}</div>
+                                  <div>SHA-256: {upload.hash}</div>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="text-[15px] text-[var(--text)]">
+                                    {doc.title.includes("PDF") || doc.title.includes("Agreement") || doc.title.includes("Bank")
+                                      ? `Drop ${doc.title.includes("Bank") ? "bank statement PDF" : `${option.name} PDF`} or browse`
+                                      : `Drop ${doc.title.includes("POS") ? "POS Summary CSV" : `${option.name} CSV`} or browse`}
+                                  </div>
+                                  <div className="mt-2 font-[family-name:var(--font-mono)] text-[10px] text-[var(--muted)]">
+                                    {doc.subtitle}
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </label>
+                        </div>
+                      );
+                    })}
                   </div>
-                </label>
+                </div>
               );
             })
           ) : (

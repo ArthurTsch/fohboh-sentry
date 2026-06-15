@@ -128,6 +128,13 @@ export type IntakeState = {
   fileName?: string;
   rows?: number;
   hashValue?: string;
+  vendorKey?: string;
+  vendorName?: string;
+  sizeBytes?: number;
+  matchPct?: number;
+  matchedColumns?: number;
+  expectedColumns?: number;
+  unmatchedHeaders?: string[];
 };
 
 export type UploadModule = {
@@ -167,6 +174,7 @@ export type WgsVendorOption = {
 };
 
 export type WgsOnboardingUpload = {
+  docKey?: string;
   hash: string;
   module: "M01" | "M02";
   name: string;

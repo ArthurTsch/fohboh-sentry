@@ -46,6 +46,7 @@ export function SentryViewRouter({
   onAddUser,
   onApprove,
   onArtifactAction,
+  onDirectUpload,
   onEnterSupportMode,
   onExpandAll,
   onFilterChange,
@@ -89,12 +90,27 @@ export function SentryViewRouter({
   onAddLocation: () => void;
   onAddUser: () => void;
   onApprove: (approvalId: string) => void;
-  onArtifactAction: (moduleId: "M01" | "M02", artifactKey: string) => void;
+  onArtifactAction: (
+    moduleId: "M01" | "M02",
+    artifactKey: string,
+    vendor?: { key: string; name: string },
+    entryMode?: "manual" | "upload",
+  ) => void;
+  onDirectUpload: (
+    moduleId: "M01" | "M02",
+    artifactKey: string,
+    file: File,
+    vendor?: { key: string; name: string },
+  ) => void;
   onEnterSupportMode: (accountId: string) => void;
   onExpandAll: () => void;
   onFilterChange: (filter: "all" | "immutable" | "editable") => void;
   onOpenCaar: Dispatch<SetStateAction<CaarRecord | null>>;
-  onOpenChecklist: (moduleId: "M01" | "M02", artifactKey: string) => void;
+  onOpenChecklist: (
+    moduleId: "M01" | "M02",
+    artifactKey: string,
+    vendor?: { key: string; name: string },
+  ) => void;
   onOpenOnboarding: (locationId: string) => void;
   onOpenSchemaEditor: Dispatch<SetStateAction<SchemaWorkspace | null>>;
   onOpenUploads: () => void;
@@ -194,6 +210,7 @@ export function SentryViewRouter({
         intakeState={artifactIntakeState}
         modules={uploadModules}
         onArtifactAction={onArtifactAction}
+        onDirectUpload={onDirectUpload}
         onOpenChecklist={onOpenChecklist}
         onOpenSchema={() => onViewChange("schema")}
       />

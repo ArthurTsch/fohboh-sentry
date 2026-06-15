@@ -393,28 +393,46 @@ export const guidePhases: GuidePhase[] = [
 
 export const faqItems: FaqItem[] = [
   {
-    topic: "Trust Score",
-    question: "Why is my Trust Score below 85?",
+    topic: "CAAR",
+    question: "What is a CAAR?",
     answer:
-      "The most common causes are a missing bank statement, incomplete POS upload, or stale schema mappings after a DSP export format change.",
+      "A Certified Amount-At-Risk Report (CAAR) is the output document produced after Sentry runs a certification. It identifies fee overcharges, documents the exact rules that were violated, and is formatted for court admissibility. Each CAAR is sealed with a SHA-256 hash so you can verify the downloaded file has not been altered.",
   },
   {
     topic: "CAAR",
-    question: "What makes a CAAR court-admissible?",
+    question: 'What does "court-admissible" mean in practice?',
     answer:
-      "A CAAR becomes court-admissible when the evidence package is sealed, hashes are verified, rule lineage is locked, and the Trust Score clears the release threshold.",
+      "It means the CAAR is formatted and evidence-chained to meet the evidentiary standards for use in arbitration, dispute resolution, or civil litigation. The SHA-256 seal hash creates an unbroken chain of custody from the original data to the final document - a requirement for legal standing.",
   },
   {
-    topic: "Schema Registry",
-    question: "Who can seal Contract Config?",
+    topic: "Vault",
+    question: "Why can't I modify a sealed certification record?",
     answer:
-      "Sealing authority is restricted to Admin and WGS Manager roles because the sealed config becomes the evidentiary source of rate truth.",
+      "SHA-256 immutability is an architectural constraint, not a permission. Once a certification run produces a vault record, the cryptographic hash makes any modification detectable and therefore invalid. If you discover an error in the input data, run a new certification with corrected data. The original record remains as a permanent audit entry.",
   },
   {
-    topic: "Recovery",
-    question: "What is included in the ExportPack?",
+    topic: "M03",
+    question: "Why is M03 Royalty Recovery locked?",
     answer:
-      "The pack includes the CAAR PDF, source CSV references, evidence manifest, signed contracts, audit trail, and the integrity manifest used for chain of custody.",
+      "M03 requires M01 and M02 to have been active for at least 90 days and both Trust Scores to be at 85 or above. This dependency exists because royalty recovery relies on the certified baseline data that M01 and M02 establish. It also ensures the franchisor-facing evidence package is built on a mature, validated data history.",
+  },
+  {
+    topic: "Trust Score",
+    question: "What is the M02 Trust Score?",
+    answer:
+      "The Trust Score (0-100) reflects how completely and accurately your M02 delivery fee data has been validated against your DSP contracts. A score of 91 means the engine has high confidence in the certified figures. Scores below 70 typically indicate missing data or unresolved DSP contract ambiguities - your WGS Advisor will flag these during onboarding.",
+  },
+  {
+    topic: "WGS",
+    question: "Who is my WGS Advisor and what do they do?",
+    answer:
+      "WGS (White Glove Services) Advisors are FohBoh specialists who handle your initial setup: reviewing your processor and DSP contracts, configuring your Schema Registry, sealing your Contract Config, and running your first certification. They are the only role that can seal Contract Config - this is an architectural requirement to ensure a qualified human reviews every contract before it governs a live certification.",
+  },
+  {
+    topic: "Locations",
+    question: "How do I add a new location?",
+    answer:
+      "Admins and WGS Managers can add locations from the Location Waterfall view. Each new location requires its own Contract Config to be sealed by a WGS Manager before its first certification run. This ensures every location's fee structures are reviewed before Sentry begins certifying against them.",
   },
 ];
 
@@ -453,6 +471,13 @@ export const uploadModules: UploadModule[] = [
         note: "Cross-system source aligned with the processor period used in the current run.",
       },
       {
+        key: "m01-agreement",
+        label: "Signed Merchant Agreement",
+        type: "PDF",
+        status: "Ready",
+        note: "Executed merchant services agreement is linked to the active contract configuration.",
+      },
+      {
         key: "m01-bank",
         label: "Bank Statement",
         type: "PDF",
@@ -480,6 +505,13 @@ export const uploadModules: UploadModule[] = [
         type: "CSV",
         status: "Ready",
         note: "DoorDash and Uber Eats files match the active schema mapping set.",
+      },
+      {
+        key: "m02-pos",
+        label: "POS Summary by Channel CSV",
+        type: "CSV",
+        status: "Needs Review",
+        note: "POS channel summary is required for cross-system variance reconciliation against DSP settlement and bank payout.",
       },
       {
         key: "m02-agreement",
@@ -516,6 +548,13 @@ export const uploadModules: UploadModule[] = [
         type: "CSV",
         status: "Ready",
         note: "Settlement export uploaded and schema-matched for the current period.",
+      },
+      {
+        key: "m02-pos-c002",
+        label: "POS Summary by Channel CSV",
+        type: "CSV",
+        status: "Missing",
+        note: "POS summary has not been uploaded for this period, so channel-level reconciliation is blocked.",
       },
       {
         key: "m02-agreement-c002",
@@ -559,6 +598,13 @@ export const uploadModules: UploadModule[] = [
         type: "CSV",
         status: "Needs Review",
         note: "POS export exists but still needs field-level validation against the active schema.",
+      },
+      {
+        key: "m01-agreement-c003",
+        label: "Signed Merchant Agreement",
+        type: "PDF",
+        status: "Needs Review",
+        note: "Renewal agreement PDF is present but addendum linkage still needs confirmation.",
       },
       {
         key: "m01-bank-c003",
@@ -1142,6 +1188,22 @@ export const contractInputDefinitions: Record<"M01" | "M02", ContractInputDefini
       help: "The signed DSP agreement start date used when validating rate applicability.",
     },
     {
+      id: "expiry_date",
+      label: "Expiry / Renewal Date",
+      placeholder: "",
+      type: "date",
+      required: false,
+      help: "Tracks renewals and determines whether an amended rate schedule should supersede the current agreement.",
+    },
+    {
+      id: "market",
+      label: "Market / Region",
+      placeholder: "e.g. Dallas-Fort Worth",
+      type: "text",
+      required: false,
+      help: "Regional scope of the DSP agreement when the same operator uses different contract territories.",
+    },
+    {
       id: "commission_base",
       label: "Commission Base Field",
       placeholder: "",
@@ -1173,6 +1235,64 @@ export const contractInputDefinitions: Record<"M01" | "M02", ContractInputDefini
       type: "number",
       required: false,
       help: "Reduced rate for member orders such as DashPass or Uber One.",
+    },
+    {
+      id: "rate_catering",
+      label: "Catering / Group Orders Rate (%)",
+      placeholder: "e.g. 12.0",
+      type: "number",
+      required: false,
+      help: "Channel-specific contracted commission rate for catering or large-format DSP orders.",
+    },
+    {
+      id: "rate_sponsored",
+      label: "In-App Sponsored Listing Rate (%)",
+      placeholder: "e.g. 5.0",
+      type: "number",
+      required: false,
+      help: "Sponsored-listing or promoted-placement fee rate if charged separately from the core DSP commission.",
+    },
+    {
+      id: "marketing_fee_pct",
+      label: "Marketing Opt-In Fee (%)",
+      placeholder: "e.g. 0.0",
+      type: "number",
+      required: false,
+      help: "Additional marketing fee percentage for DSP advertising or boosted-visibility participation.",
+    },
+    {
+      id: "error_charge_cap",
+      label: "Error Charge Cap ($)",
+      placeholder: "e.g. 0.00",
+      type: "number",
+      required: false,
+      help: "Cap for DSP error or dispute charges where the contract limits restaurant exposure.",
+    },
+    {
+      id: "tax_remit",
+      label: "Tax Remittance by DSP?",
+      placeholder: "",
+      type: "select",
+      required: false,
+      options: ["yes", "no", "partial"],
+      help: "Matches the original HTML manual-entry flow: whether the DSP remits tax, the restaurant remits it, or the arrangement is split.",
+    },
+    {
+      id: "payout_freq",
+      label: "Payout Frequency",
+      placeholder: "",
+      type: "select",
+      required: false,
+      options: ["Weekly", "Bi-weekly", "Daily", "Monthly"],
+      help: "Settlement cadence used when evaluating payout timing and reconciliation expectations.",
+    },
+    {
+      id: "override_notes",
+      label: "Override / Special Terms",
+      placeholder: "Non-standard rates, side agreements, promotional discounts, DashPass exclusions...",
+      type: "textarea",
+      required: false,
+      help: "Capture non-standard rate treatments, side agreements, promotional discounts, and exclusions that change agreement interpretation.",
     },
     {
       id: "notes",

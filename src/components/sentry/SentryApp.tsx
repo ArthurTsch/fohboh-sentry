@@ -53,7 +53,31 @@ import { LandingPage } from "./views/LandingPage";
 type ActiveArtifactState = {
   accountId: string;
   artifact: UploadArtifact;
+  entryMode?: "manual" | "upload";
   moduleId: "M01" | "M02";
+  vendorKey?: string;
+  vendorName?: string;
+};
+
+const vendorTemplateHeaders: Record<string, string[]> = {
+  heartland:
+    "trans_date,trans_id,card_type,trans_amount,fee_amount,disc_rate,disc_amount,auth_code,terminal_id,batch_id,card_number_last4,trans_type".split(","),
+  toast:
+    "date,batch_date,pos_merchant_sales,platform_net_sales,transaction_fees,processing_fees,other_merchant_fees,calculated_recovery_variance,bank_deposit_amount,card_type,entry_method,interchange_rate_applied,transaction_count,notes".split(","),
+  square:
+    "date,transaction_id,amount,fee,net_total,card_brand,pan_suffix,device_name,location_name,description,refund_id,dispute_id".split(","),
+  worldpay:
+    "txn_date,txn_id,card_brand,txn_amount,disc_rate,disc_amount,interchange_amount,assessment,terminal_id,batch_number,auth_number".split(","),
+  chase:
+    "transaction_date,transaction_id,card_type,transaction_amount,disc_rate,disc_amount,interchange_fee,service_fee,authorization_number,mid".split(","),
+  ubereats:
+    "date,order_id,item_subtotal,commission_charged,commission_rate_applied,platform_gross_sales,order_status,delivery_fee,tip,tax,settlement_date,menu_item_count,channel,notes".split(","),
+  doordash:
+    "order_date,store_id,order_id,order_subtotal,dd_commission_rate,dd_commission_amount,dd_marketing_fee,error_charge,consumer_fee,payout_amount,order_status".split(","),
+  grubhub:
+    "date,restaurant_id,order_id,restaurant_food_sales,grubhub_commission,marketing_fee,tax_remitted,adjustment_amount,net_payout,order_type".split(","),
+  slice:
+    "order_date,store_id,order_id,order_subtotal,slice_commission,marketing_contribution,adjustment,tax,net_payout".split(","),
 };
 
 type ActiveCertificationState = {
@@ -188,8 +212,13 @@ export function SentryApp() {
     };
   }
 
-  function getArtifactStateKey(accountId: string, moduleId: "M01" | "M02", artifactKey: string) {
-    return `${accountId}:${moduleId}:${artifactKey}`;
+  function getArtifactStateKey(
+    accountId: string,
+    moduleId: "M01" | "M02",
+    artifactKey: string,
+    vendorKey?: string,
+  ) {
+    return `${accountId}:${moduleId}:${artifactKey}:${vendorKey ?? "global"}`;
   }
 
   function appendLog(entry: Omit<LogRecord, "hash" | "ts" | "user"> & { hash?: string; user?: string }) {
@@ -344,48 +373,75 @@ export function SentryApp() {
     showToast(`${draft.name} added. WGS onboarding plan created.`);
   }
 
-  async function handleArtifactFileSelected(file: File) {
-    if (!activeArtifact) return;
-    const key = getArtifactStateKey(
-      activeArtifact.accountId,
-      activeArtifact.moduleId,
-      activeArtifact.artifact.key,
-    );
+  async function processArtifactFileUpload(
+    target: ActiveArtifactState,
+    file: File,
+    vendor?: { key: string; name: string },
+  ) {
+    const resolvedVendorKey = vendor?.key ?? target.vendorKey;
+    const resolvedVendorName = vendor?.name ?? target.vendorName;
+    const key = getArtifactStateKey(target.accountId, target.moduleId, target.artifact.key, resolvedVendorKey);
     const buffer = await file.arrayBuffer();
     const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
     const hashValue = Array.from(new Uint8Array(hashBuffer))
       .map((value) => value.toString(16).padStart(2, "0"))
       .join("")
       .slice(0, 12);
-    const text = activeArtifact.artifact.type === "CSV" ? await file.text() : "";
+    const text = target.artifact.type === "CSV" ? await file.text() : "";
     const rows =
-      activeArtifact.artifact.type === "CSV"
+      target.artifact.type === "CSV"
         ? Math.max(text.split(/\r?\n/).filter(Boolean).length - 1, 0)
         : undefined;
+    const headers =
+      target.artifact.type === "CSV"
+        ? (text.split(/\r?\n/, 1)[0] ?? "")
+            .split(",")
+            .map((header) => header.trim())
+            .filter(Boolean)
+        : [];
+    const expectedHeaders = resolvedVendorKey ? vendorTemplateHeaders[resolvedVendorKey] ?? [] : [];
+    const matchedColumns = expectedHeaders.filter((header) => headers.includes(header));
+    const unmatchedHeaders = expectedHeaders.filter((header) => !headers.includes(header));
+    const matchPct =
+      expectedHeaders.length > 0 ? Math.round((matchedColumns.length / expectedHeaders.length) * 100) : undefined;
+    const schemaOk = target.artifact.type === "CSV" ? (matchPct === undefined ? false : matchPct >= 60) : true;
+    const fieldsOk = target.artifact.type === "CSV" ? schemaOk && (rows ?? 0) > 0 : true;
 
     setArtifactIntakeState((state) => ({
       ...state,
       [key]: {
         uploaded: true,
-        hash: false,
-        schema: false,
-        fields: false,
+        hash: true,
+        schema: schemaOk,
+        fields: fieldsOk,
         fileName: file.name,
         rows,
         hashValue,
+        vendorKey: resolvedVendorKey,
+        vendorName: resolvedVendorName,
+        sizeBytes: file.size,
+        matchPct,
+        matchedColumns: matchedColumns.length || undefined,
+        expectedColumns: expectedHeaders.length || undefined,
+        unmatchedHeaders: unmatchedHeaders.length > 0 ? unmatchedHeaders : undefined,
       },
     }));
     setUploadState((current) =>
       current.map((module) =>
-        module.accountId === activeArtifact.accountId && module.id === activeArtifact.moduleId
+        module.accountId === target.accountId && module.id === target.moduleId
           ? {
               ...module,
               artifacts: module.artifacts.map((artifact) =>
-                artifact.key === activeArtifact.artifact.key
+                artifact.key === target.artifact.key
                   ? {
                       ...artifact,
-                      status: "Needs Review",
-                      note: `${file.name} uploaded. ${rows ?? "PDF"} rows/pages recorded, awaiting hash and schema validation.`,
+                      status: schemaOk && fieldsOk ? "Ready" : "Needs Review",
+                      note:
+                        target.artifact.type === "CSV" && matchPct !== undefined
+                          ? `${file.name} uploaded. Schema match ${matchPct}%. ${
+                              fieldsOk ? "Ready for certification intake." : "WGS review required."
+                            }`
+                          : `${file.name} uploaded. PDF sealed with intake hash and ready for downstream review.`,
                     }
                   : artifact,
               ),
@@ -394,26 +450,62 @@ export function SentryApp() {
       ),
     );
     appendLog({
-      accountId: activeArtifact.accountId,
-      action: `${activeArtifact.artifact.label} uploaded into ${activeArtifact.moduleId}`,
+      accountId: target.accountId,
+      action: `${target.artifact.label} uploaded into ${target.moduleId}`,
       immutable: true,
       location: supportMode.accountName ?? "Portfolio",
     });
     showToast(`${file.name} uploaded and hashed.`);
   }
 
-  function handleArtifactAction(moduleId: "M01" | "M02", artifactKey: string) {
-    const module = visibleUploadModules.find((item) => item.id === moduleId);
-    const artifact = module?.artifacts.find((item) => item.key === artifactKey);
-    if (!module || !artifact) return;
-    setActiveArtifact({ accountId: module.accountId, artifact, moduleId });
+  async function handleArtifactFileSelected(file: File) {
+    if (!activeArtifact) return;
+    await processArtifactFileUpload(activeArtifact, file);
   }
 
-  function handleArtifactChecklist(moduleId: "M01" | "M02", artifactKey: string) {
+  async function handleDirectArtifactUpload(
+    moduleId: "M01" | "M02",
+    artifactKey: string,
+    file: File,
+    vendor?: { key: string; name: string },
+  ) {
     const module = visibleUploadModules.find((item) => item.id === moduleId);
     const artifact = module?.artifacts.find((item) => item.key === artifactKey);
     if (!module || !artifact) return;
-    setActiveChecklist({ accountId: module.accountId, artifact, moduleId });
+
+    const target = { accountId: module.accountId, artifact, moduleId, vendorKey: vendor?.key, vendorName: vendor?.name };
+    setActiveArtifact(target);
+    await processArtifactFileUpload(target, file, vendor);
+  }
+
+  function handleArtifactAction(
+    moduleId: "M01" | "M02",
+    artifactKey: string,
+    vendor?: { key: string; name: string },
+    entryMode?: "manual" | "upload",
+  ) {
+    const module = visibleUploadModules.find((item) => item.id === moduleId);
+    const artifact = module?.artifacts.find((item) => item.key === artifactKey);
+    if (!module || !artifact) return;
+    setActiveArtifact({
+      accountId: module.accountId,
+      artifact,
+      entryMode,
+      moduleId,
+      vendorKey: vendor?.key,
+      vendorName: vendor?.name,
+    });
+  }
+
+  function handleArtifactChecklist(
+    moduleId: "M01" | "M02",
+    artifactKey: string,
+    vendor?: { key: string; name: string },
+  ) {
+    const module = visibleUploadModules.find((item) => item.id === moduleId);
+    const artifact = module?.artifacts.find((item) => item.key === artifactKey);
+    if (!module || !artifact) return;
+    setActiveChecklist({ accountId: module.accountId, artifact, moduleId, vendorKey: vendor?.key, vendorName: vendor?.name });
   }
 
   function handleSaveWorkspace(workspace: SchemaWorkspace) {
@@ -521,6 +613,7 @@ export function SentryApp() {
       activeArtifact.accountId,
       activeArtifact.moduleId,
       activeArtifact.artifact.key,
+      activeArtifact.vendorKey,
     );
     const current =
       artifactIntakeState[key] ?? {
@@ -611,6 +704,7 @@ export function SentryApp() {
       activeArtifact.accountId,
       activeArtifact.moduleId,
       activeArtifact.artifact.key,
+      activeArtifact.vendorKey,
     );
     setArtifactContractState((state) => ({
       ...state,
@@ -923,10 +1017,20 @@ export function SentryApp() {
       : null) ?? null;
 
   const activeArtifactStateKey = activeArtifact
-    ? getArtifactStateKey(activeArtifact.accountId, activeArtifact.moduleId, activeArtifact.artifact.key)
+    ? getArtifactStateKey(
+        activeArtifact.accountId,
+        activeArtifact.moduleId,
+        activeArtifact.artifact.key,
+        activeArtifact.vendorKey,
+      )
     : null;
   const activeChecklistStateKey = activeChecklist
-    ? getArtifactStateKey(activeChecklist.accountId, activeChecklist.moduleId, activeChecklist.artifact.key)
+    ? getArtifactStateKey(
+        activeChecklist.accountId,
+        activeChecklist.moduleId,
+        activeChecklist.artifact.key,
+        activeChecklist.vendorKey,
+      )
     : null;
 
   return (
@@ -970,6 +1074,7 @@ export function SentryApp() {
           }}
           onApprove={handleApprove}
           onArtifactAction={handleArtifactAction}
+          onDirectUpload={handleDirectArtifactUpload}
           onEnterSupportMode={handleEnterSupportMode}
           onExpandAll={handleExpandAll}
           onFilterChange={setLogFilter}
@@ -1020,6 +1125,7 @@ export function SentryApp() {
         <ArtifactWorkflowModal
           artifact={activeArtifact.artifact}
           contractValues={artifactContractState[activeArtifactStateKey] ?? {}}
+          defaultEntryMode={activeArtifact.entryMode}
           intake={
             artifactIntakeState[activeArtifactStateKey] ?? {
               uploaded: false,
@@ -1033,6 +1139,7 @@ export function SentryApp() {
           onFieldChange={handleArtifactContractFieldChange}
           onFileSelected={handleArtifactFileSelected}
           onProgressIntake={handleProgressArtifactWorkflow}
+          vendorName={activeArtifact.vendorName}
         />
       ) : null}
 
@@ -1049,6 +1156,7 @@ export function SentryApp() {
           }
           moduleId={activeChecklist.moduleId}
           onClose={() => setActiveChecklist(null)}
+          vendorName={activeChecklist.vendorName}
         />
       ) : null}
 

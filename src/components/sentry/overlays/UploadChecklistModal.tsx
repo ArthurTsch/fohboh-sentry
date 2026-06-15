@@ -13,11 +13,13 @@ export function UploadChecklistModal({
   intake,
   moduleId,
   onClose,
+  vendorName,
 }: {
   artifact: UploadArtifact;
   intake: IntakeState;
   moduleId: "M01" | "M02";
   onClose: () => void;
+  vendorName?: string;
 }) {
   const complete = intake.uploaded && intake.hash && intake.schema && intake.fields;
 
@@ -30,7 +32,7 @@ export function UploadChecklistModal({
               Artifact Checklist
             </div>
             <div className="mt-1 text-sm text-[var(--muted)]">
-              {moduleId} · {artifact.label}
+              {moduleId} | {vendorName ? `${vendorName} | ` : ""}{artifact.label}
             </div>
           </div>
           <button
@@ -42,7 +44,7 @@ export function UploadChecklistModal({
           </button>
         </div>
 
-        <div className="grid gap-6 p-6 lg:grid-cols-[1fr_280px]">
+        <div className="grid gap-6 p-6 lg:grid-cols-[1fr_320px]">
           <div className="space-y-3">
             {checklistLabels.map((item) => {
               const done = intake[item.key];
@@ -63,6 +65,24 @@ export function UploadChecklistModal({
                 </div>
               );
             })}
+
+            {intake.matchPct !== undefined && intake.matchPct < 60 ? (
+              <div className="rounded-2xl border border-[rgba(212,131,10,0.4)] bg-[rgba(214,48,49,0.07)] p-4">
+                <div className="text-sm font-semibold text-[var(--accent)]">
+                  {intake.fileName ?? artifact.label} - partial schema match ({intake.matchPct}%)
+                </div>
+                <div className="mt-1 text-xs text-[var(--text)]">
+                  {formatBytes(intake.sizeBytes ?? 0)} - {intake.rows ?? 0} rows - {intake.matchedColumns ?? 0}/
+                  {intake.expectedColumns ?? 0} columns matched
+                </div>
+                {intake.unmatchedHeaders?.length ? (
+                  <div className="mt-2 font-[family-name:var(--font-mono)] text-[10px] text-[var(--accent)]">
+                    Unmatched: {intake.unmatchedHeaders.slice(0, 5).join(", ")}
+                    {intake.unmatchedHeaders.length > 5 ? ` + ${intake.unmatchedHeaders.length - 5} more` : ""}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="space-y-4">
@@ -84,12 +104,33 @@ export function UploadChecklistModal({
 
             <SectionCard>
               <div className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.03em]">
-                Intake Record
+                Intake Status
               </div>
-              <div className="mt-3 space-y-2 text-sm text-[var(--muted)]">
+              <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <div className="mb-3 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
+                  {artifact.label} - intake status
+                </div>
+                <div className="space-y-2">
+                  {checklistLabels.map((item) => (
+                    <div key={item.key} className="flex items-center gap-2 text-[12px] text-[var(--muted)]">
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          intake[item.key]
+                            ? "bg-[var(--success)] shadow-[0_0_4px_rgba(34,197,94,0.5)]"
+                            : "bg-[var(--border)]"
+                        }`}
+                      />
+                      {item.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-4 space-y-2 text-sm text-[var(--muted)]">
+                <div>Vendor: {vendorName ?? intake.vendorName ?? "Not specified"}</div>
                 <div>File: {intake.fileName ?? "Not uploaded"}</div>
                 <div>Rows / pages: {intake.rows ?? "Pending"}</div>
                 <div>Hash: {intake.hashValue ?? "Pending"}</div>
+                <div>Schema match: {intake.matchPct !== undefined ? `${intake.matchPct}%` : "Pending"}</div>
               </div>
             </SectionCard>
           </div>
@@ -97,4 +138,10 @@ export function UploadChecklistModal({
       </div>
     </div>
   );
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

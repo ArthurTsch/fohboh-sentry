@@ -31,7 +31,7 @@ export function SupportChat({
       </button>
 
       {chatOpen ? (
-        <div className="fixed right-6 bottom-24 z-40 w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-3xl border border-[var(--border)] bg-white shadow-[0_22px_64px_rgba(0,0,0,0.16)]">
+        <div className="fixed right-4 bottom-24 z-40 w-[min(420px,calc(100vw-1.5rem))] overflow-hidden rounded-3xl border border-[var(--border)] bg-white shadow-[0_22px_64px_rgba(0,0,0,0.16)] sm:right-6 sm:w-[min(420px,calc(100vw-2rem))]">
           <div className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-4 py-3">
             <div className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full bg-[var(--success)]" />
@@ -71,30 +71,34 @@ export function SupportChat({
               </button>
             ))}
           </div>
-          <div className="flex gap-2 border-t border-[var(--border)] bg-white p-3">
-            <input
-              value={chatInput}
-              onChange={(event) => onInputChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") onSend();
-              }}
-              placeholder="Ask a question..."
-              className="flex-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-2.5 text-sm outline-none"
-            />
-            <button
-              type="button"
-              onClick={() => onSend()}
-              className="rounded-xl bg-[var(--text)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
-            >
-              Send
-            </button>
-            <button
-              type="button"
-              onClick={onCreateTicket}
-              className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
-            >
-              Create Ticket
-            </button>
+          <div className="border-t border-[var(--border)] bg-white p-3">
+            <div className="space-y-2">
+              <input
+                value={chatInput}
+                onChange={(event) => onInputChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") onSend();
+                }}
+                placeholder="Ask a question..."
+                className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm outline-none"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSend()}
+                  className="rounded-xl bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+                >
+                  Send
+                </button>
+                <button
+                  type="button"
+                  onClick={onCreateTicket}
+                  className="rounded-xl border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                >
+                  Create Ticket
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
