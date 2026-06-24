@@ -1,0 +1,186 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model managers {
+  id                  Int       @id @default(autoincrement())
+  email               String    @unique @db.VarChar(255)
+  password_hash       String    @db.VarChar(255)
+  role                String    @db.VarChar(50)
+  active              Boolean?  @default(true)
+  email_verified      Boolean?  @default(false)
+  full_name           String?   @db.VarChar(100)
+  phone_number        String?   @db.VarChar(20)
+  address             String?
+  profile_image       String?   @db.VarChar(255)
+  created_at          DateTime? @default(now()) @db.Timestamptz(6)
+  created_by          Int?
+  regional_manager_id Int?
+}
+
+model restaurants {
+  id             Int       @id @default(autoincrement())
+  store_id       String?   @db.VarChar(255)
+  name           String    @db.VarChar(255)
+  location       String?
+  city           String?   @db.VarChar(100)
+  state          String?   @db.VarChar(100)
+  zip_code       String?   @db.VarChar(20)
+  country        String?   @db.VarChar(100)
+  contact_number String?   @db.VarChar(50)
+  created_by     Int?
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
+  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+  active         Boolean?  @default(true)
+  unit_id        String?   @unique @db.VarChar(50)
+
+  @@index([created_by], map: "idx_restaurants_created_by")
+  @@index([name], map: "idx_restaurants_name")
+  @@index([store_id], map: "idx_restaurants_store_id")
+}
+
+model store_analytics_results {
+  id               Int       @id @default(autoincrement())
+  store_id         String    @db.VarChar(50)
+  time_period      String    @db.VarChar(50)
+  analytics_data   Json
+  calculation_date DateTime  @db.Date
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+  email            String?   @db.VarChar(255)
+
+  @@unique([store_id, time_period, calculation_date])
+  @@index([calculation_date], map: "idx_analytics_date")
+  @@index([time_period], map: "idx_analytics_period")
+  @@index([store_id], map: "idx_analytics_store_id")
+}
+
+model store_credentials {
+  id            Int       @id @default(autoincrement())
+  store_id      String    @db.VarChar(255)
+  client_id     String    @db.VarChar(255)
+  client_secret String    @db.VarChar(255)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  email         String?   @db.VarChar(255)
+  cid           String?   @db.VarChar(255)
+
+  @@unique([store_id, email])
+}
+
+model store_embeddings {
+  id            Int       @id @default(autoincrement())
+  store_id      String    @db.VarChar(50)
+  data_type     String    @db.VarChar(50)
+  record_id     String?   @db.VarChar(255)
+  data_hash     String    @db.VarChar(255)
+  chunk_index   Int?      @default(0)
+  text_content  String
+  embedding     Float[]
+  original_data Json?
+  record_date   DateTime? @db.Date
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  updated_at    DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([data_type], map: "idx_embeddings_data_type")
+  @@index([record_date], map: "idx_embeddings_date")
+  @@index([data_hash], map: "idx_embeddings_hash")
+  @@index([record_id], map: "idx_embeddings_record_id")
+  @@index([store_id], map: "idx_embeddings_store_id")
+}
+
+model store_employees {
+  id               Int       @id @default(autoincrement())
+  store_id         String    @db.VarChar(50)
+  employee_id      String?   @db.VarChar(100)
+  name             String?   @db.VarChar(255)
+  role             String?   @db.VarChar(100)
+  hire_date        DateTime? @db.Date
+  termination_date DateTime? @db.Date
+  hourly_rate      Decimal?  @db.Decimal
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([store_id], map: "idx_employees_store_id")
+}
+
+model store_inventory {
+  id             Int       @id @default(autoincrement())
+  store_id       String    @db.VarChar(50)
+  inventory_date DateTime? @db.Date
+  ingredient     String?   @db.VarChar(255)
+  quantity       Decimal?  @db.Decimal
+  par_level      Decimal?  @db.Decimal
+  unit_cost      Decimal?  @db.Decimal
+  is_low         Boolean?
+  waste          Decimal?  @default(0) @db.Decimal
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
+  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([inventory_date], map: "idx_inventory_date")
+  @@index([store_id], map: "idx_inventory_store_id")
+}
+
+model store_menu {
+  id         Int       @id @default(autoincrement())
+  store_id   String    @db.VarChar(50)
+  menu_item  String?   @db.VarChar(255)
+  ingredient String?   @db.VarChar(255)
+  amount     Decimal?  @db.Decimal
+  unit_cost  Decimal?  @db.Decimal
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([store_id], map: "idx_menu_store_id")
+}
+
+model store_sales {
+  id                  Int       @id @default(autoincrement())
+  store_id            String    @db.VarChar(50)
+  sale_id             String?   @db.VarChar(100)
+  sale_date           DateTime? @db.Date
+  sale_time           DateTime? @db.Timestamp(6)
+  sold_items_name     String?
+  number_of_items     Decimal?  @db.Decimal
+  subtotal            Decimal?  @db.Decimal
+  tip                 Decimal?  @db.Decimal
+  total_amount        Decimal?  @db.Decimal
+  payment_method      String?   @db.VarChar(255)
+  order_type          String?   @db.VarChar(100)
+  customer_id         String?   @db.VarChar(100)
+  is_loyalty          Boolean?
+  promotion_id        String?   @db.VarChar(100)
+  discount_applied    Decimal?  @db.Decimal
+  table_number        String?   @db.VarChar(50)
+  guest_count         Int?
+  seated_time         DateTime? @db.Timestamp(6)
+  departure_time      DateTime? @db.Timestamp(6)
+  was_reservation     Boolean?
+  order_received_time DateTime? @db.Timestamp(6)
+  kitchen_start_time  DateTime? @db.Timestamp(6)
+  had_modification    Boolean?
+  order_accuracy      Decimal?  @db.Decimal
+  void_status         Boolean?  @default(false)
+  reason              String?
+  daypart             String?   @db.VarChar(50)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  @@unique([store_id, sale_id], map: "uq_store_sales_store_sale")
+  @@index([sale_date], map: "idx_sales_date")
+  @@index([store_id], map: "idx_sales_store_id")
+}
+
+model text_notes {
+  id         String    @id @db.VarChar(36)
+  user_email String    @db.VarChar(255)
+  content    Json
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([user_email])
+}

@@ -43,6 +43,7 @@ export function CaarReportModal({
   const locationModules = uploadModules.filter((module) => module.accountId === record.accountId && module.id === moduleId);
   const exhibits = buildExhibits({
     artifactIntakeState,
+    locationId: record.locationId,
     modules: locationModules,
     moduleId,
     trustScore: record.trustScore,
@@ -515,11 +516,13 @@ function inferModule(record: CaarRecord) {
 
 function buildExhibits({
   artifactIntakeState,
+  locationId,
   modules,
   moduleId,
   trustScore,
 }: {
   artifactIntakeState: Record<string, IntakeState>;
+  locationId: string;
   moduleId: "M01" | "M02";
   modules: UploadModule[];
   trustScore: number;
@@ -531,11 +534,11 @@ function buildExhibits({
   const bankArtifact = artifacts.find((artifact) => artifact.key.includes("bank"));
   const contractArtifact = artifacts.find((artifact) => artifact.key.includes("contract") || artifact.key.includes("agreement"));
 
-  const csvIntake = csvArtifact ? resolveArtifactIntake(artifactIntakeState, modules, csvArtifact) : null;
-  const posIntake = posArtifact ? resolveArtifactIntake(artifactIntakeState, modules, posArtifact) : null;
-  const statementIntake = statementArtifact ? resolveArtifactIntake(artifactIntakeState, modules, statementArtifact) : null;
-  const bankIntake = bankArtifact ? resolveArtifactIntake(artifactIntakeState, modules, bankArtifact) : null;
-  const contractIntake = contractArtifact ? resolveArtifactIntake(artifactIntakeState, modules, contractArtifact) : null;
+  const csvIntake = csvArtifact ? resolveArtifactIntake(artifactIntakeState, modules, locationId, csvArtifact) : null;
+  const posIntake = posArtifact ? resolveArtifactIntake(artifactIntakeState, modules, locationId, posArtifact) : null;
+  const statementIntake = statementArtifact ? resolveArtifactIntake(artifactIntakeState, modules, locationId, statementArtifact) : null;
+  const bankIntake = bankArtifact ? resolveArtifactIntake(artifactIntakeState, modules, locationId, bankArtifact) : null;
+  const contractIntake = contractArtifact ? resolveArtifactIntake(artifactIntakeState, modules, locationId, contractArtifact) : null;
 
   return [
     exhibit("EX-001", "CSV Upload", "Aggregated source file received from user", csvIntake, true),
@@ -602,13 +605,14 @@ function exhibit(
 function resolveArtifactIntake(
   state: Record<string, IntakeState>,
   modules: UploadModule[],
+  locationId: string,
   artifact: UploadArtifact,
 ) {
-  for (const module of modules) {
-    const globalKey = `${module.accountId}:${module.id}:${artifact.key}:global`;
+  for (const uploadModule of modules) {
+    const globalKey = `${uploadModule.accountId}:${locationId}:${uploadModule.id}:${artifact.key}:global`;
     if (state[globalKey]?.uploaded) return state[globalKey];
 
-    const prefix = `${module.accountId}:${module.id}:${artifact.key}:`;
+    const prefix = `${uploadModule.accountId}:${locationId}:${uploadModule.id}:${artifact.key}:`;
     const match = Object.entries(state).find(([key, value]) => key.startsWith(prefix) && value.uploaded);
     if (match) return match[1];
   }

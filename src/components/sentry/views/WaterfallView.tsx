@@ -26,7 +26,7 @@ export function WaterfallView({
   onOpenSchema: () => void;
   onRunCertification: (locationId: string) => void;
   onToggleLocation: (id: string) => void;
-  onOpenUploads: () => void;
+  onOpenUploads: (locationId: string) => void;
   role: Role;
 }) {
   const canUpload = role === "Admin" || role === "Manager" || role === "WGS Manager";
@@ -281,7 +281,7 @@ export function WaterfallView({
                   ) : canUpload ? (
                     <button
                       type="button"
-                      onClick={onOpenUploads}
+                      onClick={() => onOpenUploads(location.id)}
                       className="rounded-lg bg-[var(--text)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
                     >
                       Upload Data
@@ -351,7 +351,7 @@ export function WaterfallView({
                   <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--border)] pt-4">
                     <button
                       type="button"
-                      onClick={onOpenUploads}
+                      onClick={() => onOpenUploads(location.id)}
                       className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
                     >
                       Upload Data

@@ -5,6 +5,7 @@ export type ViewId =
   | "waterfall"
   | "caars"
   | "log"
+  | "profile"
   | "permissions"
   | "diy"
   | "userguide"
@@ -41,6 +42,8 @@ export type LocationRecord = {
   id: string;
   name: string;
   market: string;
+  ownerEmail?: string;
+  ownerManagerId?: number | null;
   m01: number;
   m02: number;
   ium: string;
@@ -135,6 +138,18 @@ export type IntakeState = {
   matchedColumns?: number;
   expectedColumns?: number;
   unmatchedHeaders?: string[];
+};
+
+export type UploadReceipt = {
+  fileName: string;
+  locationId: string;
+  locationName: string;
+  matchPct?: number;
+  moduleId: "M01" | "M02";
+  rows?: number;
+  sizeBytes: number;
+  status: "ready" | "review";
+  vendorName?: string;
 };
 
 export type UploadModule = {
@@ -270,9 +285,15 @@ export type AddLocationDraft = {
 export type RequestAccessDraft = {
   company: string;
   email: string;
+  name: string;
+  phone: string;
   locations: string;
+  monthlyVolume: string;
   modules: string[];
+  modulePlan: "bundle" | "m01" | "m02";
   notes: string;
+  processors: string[];
+  dsps: string[];
 };
 
 export type WgsUser = {
@@ -293,7 +314,10 @@ export type ChatMessage = {
 };
 
 export type SessionState = {
+  accountId: string | null;
   email: string;
+  managerId?: number | null;
+  name?: string;
   role: Role;
 };
 

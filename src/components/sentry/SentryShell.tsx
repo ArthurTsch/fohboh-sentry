@@ -129,6 +129,16 @@ const navHelp: Record<
     footerLabel: "Enforcement",
     footerValue: "Architecture-level workflow gating",
   },
+  profile: {
+    title: "Sidebar / Profile",
+    sections: [
+      { label: "What It Is", text: "Your current session identity, role boundary, and account scope." },
+      { label: "What It Does", text: "Opens the profile surface for the logged-in operator or WGS user." },
+      { label: "Why It Matters", text: "Access and data visibility are tied to this identity record." },
+    ],
+    footerLabel: "Identity Source",
+    footerValue: "Current authenticated session",
+  },
   support: {
     title: "Sidebar / Help",
     sections: [
@@ -276,20 +286,34 @@ export function SentryShell({
         </nav>
 
         <div className="border-t border-[var(--border)] p-4">
-          <div className="mb-3 flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--text)] text-sm font-bold text-white">
-              {getInitials(session.email)}
-            </div>
-            <div className="min-w-0">
-              <div className="truncate text-sm text-[var(--text)]">{session.email}</div>
-              <div className="mt-1">
-                <span
-                  className={`inline-flex rounded-full px-2 py-1 font-[family-name:var(--font-mono)] text-[9px] font-bold uppercase tracking-[0.16em] ${roleClass[session.role]}`}
-                >
-                  {session.role}
-                </span>
+          <div className="mb-3 flex items-center gap-2 rounded-xl hover:bg-[var(--surface)]">
+            <button
+              type="button"
+              onClick={() => onViewChange("profile")}
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left"
+            >
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--text)] text-sm font-bold text-white">
+                {getInitials(session.email)}
               </div>
-            </div>
+              <div className="min-w-0">
+                <div className="truncate text-sm text-[var(--text)]">{session.email}</div>
+                <div className="mt-1">
+                  <span
+                    className={`inline-flex rounded-full px-2 py-1 font-[family-name:var(--font-mono)] text-[9px] font-bold uppercase tracking-[0.16em] ${roleClass[session.role]}`}
+                  >
+                    {session.role}
+                  </span>
+                </div>
+              </div>
+            </button>
+            <span className="mr-1 shrink-0">
+              <HelpTip
+                title={navHelp.profile.title}
+                sections={navHelp.profile.sections}
+                footerLabel={navHelp.profile.footerLabel}
+                footerValue={navHelp.profile.footerValue}
+              />
+            </span>
           </div>
           <button
             type="button"

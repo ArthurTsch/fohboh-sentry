@@ -6,7 +6,9 @@ import type {
   LogRecord,
   Role,
   SchemaWorkspace,
+  SessionState,
   UploadModule,
+  UploadReceipt,
   ViewId,
   WgsAccount,
   WgsApproval,
@@ -20,6 +22,7 @@ import { FaqView } from "./views/FaqView";
 import { LogView } from "./views/LogView";
 import { OnboardingView } from "./views/OnboardingView";
 import { PermissionsView } from "./views/PermissionsView";
+import { ProfileView } from "./views/ProfileView";
 import { SchemaRegistryView } from "./views/SchemaRegistryView";
 import { UploadCenterView } from "./views/UploadCenterView";
 import { UserGuideView } from "./views/UserGuideView";
@@ -29,6 +32,8 @@ import { WgsAdminView } from "./views/WgsAdminView";
 export function SentryViewRouter({
   accounts,
   activeView,
+  activeUploadLocationId,
+  activeUploadLocationName,
   approvals,
   averageTrust,
   artifactContractState,
@@ -67,13 +72,17 @@ export function SentryViewRouter({
   queue,
   role,
   schemaWorkspaces,
+  session,
   totalCaars,
   totalRecovery,
+  uploadFeedback,
   uploadModules,
   users,
 }: {
   accounts: WgsAccount[];
   activeView: ViewId;
+  activeUploadLocationId: string | null;
+  activeUploadLocationName: string | null;
   approvals: WgsApproval[];
   averageTrust: number;
   artifactContractState: Record<string, Record<string, string>>;
@@ -101,7 +110,7 @@ export function SentryViewRouter({
     artifactKey: string,
     file: File,
     vendor?: { key: string; name: string },
-  ) => void;
+  ) => Promise<UploadReceipt | null>;
   onEnterSupportMode: (accountId: string) => void;
   onExpandAll: () => void;
   onFilterChange: (filter: "all" | "immutable" | "editable") => void;
@@ -113,7 +122,7 @@ export function SentryViewRouter({
   ) => void;
   onOpenOnboarding: (locationId: string) => void;
   onOpenSchemaEditor: Dispatch<SetStateAction<SchemaWorkspace | null>>;
-  onOpenUploads: () => void;
+  onOpenUploads: (locationId: string) => void;
   onOpenUser: Dispatch<SetStateAction<WgsUser | null>>;
   onQueryChange: Dispatch<SetStateAction<string>>;
   onResolveQueue: (ticketId: string) => void;
@@ -126,8 +135,10 @@ export function SentryViewRouter({
   queue: WgsQueueItem[];
   role: Role;
   schemaWorkspaces: SchemaWorkspace[];
+  session: SessionState;
   totalCaars: number;
   totalRecovery: string;
+  uploadFeedback: UploadReceipt | null;
   uploadModules: UploadModule[];
   users: WgsUser[];
 }) {
@@ -172,6 +183,10 @@ export function SentryViewRouter({
     return <LogView entries={filteredLogs} filter={logFilter} onFilterChange={onFilterChange} />;
   }
 
+  if (activeView === "profile") {
+    return <ProfileView session={session} visibleLocationCount={locations.length} />;
+  }
+
   if (activeView === "permissions") {
     return <PermissionsView />;
   }
@@ -206,6 +221,8 @@ export function SentryViewRouter({
   if (activeView === "uploads") {
     return (
       <UploadCenterView
+        activeLocationId={activeUploadLocationId}
+        activeLocationName={activeUploadLocationName}
         contractState={artifactContractState}
         intakeState={artifactIntakeState}
         modules={uploadModules}
@@ -213,6 +230,7 @@ export function SentryViewRouter({
         onDirectUpload={onDirectUpload}
         onOpenChecklist={onOpenChecklist}
         onOpenSchema={() => onViewChange("schema")}
+        uploadFeedback={uploadFeedback}
       />
     );
   }
@@ -233,7 +251,15 @@ export function SentryViewRouter({
         completed={completed}
         onToggleChecklist={onToggleChecklist}
         onOpenSchema={() => onViewChange("schema")}
-        onOpenUploads={() => onViewChange("uploads")}
+        onOpenUploads={() => {
+          if (activeUploadLocationId) {
+            onOpenUploads(activeUploadLocationId);
+          } else if (locations[0]) {
+            onOpenUploads(locations[0].id);
+          } else {
+            onViewChange("uploads");
+          }
+        }}
       />
     );
   }

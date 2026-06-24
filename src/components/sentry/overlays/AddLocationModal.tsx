@@ -1,9 +1,74 @@
 import { useMemo, useState } from "react";
 import type { AddLocationDraft } from "../types";
+import { HelpTip } from "../ui/primitives";
 
 const dspOptions = ["DoorDash", "Uber Eats", "Grubhub", "Slice"];
 const processorOptions = ["Heartland", "Toast", "Square", "Worldpay", "Chase Paymentech", "Other"];
 const posOptions = ["Toast", "Square", "Heartland", "Worldpay", "Chase Paymentech", "Other"];
+const stepHelp: {
+  footerLabel: string;
+  footerValue: string;
+  sections: { label: string; text: string }[];
+  title: string;
+}[] = [
+  {
+    footerLabel: "Lead time",
+    footerValue: "WGS contacts you within 1 business day",
+    sections: [
+      {
+        label: "What It Is",
+        text: "Basic information about the new location: name, address, POS system, and primary contact.",
+      },
+      {
+        label: "What It Does",
+        text: "This data pre-fills the WGS onboarding package sent to your advisor. Accurate details prevent back-and-forth during setup.",
+      },
+      {
+        label: "Why It Matters",
+        text: "The location name entered here will appear on all future CAARs and in the Activity Log. Use the exact name used in your POS and processor accounts.",
+      },
+    ],
+    title: "Add Location / Step 1",
+  },
+  {
+    footerLabel: "Required",
+    footerValue: "Module + processor + DSP selections",
+    sections: [
+      {
+        label: "What It Is",
+        text: "Select which Sentry modules to activate for this location and identify your DSP platforms and card processor.",
+      },
+      {
+        label: "What It Does",
+        text: "Module selection determines which CSV templates you'll need to provide, which Schema Registry entries WGS will configure, and your monthly per-location fee.",
+      },
+      {
+        label: "Why It Matters",
+        text: "Activating M01 without the correct card processor identified means WGS cannot configure the interchange rule set. Both selections are required.",
+      },
+    ],
+    title: "Add Location / Step 2",
+  },
+  {
+    footerLabel: "Critical Doc",
+    footerValue: "Signed agreement with contracted rates",
+    sections: [
+      {
+        label: "What It Is",
+        text: "Confirmation of what your WGS Advisor will need from you to complete onboarding: signed agreements, terminal serial numbers, statement exports.",
+      },
+      {
+        label: "What It Does",
+        text: "Review the checklist and gather the required documents before your WGS onboarding call. Missing documents delay the timeline.",
+      },
+      {
+        label: "Why It Matters",
+        text: "Certification cannot begin until Contract Config is sealed. Contract Config cannot be sealed without the signed agreement. Bring it to the onboarding call.",
+      },
+    ],
+    title: "Add Location / Step 3",
+  },
+];
 
 export function AddLocationModal({
   initialDraft,
@@ -46,47 +111,68 @@ export function AddLocationModal({
     setStep((current) => current + 1);
   }
 
-  function back() {
-    setStep((current) => Math.max(1, current - 1));
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-3xl rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-5">
-          <div>
-            <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
-              Add Location
+        <div className="border-b border-[var(--border)] px-6 pb-0 pt-5">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <div className="font-[family-name:var(--font-display)] text-[2rem] font-bold tracking-[-0.04em]">
+                Add New Location
+              </div>
+              <div className="mt-1 max-w-2xl text-sm leading-7 text-[var(--muted)]">
+                This starts the onboarding journey for the new location. A WGS Manager will be notified
+                to configure Contract Config and seal the Schema Registry before the first certification
+                run.
+              </div>
             </div>
-            <div className="mt-1 text-sm text-[var(--muted)]">Step {step} of 3</div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="grid grid-cols-3 border-b border-[var(--border)] bg-[var(--surface)]">
-          {["Location", "Modules", "Onboarding"].map((label, index) => (
-            <div
-              key={label}
-              className={`px-4 py-3 text-center font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.18em] ${
-                step === index + 1 ? "text-[var(--accent)]" : "text-[var(--muted)]"
-              }`}
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-lg leading-none text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
             >
-              {label}
-            </div>
-          ))}
+              ×
+            </button>
+          </div>
+
+          <div className="flex gap-4">
+            {[
+              "1 · Location Details",
+              "2 · Modules & Data",
+              "3 · Onboarding Checklist",
+            ].map((label, index) => {
+              const active = step === index + 1;
+              const help = stepHelp[index];
+
+              return (
+                <div
+                  key={label}
+                  className={`flex items-center gap-1 border-b-2 px-4 pb-3 text-sm ${
+                    active
+                      ? "border-b-[var(--accent)] font-semibold text-[var(--accent)]"
+                      : "border-b-transparent text-[var(--muted)]"
+                  }`}
+                >
+                  <span>{label}</span>
+                  <HelpTip
+                    title={help.title}
+                    sections={help.sections}
+                    footerLabel={help.footerLabel}
+                    footerValue={help.footerValue}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="p-6">
           {step === 1 ? (
             <div className="grid gap-4">
               <label className="grid gap-2">
-                <span className="text-sm font-medium">Location Name</span>
+                <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
+                  Location Name *
+                </span>
                 <input
                   value={draft.name}
                   onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
@@ -95,24 +181,32 @@ export function AddLocationModal({
                 />
               </label>
               <label className="grid gap-2">
-                <span className="text-sm font-medium">Street Address</span>
+                <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
+                  Street Address
+                </span>
                 <input
                   value={draft.address}
                   onChange={(event) => setDraft((current) => ({ ...current, address: event.target.value }))}
                   className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm outline-none"
+                  placeholder="e.g. 3400 W. Airport Freeway, Irving TX 75062"
                 />
               </label>
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="grid gap-2">
-                  <span className="text-sm font-medium">Internal Location ID</span>
+                  <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
+                    Internal Location ID (Optional)
+                  </span>
                   <input
                     value={draft.locId}
                     onChange={(event) => setDraft((current) => ({ ...current, locId: event.target.value }))}
                     className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm outline-none"
+                    placeholder="e.g. NTXDAL-004"
                   />
                 </label>
                 <label className="grid gap-2">
-                  <span className="text-sm font-medium">POS System</span>
+                  <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
+                    POS System
+                  </span>
                   <select
                     value={draft.posSystem}
                     onChange={(event) => setDraft((current) => ({ ...current, posSystem: event.target.value }))}
@@ -123,6 +217,16 @@ export function AddLocationModal({
                     ))}
                   </select>
                 </label>
+              </div>
+              <div className="rounded-[10px] border border-[rgba(212,131,10,0.5)] border-l-4 border-l-[#ff9800] bg-[#2A1500] px-4 py-4">
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
+                  ⚠ Before Proceeding
+                </div>
+                <div className="mt-2 text-sm leading-7 text-[#C4924A]">
+                  Have the following ready for this location: signed processor agreement (M01),
+                  signed DSP merchant agreements (M02), terminal serial numbers, and DSP merchant
+                  portal credentials. Contract Config cannot be sealed without the signed agreements.
+                </div>
               </div>
             </div>
           ) : null}
@@ -226,19 +330,13 @@ export function AddLocationModal({
         </div>
 
         <div className="flex items-center justify-between border-t border-[var(--border)] px-6 py-5">
-          <button
-            type="button"
-            onClick={back}
-            className={`rounded-lg border border-[var(--border)] px-4 py-2 text-sm ${step === 1 ? "invisible" : "text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"}`}
-          >
-            Back
-          </button>
+          <div className="text-sm text-[var(--muted)]">{`Step ${step} of 3`}</div>
           <button
             type="button"
             onClick={next}
-            className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+            className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#bb2a2b]"
           >
-            {step === 3 ? "Start Onboarding" : "Next"}
+            {step === 3 ? "Start Onboarding →" : "Next →"}
           </button>
         </div>
       </div>

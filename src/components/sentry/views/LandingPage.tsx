@@ -1,35 +1,63 @@
 import { useState } from "react";
-import { demoAccounts, moduleSummaries } from "../data";
-import type { Role } from "../types";
+import { moduleSummaries } from "../data";
+import type { SessionState } from "../types";
 import { KpiCard } from "../ui/primitives";
 
 export function LandingPage({
   onLogin,
   onRequestAccess,
 }: {
-  onLogin: (email: string, role: Role) => void;
+  onLogin: (session: SessionState) => void;
   onRequestAccess: () => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
       setError("Email is required.");
       return;
     }
-
-    const matchedAccount = demoAccounts.find((account) => account.email.toLowerCase() === normalizedEmail);
-    if (!matchedAccount) {
-      setError("Use one of the demo accounts listed below.");
+    if (!password) {
+      setError("Password is required.");
       return;
     }
 
+    setIsSubmitting(true);
     setError(null);
-    onLogin(matchedAccount.email, matchedAccount.role);
+
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        error?: string;
+        session?: SessionState;
+      };
+
+      if (!response.ok || !payload.session) {
+        setError(payload.error ?? "Unable to sign in.");
+        return;
+      }
+
+      onLogin(payload.session);
+    } catch {
+      setError("Unable to sign in right now.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -144,47 +172,21 @@ export function LandingPage({
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm outline-none"
-                placeholder="Enter any value for demo access"
+                placeholder="Enter your password"
               />
             </label>
             <div className="text-xs text-[var(--muted)]">
-              Demo build: password is not validated yet. Email must match one of the demo accounts.
+              Manager access is verified against the live account directory.
             </div>
             {error ? <div className="text-sm text-[var(--accent)]">{error}</div> : null}
             <button
               type="submit"
+              disabled={isSubmitting}
               className="w-full rounded-xl bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
             >
-              Sign In
+              {isSubmitting ? "Signing In..." : "Sign In"}
             </button>
           </form>
-
-          <div className="my-5 flex items-center gap-3 text-xs text-[var(--muted)]">
-            <div className="h-px flex-1 bg-[var(--border)]" />
-            <span>Demo accounts</span>
-            <div className="h-px flex-1 bg-[var(--border)]" />
-          </div>
-
-          <div className="space-y-2">
-            {demoAccounts.map((account) => (
-              <button
-                key={account.email}
-                type="button"
-                onClick={() => {
-                  setEmail(account.email);
-                  setPassword("");
-                  setError(null);
-                  onLogin(account.email, account.role);
-                }}
-                className="flex w-full items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-left transition hover:border-[var(--text)] hover:bg-white"
-              >
-                <div className="font-[family-name:var(--font-mono)] text-[12px] text-[var(--text)]">
-                  {account.email}
-                </div>
-                <div className="text-xs text-[var(--muted)]">{account.label}</div>
-              </button>
-            ))}
-          </div>
         </aside>
       </div>
 

@@ -1105,9 +1105,15 @@ export const emptyAddLocationDraft: AddLocationDraft = {
 export const emptyRequestAccessDraft: RequestAccessDraft = {
   company: "",
   email: "",
-  locations: "1",
+  name: "",
+  phone: "",
+  locations: "",
+  monthlyVolume: "",
   modules: ["M01", "M02"],
+  modulePlan: "bundle",
   notes: "",
+  processors: [],
+  dsps: [],
 };
 
 export const contractInputDefinitions: Record<"M01" | "M02", ContractInputDefinition[]> = {

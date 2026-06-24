@@ -5,10 +5,30 @@ import type {
   LocationRecord,
   LogRecord,
   SchemaWorkspace,
+  SessionState,
   SupportModeState,
   UploadModule,
 } from "../types";
 import { formatCurrency, parseCurrency } from "../utils";
+
+function matchesSessionScope(location: LocationRecord, session: SessionState) {
+  if (session.role === "WGS Manager") {
+    return true;
+  }
+
+  const sessionEmail = session.email.trim().toLowerCase();
+  const locationEmail = location.ownerEmail?.trim().toLowerCase() ?? "";
+
+  if (typeof session.managerId === "number" && location.ownerManagerId === session.managerId) {
+    return true;
+  }
+
+  if (locationEmail && locationEmail === sessionEmail) {
+    return true;
+  }
+
+  return false;
+}
 
 export function useSentryDerivedState({
   deferredFaqQuery,
@@ -17,6 +37,7 @@ export function useSentryDerivedState({
   logState,
   locationState,
   schemaState,
+  session,
   supportMode,
   uploadState,
   caarState,
@@ -28,28 +49,39 @@ export function useSentryDerivedState({
   logState: LogRecord[];
   locationState: LocationRecord[];
   schemaState: SchemaWorkspace[];
+  session: SessionState | null;
   supportMode: SupportModeState;
   uploadState: UploadModule[];
 }) {
+  const scopedAccountId =
+    session?.role === "WGS Manager" && supportMode.active && supportMode.accountId
+      ? supportMode.accountId
+      : session?.role === "WGS Manager"
+        ? null
+        : session?.accountId ?? null;
+
   const visibleLocations = useMemo(() => {
-    if (!supportMode.active || !supportMode.accountId) return locationState;
-    return locationState.filter((location) => location.accountId === supportMode.accountId);
-  }, [locationState, supportMode]);
+    if (!session) return [];
+    return locationState.filter((location) => matchesSessionScope(location, session));
+  }, [locationState, session]);
 
   const visibleCaars = useMemo(() => {
-    if (!supportMode.active || !supportMode.accountId) return caarState;
-    return caarState.filter((record) => record.accountId === supportMode.accountId);
-  }, [caarState, supportMode]);
+    if (!session) return [];
+    if (!scopedAccountId) return session.role === "WGS Manager" ? caarState : [];
+    return caarState.filter((record) => record.accountId === scopedAccountId);
+  }, [caarState, scopedAccountId, session]);
 
   const visibleUploadModules = useMemo(() => {
-    if (!supportMode.active || !supportMode.accountId) return uploadState;
-    return uploadState.filter((module) => module.accountId === supportMode.accountId);
-  }, [supportMode, uploadState]);
+    if (!session) return [];
+    if (!scopedAccountId) return session.role === "WGS Manager" ? uploadState : [];
+    return uploadState.filter((module) => module.accountId === scopedAccountId);
+  }, [scopedAccountId, session, uploadState]);
 
   const visibleSchemaWorkspaces = useMemo(() => {
-    if (!supportMode.active || !supportMode.accountId) return schemaState;
-    return schemaState.filter((workspace) => workspace.accountId === supportMode.accountId);
-  }, [schemaState, supportMode]);
+    if (!session) return [];
+    if (!scopedAccountId) return session.role === "WGS Manager" ? schemaState : [];
+    return schemaState.filter((workspace) => workspace.accountId === scopedAccountId);
+  }, [schemaState, scopedAccountId, session]);
 
   const averageTrust = Math.round(
     visibleLocations.reduce((sum, location) => sum + (location.m01 + location.m02) / 2, 0) /
@@ -62,14 +94,17 @@ export function useSentryDerivedState({
   const totalCaars = visibleCaars.filter((record) => record.status === "Court Admissible").length;
 
   const filteredLogs = useMemo(() => {
-    const scoped =
-      supportMode.active && supportMode.accountId
-        ? logState.filter((entry) => entry.accountId === supportMode.accountId)
-        : logState;
+    const scoped = !session
+      ? []
+      : !scopedAccountId
+        ? session.role === "WGS Manager"
+          ? logState
+          : []
+        : logState.filter((entry) => entry.accountId === scopedAccountId);
     if (logFilter === "immutable") return scoped.filter((entry) => entry.immutable);
     if (logFilter === "editable") return scoped.filter((entry) => !entry.immutable);
     return scoped;
-  }, [logFilter, logState, supportMode]);
+  }, [logFilter, logState, scopedAccountId, session]);
 
   const filteredFaq = useMemo(() => {
     const query = deferredFaqQuery.trim().toLowerCase();

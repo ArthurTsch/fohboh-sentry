@@ -1,6 +1,12 @@
 "use client";
 
-import { startTransition, useDeferredValue, useState } from "react";
+import {
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { navigation, viewMeta } from "./config";
 import {
   caarRecords,
@@ -38,11 +44,11 @@ import type {
   IntakeState,
   LogRecord,
   RequestAccessDraft,
-  Role,
   SchemaWorkspace,
   SessionState,
   SupportModeState,
   UploadArtifact,
+  UploadReceipt,
   ViewId,
   WgsOnboardingProgress,
   WgsUser,
@@ -54,6 +60,8 @@ type ActiveArtifactState = {
   accountId: string;
   artifact: UploadArtifact;
   entryMode?: "manual" | "upload";
+  locationId: string;
+  locationName: string;
   moduleId: "M01" | "M02";
   vendorKey?: string;
   vendorName?: string;
@@ -88,9 +96,82 @@ type ActiveCertificationState = {
   trustScore: number;
 };
 
+const SESSION_STORAGE_KEY = "sentry-session";
+const SESSION_CHANGE_EVENT = "sentry-session-change";
+let cachedSessionRaw: string | null = null;
+let cachedSessionValue: SessionState | null = null;
+const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
+
+function readSavedSession(): SessionState | null {
+  if (typeof window === "undefined") return null;
+
+  const savedSession = window.localStorage.getItem(SESSION_STORAGE_KEY);
+  if (!savedSession) {
+    cachedSessionRaw = null;
+    cachedSessionValue = null;
+    return null;
+  }
+
+  if (savedSession === cachedSessionRaw) {
+    return cachedSessionValue;
+  }
+
+  try {
+    cachedSessionRaw = savedSession;
+    cachedSessionValue = JSON.parse(savedSession) as SessionState;
+    return cachedSessionValue;
+  } catch {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+    cachedSessionRaw = null;
+    cachedSessionValue = null;
+    return null;
+  }
+}
+
+function subscribeToSessionStore(callback: () => void) {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+
+  const handleStorage = (event: StorageEvent) => {
+    if (!event.key || event.key === SESSION_STORAGE_KEY) {
+      callback();
+    }
+  };
+
+  const handleSessionChange = () => {
+    callback();
+  };
+
+  window.addEventListener("storage", handleStorage);
+  window.addEventListener(SESSION_CHANGE_EVENT, handleSessionChange);
+
+  return () => {
+    window.removeEventListener("storage", handleStorage);
+    window.removeEventListener(SESSION_CHANGE_EVENT, handleSessionChange);
+  };
+}
+
+type DatabaseRestaurant = {
+  city: string | null;
+  country: string | null;
+  created_by: number | null;
+  id: number;
+  location: string | null;
+  name: string;
+  state: string | null;
+  store_id: string | null;
+  unit_id: string | null;
+};
+
 export function SentryApp() {
+  const persistedSession = useSyncExternalStore(
+    subscribeToSessionStore,
+    readSavedSession,
+    () => null,
+  );
   const [session, setSession] = useState<SessionState | null>(null);
-  const [activeView, setActiveView] = useState<ViewId>("dashboard");
+  const [activeViewOverride, setActiveViewOverride] = useState<ViewId | null>(null);
   const [expandedLocations, setExpandedLocations] = useState<string[]>(["LOC-104"]);
   const [selectedCaar, setSelectedCaar] = useState<CaarRecord | null>(null);
   const [logFilter, setLogFilter] = useState<"all" | "immutable" | "editable">("all");
@@ -103,6 +184,7 @@ export function SentryApp() {
 
   const [caarState, setCaarState] = useState(caarRecords);
   const [locationState, setLocationState] = useState(locations);
+  const [assignedLocationState, setAssignedLocationState] = useState<typeof locations>([]);
   const [logState, setLogState] = useState(logRecords);
   const [uploadState, setUploadState] = useState(uploadModules);
   const [schemaState, setSchemaState] = useState(schemaWorkspaces);
@@ -131,15 +213,25 @@ export function SentryApp() {
   const [artifactIntakeState, setArtifactIntakeState] = useState<Record<string, IntakeState>>({});
   const [artifactContractState, setArtifactContractState] = useState<Record<string, Record<string, string>>>({});
   const [activeCertification, setActiveCertification] = useState<ActiveCertificationState | null>(null);
+  const [activeUploadLocation, setActiveUploadLocation] = useState<{
+    accountId: string;
+    id: string;
+    name: string;
+  } | null>(null);
+  const [uploadFeedback, setUploadFeedback] = useState<UploadReceipt | null>(null);
   const [supportMode, setSupportMode] = useState<SupportModeState>({
     active: false,
     accountId: null,
     accountName: null,
   });
 
+  const effectiveSession = session ?? persistedSession;
+  const activeView = activeViewOverride ?? (effectiveSession?.role === "WGS Manager" ? "wgs" : "dashboard");
+  const runtimeLocationState = effectiveSession ? assignedLocationState : locationState;
+
   const deferredFaqQuery = useDeferredValue(faqQuery);
 
-  useSentryPersistence(
+  const persistenceHydrated = useSentryPersistence(
     {
       artifactContractState,
       artifactIntakeState,
@@ -172,6 +264,86 @@ export function SentryApp() {
     },
   );
 
+  async function syncAssignedRestaurants(
+    sessionState: SessionState | null = effectiveSession,
+  ) {
+    if (!sessionState || !persistenceHydrated) {
+      return;
+    }
+
+    const params = new URLSearchParams({
+      email: sessionState.email,
+      role: sessionState.role,
+    });
+
+    if (typeof sessionState.managerId === "number") {
+      params.set("managerId", String(sessionState.managerId));
+    }
+
+    const response = await fetch(`/api/restaurants?${params.toString()}`, {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      restaurants?: DatabaseRestaurant[];
+    };
+
+    setAssignedLocationState(
+      mapAssignedRestaurantsToLocations(payload.restaurants ?? [], sessionState),
+    );
+  }
+
+  useEffect(() => {
+    if (!effectiveSession || !persistenceHydrated) return;
+
+    let cancelled = false;
+
+    async function run() {
+      const sessionState = effectiveSession;
+      if (!sessionState) {
+        return;
+      }
+      const params = new URLSearchParams({
+        email: sessionState.email,
+        role: sessionState.role,
+      });
+
+      if (typeof sessionState.managerId === "number") {
+        params.set("managerId", String(sessionState.managerId));
+      }
+
+      const response = await fetch(`/api/restaurants?${params.toString()}`, {
+        cache: "no-store",
+      });
+
+      if (!response.ok || cancelled) {
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        restaurants?: DatabaseRestaurant[];
+      };
+
+      if (cancelled) {
+        return;
+      }
+
+      setAssignedLocationState(
+        mapAssignedRestaurantsToLocations(payload.restaurants ?? [], sessionState),
+      );
+    }
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveSession, persistenceHydrated]);
+
   const {
     averageTrust,
     filteredFaq,
@@ -187,11 +359,64 @@ export function SentryApp() {
     deferredFaqQuery,
     logFilter,
     logState,
-    locationState,
+    locationState: runtimeLocationState,
     schemaState,
+    session: effectiveSession,
     supportMode,
     uploadState,
   });
+
+  function upsertRuntimeLocation(nextLocation: (typeof locations)[number]) {
+    setAssignedLocationState((current) => {
+      const index = current.findIndex((item) => item.id === nextLocation.id);
+      if (index === -1) {
+        return [...current, nextLocation];
+      }
+
+      return current.map((item, itemIndex) => (itemIndex === index ? nextLocation : item));
+    });
+  }
+
+  function updateRuntimeLocation(
+    locationId: string,
+    updater: (location: (typeof locations)[number]) => (typeof locations)[number],
+  ) {
+    setAssignedLocationState((current) =>
+      current.map((item) => (item.id === locationId ? updater(item) : item)),
+    );
+  }
+
+  function resolveUploadModulesForAccount(accountId: string) {
+    const exactModules = uploadState.filter((module) => module.accountId === accountId);
+    if (exactModules.length > 0) {
+      return exactModules;
+    }
+
+    const baseTemplates = uploadModules.filter(
+      (module) => module.accountId === BASE_UPLOAD_TEMPLATE_ACCOUNT_ID,
+    );
+
+    return baseTemplates.map((module) => ({
+      ...module,
+      accountId,
+      artifacts: module.artifacts.map((artifact) => ({
+        ...artifact,
+        status: "Missing" as const,
+        note: "No upload received yet for this location.",
+      })),
+    }));
+  }
+
+  function getScopedAccountId() {
+    if (supportMode.active && supportMode.accountId) return supportMode.accountId;
+    if (effectiveSession?.accountId) return effectiveSession.accountId;
+    return "C001";
+  }
+
+  function getScopedAccountName() {
+    if (supportMode.active && supportMode.accountName) return supportMode.accountName;
+    return effectiveSession?.name?.trim() || effectiveSession?.email || "Portfolio";
+  }
 
   function showToast(message: string) {
     setToast(message);
@@ -214,11 +439,12 @@ export function SentryApp() {
 
   function getArtifactStateKey(
     accountId: string,
+    locationId: string,
     moduleId: "M01" | "M02",
     artifactKey: string,
     vendorKey?: string,
   ) {
-    return `${accountId}:${moduleId}:${artifactKey}:${vendorKey ?? "global"}`;
+    return `${accountId}:${locationId}:${moduleId}:${artifactKey}:${vendorKey ?? "global"}`;
   }
 
   function appendLog(entry: Omit<LogRecord, "hash" | "ts" | "user"> & { hash?: string; user?: string }) {
@@ -238,15 +464,30 @@ export function SentryApp() {
     ]);
   }
 
-  function deriveModuleScore(accountId: string, moduleId: "M01" | "M02") {
-    const module = uploadState.find((item) => item.accountId === accountId && item.id === moduleId);
-    if (!module) return 0;
+  function deriveModuleScore(accountId: string, locationId: string, moduleId: "M01" | "M02") {
+    const uploadModule = uploadState.find((item) => item.accountId === accountId && item.id === moduleId);
+    if (!uploadModule) return 0;
 
-    const artifacts = module.artifacts.length;
-    const readyCount = module.artifacts.filter((artifact) => artifact.status === "Ready").length;
-    const reviewCount = module.artifacts.filter((artifact) => artifact.status === "Needs Review").length;
-    const uploadBonus = module.artifacts.reduce((sum, artifact) => {
-      const intake = artifactIntakeState[getArtifactStateKey(accountId, moduleId, artifact.key)];
+    const artifacts = uploadModule.artifacts.length;
+    const artifactStates = uploadModule.artifacts.map((artifact) => {
+      const prefix = `${accountId}:${locationId}:${moduleId}:${artifact.key}:`;
+      const matches = Object.entries(artifactIntakeState)
+        .filter(([key, value]) => key.startsWith(prefix) && value.uploaded)
+        .map(([, value]) => value);
+      const bestMatch = matches.find((value) => value.hash && value.schema && value.fields) ?? matches[0] ?? null;
+      return { artifact, intake: bestMatch };
+    });
+    const readyCount = artifactStates.filter(
+      ({ intake }) => intake?.uploaded && intake.hash && intake.schema && intake.fields,
+    ).length;
+    const reviewCount = artifactStates.filter(
+      ({ intake }) => intake?.uploaded && !(intake.hash && intake.schema && intake.fields),
+    ).length;
+    const uploadBonus = uploadModule.artifacts.reduce((sum, artifact) => {
+      const prefix = `${accountId}:${locationId}:${moduleId}:${artifact.key}:`;
+      const intake =
+        Object.entries(artifactIntakeState).find(([key, value]) => key.startsWith(prefix) && value.uploaded)?.[1] ??
+        null;
       return sum + (intake?.uploaded ? 4 : 0) + (intake?.hash ? 4 : 0);
     }, 0);
 
@@ -274,20 +515,27 @@ export function SentryApp() {
     ];
   }
 
-  function handleLogin(email: string, role: Role) {
+  function handleLogin(nextSession: SessionState) {
     startTransition(() => {
-      setSession({ email, role });
-      setActiveView(role === "WGS Manager" ? "wgs" : "dashboard");
+      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession));
+      window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
+      setSession(nextSession);
+      if (nextSession.role !== "WGS Manager") {
+        setSupportMode({ active: false, accountId: null, accountName: null });
+      }
+      setActiveViewOverride(nextSession.role === "WGS Manager" ? "wgs" : "dashboard");
     });
   }
 
   function handleSignOut() {
     startTransition(() => {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+      window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
       setSession(null);
       setSelectedCaar(null);
       setChatOpen(false);
       setMessages(initialMessages);
-      setActiveView("dashboard");
+      setActiveViewOverride("dashboard");
       setShowAddLocation(false);
       setShowRequestAccess(false);
       setActiveOnboardingLocation(null);
@@ -297,12 +545,29 @@ export function SentryApp() {
       setActiveArtifact(null);
       setActiveChecklist(null);
       setActiveCertification(null);
+      setActiveUploadLocation(null);
+      setUploadFeedback(null);
+      setAssignedLocationState([]);
       setSupportMode({ active: false, accountId: null, accountName: null });
     });
   }
 
   function handleViewChange(view: ViewId) {
-    startTransition(() => setActiveView(view));
+    startTransition(() => setActiveViewOverride(view));
+  }
+
+  function handleOpenLocationUploads(locationId: string) {
+    const location = visibleLocations.find((item) => item.id === locationId);
+    if (!location) {
+      return;
+    }
+
+    setActiveUploadLocation({
+      accountId: location.accountId,
+      id: location.id,
+      name: location.name,
+    });
+    startTransition(() => setActiveViewOverride("uploads"));
   }
 
   function toggleLocation(id: string) {
@@ -328,13 +593,48 @@ export function SentryApp() {
     setChatOpen(true);
   }
 
-  function handleAddLocation(draft: AddLocationDraft) {
-    const newId = draft.locId.trim() || `LOC-${100 + locationState.length + 1}`;
+  async function handleAddLocation(draft: AddLocationDraft) {
+    const createResponse = await fetch("/api/restaurants", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        accountId: getScopedAccountId(),
+        address: draft.address,
+        creatorEmail: effectiveSession?.email ?? null,
+        locationName: draft.name,
+        managerId: effectiveSession?.managerId ?? null,
+        unitId: draft.locId.trim() || null,
+      }),
+    });
+
+    if (!createResponse.ok) {
+      const payload = (await createResponse.json().catch(() => null)) as { error?: string } | null;
+      showToast(payload?.error ?? "Unable to create the restaurant record.");
+      return;
+    }
+
+    const payload = (await createResponse.json()) as {
+      restaurant?: {
+        address?: string | null;
+        id: number;
+        name: string;
+        unitId?: string | null;
+      };
+    };
+    const createdRestaurant = payload.restaurant;
+    const locationId =
+      createdRestaurant?.unitId?.trim() ||
+      draft.locId.trim() ||
+      `LOC-DB-${createdRestaurant?.id ?? Date.now()}`;
     const location = {
-      accountId: supportMode.accountId ?? "C001",
-      id: newId,
-      name: draft.name,
-      market: draft.address || "New market",
+      accountId: getScopedAccountId(),
+      id: locationId,
+      name: createdRestaurant?.name?.trim() || draft.name,
+      market: createdRestaurant?.address?.trim() || draft.address || "New market",
+      ownerEmail: effectiveSession?.email ?? undefined,
+      ownerManagerId: effectiveSession?.managerId ?? null,
       m01: 0,
       m02: 0,
       ium: "--",
@@ -356,13 +656,14 @@ export function SentryApp() {
       ],
     };
 
-    setLocationState((current) => [...current, location]);
+    upsertRuntimeLocation(location);
     setWgsOnboardingState((current) => ({
       ...current,
       [location.id]: createWgsOnboardingProgress(),
     }));
+    void syncAssignedRestaurants();
     setShowAddLocation(false);
-    setActiveView("onboarding");
+    setActiveViewOverride("onboarding");
     setActiveOnboardingLocation(location.id);
     appendLog({
       accountId: location.accountId,
@@ -377,10 +678,16 @@ export function SentryApp() {
     target: ActiveArtifactState,
     file: File,
     vendor?: { key: string; name: string },
-  ) {
+  ): Promise<UploadReceipt> {
     const resolvedVendorKey = vendor?.key ?? target.vendorKey;
     const resolvedVendorName = vendor?.name ?? target.vendorName;
-    const key = getArtifactStateKey(target.accountId, target.moduleId, target.artifact.key, resolvedVendorKey);
+    const locationScopedKey = getArtifactStateKey(
+      target.accountId,
+      target.locationId,
+      target.moduleId,
+      target.artifact.key,
+      resolvedVendorKey,
+    );
     const buffer = await file.arrayBuffer();
     const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
     const hashValue = Array.from(new Uint8Array(hashBuffer))
@@ -409,7 +716,7 @@ export function SentryApp() {
 
     setArtifactIntakeState((state) => ({
       ...state,
-      [key]: {
+      [locationScopedKey]: {
         uploaded: true,
         hash: true,
         schema: schemaOk,
@@ -453,9 +760,22 @@ export function SentryApp() {
       accountId: target.accountId,
       action: `${target.artifact.label} uploaded into ${target.moduleId}`,
       immutable: true,
-      location: supportMode.accountName ?? "Portfolio",
+      location: target.locationName,
     });
+    const receipt: UploadReceipt = {
+      fileName: file.name,
+      locationId: target.locationId,
+      locationName: target.locationName,
+      matchPct,
+      moduleId: target.moduleId,
+      rows,
+      sizeBytes: file.size,
+      status: schemaOk && fieldsOk ? "ready" : "review",
+      vendorName: resolvedVendorName,
+    };
+    setUploadFeedback(receipt);
     showToast(`${file.name} uploaded and hashed.`);
+    return receipt;
   }
 
   async function handleArtifactFileSelected(file: File) {
@@ -468,14 +788,25 @@ export function SentryApp() {
     artifactKey: string,
     file: File,
     vendor?: { key: string; name: string },
-  ) {
-    const module = visibleUploadModules.find((item) => item.id === moduleId);
-    const artifact = module?.artifacts.find((item) => item.key === artifactKey);
-    if (!module || !artifact) return;
+  ): Promise<UploadReceipt | null> {
+    const targetLocation = activeUploadLocation ?? visibleLocations[0];
+    const uploadModule = targetLocation
+      ? resolveUploadModulesForAccount(targetLocation.accountId).find((item) => item.id === moduleId)
+      : null;
+    const artifact = uploadModule?.artifacts.find((item) => item.key === artifactKey);
+    if (!uploadModule || !artifact || !targetLocation) return null;
 
-    const target = { accountId: module.accountId, artifact, moduleId, vendorKey: vendor?.key, vendorName: vendor?.name };
+    const target = {
+      accountId: uploadModule.accountId,
+      artifact,
+      locationId: targetLocation.id,
+      locationName: targetLocation.name,
+      moduleId,
+      vendorKey: vendor?.key,
+      vendorName: vendor?.name,
+    };
     setActiveArtifact(target);
-    await processArtifactFileUpload(target, file, vendor);
+    return processArtifactFileUpload(target, file, vendor);
   }
 
   function handleArtifactAction(
@@ -484,13 +815,18 @@ export function SentryApp() {
     vendor?: { key: string; name: string },
     entryMode?: "manual" | "upload",
   ) {
-    const module = visibleUploadModules.find((item) => item.id === moduleId);
-    const artifact = module?.artifacts.find((item) => item.key === artifactKey);
-    if (!module || !artifact) return;
+    const targetLocation = activeUploadLocation ?? visibleLocations[0];
+    const uploadModule = targetLocation
+      ? resolveUploadModulesForAccount(targetLocation.accountId).find((item) => item.id === moduleId)
+      : null;
+    const artifact = uploadModule?.artifacts.find((item) => item.key === artifactKey);
+    if (!uploadModule || !artifact || !targetLocation) return;
     setActiveArtifact({
-      accountId: module.accountId,
+      accountId: uploadModule.accountId,
       artifact,
       entryMode,
+      locationId: targetLocation.id,
+      locationName: targetLocation.name,
       moduleId,
       vendorKey: vendor?.key,
       vendorName: vendor?.name,
@@ -502,10 +838,21 @@ export function SentryApp() {
     artifactKey: string,
     vendor?: { key: string; name: string },
   ) {
-    const module = visibleUploadModules.find((item) => item.id === moduleId);
-    const artifact = module?.artifacts.find((item) => item.key === artifactKey);
-    if (!module || !artifact) return;
-    setActiveChecklist({ accountId: module.accountId, artifact, moduleId, vendorKey: vendor?.key, vendorName: vendor?.name });
+    const targetLocation = activeUploadLocation ?? visibleLocations[0];
+    const uploadModule = targetLocation
+      ? resolveUploadModulesForAccount(targetLocation.accountId).find((item) => item.id === moduleId)
+      : null;
+    const artifact = uploadModule?.artifacts.find((item) => item.key === artifactKey);
+    if (!uploadModule || !artifact || !targetLocation) return;
+    setActiveChecklist({
+      accountId: uploadModule.accountId,
+      artifact,
+      locationId: targetLocation.id,
+      locationName: targetLocation.name,
+      moduleId,
+      vendorKey: vendor?.key,
+      vendorName: vendor?.name,
+    });
   }
 
   function handleSaveWorkspace(workspace: SchemaWorkspace) {
@@ -597,7 +944,7 @@ export function SentryApp() {
     setEditingWgsUser(null);
     setCreatingWgsUser(false);
     appendLog({
-      accountId: "C001",
+      accountId: getScopedAccountId(),
       action: isNew
         ? `WGS user created: ${resolvedUser.firstName} ${resolvedUser.lastName}`
         : `WGS user updated: ${resolvedUser.firstName} ${resolvedUser.lastName}`,
@@ -611,6 +958,7 @@ export function SentryApp() {
     if (!activeArtifact) return;
     const key = getArtifactStateKey(
       activeArtifact.accountId,
+      activeArtifact.locationId,
       activeArtifact.moduleId,
       activeArtifact.artifact.key,
       activeArtifact.vendorKey,
@@ -694,7 +1042,7 @@ export function SentryApp() {
       accountId: activeArtifact.accountId,
       action: `${activeArtifact.artifact.label} intake advanced in ${activeArtifact.moduleId}`,
       immutable: isReady,
-      location: supportMode.accountName ?? "Portfolio",
+      location: activeArtifact.locationName,
     });
   }
 
@@ -702,6 +1050,7 @@ export function SentryApp() {
     if (!activeArtifact) return;
     const key = getArtifactStateKey(
       activeArtifact.accountId,
+      activeArtifact.locationId,
       activeArtifact.moduleId,
       activeArtifact.artifact.key,
       activeArtifact.vendorKey,
@@ -722,7 +1071,7 @@ export function SentryApp() {
       accountId,
       accountName: account?.name ?? accountId,
     });
-    setActiveView("dashboard");
+    setActiveViewOverride("dashboard");
     showToast(`Support Mode enabled for ${account?.name ?? accountId}.`);
   }
 
@@ -742,31 +1091,25 @@ export function SentryApp() {
   }
 
   function handleCompleteOnboarding(locationId: string) {
-    const location = locationState.find((item) => item.id === locationId);
+    const location = runtimeLocationState.find((item) => item.id === locationId);
     const progress = wgsOnboardingState[locationId];
     if (!location || !progress) return;
 
     const uploadCount = Object.keys(progress.uploads).length;
-    setLocationState((current) =>
-      current.map((item) =>
-        item.id === locationId
+    updateRuntimeLocation(locationId, (item) => ({
+      ...item,
+      status: Math.round((item.m01 + item.m02) / 2) >= 85 ? "Certified" : "At Risk",
+      lastCertified: new Date().toISOString().slice(0, 10),
+      modules: item.modules.map((module) =>
+        module.label === "Evidence"
           ? {
-              ...item,
-              status: Math.round((item.m01 + item.m02) / 2) >= 85 ? "Certified" : "At Risk",
-              lastCertified: new Date().toISOString().slice(0, 10),
-              modules: item.modules.map((module) =>
-                module.label === "Evidence"
-                  ? {
-                      ...module,
-                      score: Math.min(92, 60 + uploadCount * 6),
-                      note: `${uploadCount} onboarding uploads captured. WGS activation workflow completed and ready for ongoing certification.`,
-                    }
-                  : module,
-              ),
+              ...module,
+              score: Math.min(92, 60 + uploadCount * 6),
+              note: `${uploadCount} onboarding uploads captured. WGS activation workflow completed and ready for ongoing certification.`,
             }
-          : item,
+          : module,
       ),
-    );
+    }));
     setWgsOnboardingState((current) => ({
       ...current,
       [locationId]: {
@@ -786,7 +1129,7 @@ export function SentryApp() {
 
   function handleSendPasswordReset(userId: string, email: string) {
     appendLog({
-      accountId: "C001",
+      accountId: getScopedAccountId(),
       action: `Password reset link sent to ${email}`,
       immutable: false,
       location: "WGS Admin",
@@ -802,7 +1145,7 @@ export function SentryApp() {
     );
     setEditingWgsUser(null);
     appendLog({
-      accountId: "C001",
+      accountId: getScopedAccountId(),
       action: `WGS account deactivated: ${user.firstName} ${user.lastName}`,
       immutable: false,
       location: "WGS Admin",
@@ -822,17 +1165,26 @@ export function SentryApp() {
 
   function handleRequestAccess(draft: RequestAccessDraft) {
     const nextId = `APR-${String(wgsApprovalState.length + 20).padStart(3, "0")}`;
+    const scopeDetails = [
+      draft.locations ? `${draft.locations} locations` : null,
+      draft.processors.length > 0 ? `processors: ${draft.processors.join(", ")}` : null,
+      draft.dsps.length > 0 ? `DSPs: ${draft.dsps.join(", ")}` : null,
+      draft.monthlyVolume ? `volume: ${draft.monthlyVolume}` : null,
+    ]
+      .filter(Boolean)
+      .join(" | ");
+
     setWgsApprovalState((current) => [
       {
         id: nextId,
         account: draft.company,
         type: "Access Request",
-        summary: `${draft.email} requested ${draft.modules.join(" + ")} access for ${draft.locations} location(s).`,
+        summary: `${draft.name || draft.email} requested ${draft.modules.join(" + ")} via ${draft.modulePlan}.${scopeDetails ? ` ${scopeDetails}.` : ""}`,
       },
       ...current,
     ]);
     appendLog({
-      accountId: "C001",
+      accountId: getScopedAccountId(),
       action: `Request access submitted for ${draft.company}`,
       immutable: false,
       location: "Landing",
@@ -848,7 +1200,7 @@ export function SentryApp() {
       showToast("Add a support message before creating a ticket.");
       return;
     }
-    const accountName = supportMode.accountName ?? "Dominos NTX - Dallas";
+    const accountName = getScopedAccountName();
     setWgsQueueState((current) => [
       {
         id: `TCK-${String(current.length + 400).padStart(3, "0")}`,
@@ -863,7 +1215,7 @@ export function SentryApp() {
       ...current,
     ]);
     appendLog({
-      accountId: supportMode.accountId ?? "C001",
+      accountId: getScopedAccountId(),
       action: `Support ticket created: ${message}`,
       immutable: false,
       location: accountName,
@@ -872,11 +1224,11 @@ export function SentryApp() {
   }
 
   function handleRunCertification(locationId: string) {
-    const location = locationState.find((item) => item.id === locationId);
+    const location = runtimeLocationState.find((item) => item.id === locationId);
     if (!location) return;
 
-    const m01Score = deriveModuleScore(location.accountId, "M01");
-    const m02Score = deriveModuleScore(location.accountId, "M02");
+    const m01Score = deriveModuleScore(location.accountId, location.id, "M01");
+    const m02Score = deriveModuleScore(location.accountId, location.id, "M02");
     const trustScore = Math.round((m01Score + m02Score) / 2);
     const ready = trustScore >= 85;
     const amountValue = Math.max(12000, Math.round((m01Score * 180 + m02Score * 160) * 1.3));
@@ -912,45 +1264,39 @@ export function SentryApp() {
       trustScore,
     };
 
-    setLocationState((current) =>
-      current.map((item) =>
-        item.id === locationId
+    updateRuntimeLocation(locationId, (item) => ({
+      ...item,
+      lastCertified: new Date().toISOString().slice(0, 10),
+      m01: m01Score,
+      m02: m02Score,
+      modules: item.modules.map((module) =>
+        module.label === "M01"
           ? {
-              ...item,
-              lastCertified: new Date().toISOString().slice(0, 10),
-              m01: m01Score,
-              m02: m02Score,
-              modules: item.modules.map((module) =>
-                module.label === "M01"
-                  ? {
-                      ...module,
-                      score: m01Score,
-                      note: ready
-                        ? "Certification run completed and locked."
-                        : "Certification completed with unresolved release controls.",
-                    }
-                  : module.label === "M02"
-                    ? {
-                        ...module,
-                        score: m02Score,
-                        note: ready
-                          ? "Delivery evidence package cleared release."
-                          : "Delivery evidence package still requires remediation.",
-                      }
-                    : {
-                        ...module,
-                        score: ready ? 94 : 76,
-                        note: ready
-                          ? "Evidence chain and intake verification are complete."
-                          : "Evidence chain is present but still missing one or more release checks.",
-                      },
-              ),
-              recovery: formatCurrency(amountValue),
-              status: ready ? "Certified" : "At Risk",
+              ...module,
+              score: m01Score,
+              note: ready
+                ? "Certification run completed and locked."
+                : "Certification completed with unresolved release controls.",
             }
-          : item,
+          : module.label === "M02"
+            ? {
+                ...module,
+                score: m02Score,
+                note: ready
+                  ? "Delivery evidence package cleared release."
+                  : "Delivery evidence package still requires remediation.",
+              }
+            : {
+                ...module,
+                score: ready ? 94 : 76,
+                note: ready
+                  ? "Evidence chain and intake verification are complete."
+                  : "Evidence chain is present but still missing one or more release checks.",
+              },
       ),
-    );
+      recovery: formatCurrency(amountValue),
+      status: ready ? "Certified" : "At Risk",
+    }));
     setCaarState((current) => [nextRecord, ...current.filter((item) => item.locationId !== locationId)]);
     appendLog({
       accountId: location.accountId,
@@ -990,7 +1336,7 @@ export function SentryApp() {
     });
   }
 
-  if (!session) {
+  if (!effectiveSession) {
     return (
       <>
         <LandingPage onLogin={handleLogin} onRequestAccess={() => setShowRequestAccess(true)} />
@@ -1006,19 +1352,16 @@ export function SentryApp() {
   }
 
   const meta = viewMeta[activeView];
-  const navGroups =
-    session.role === "WGS Manager"
-      ? [...navigation, { section: "Admin", items: [{ id: "wgs" as ViewId, label: "WGS Admin", icon: "🛠" }] }]
-      : navigation;
 
   const activeOnboardingRecord =
     (activeOnboardingLocation
-      ? locationState.find((item) => item.id === activeOnboardingLocation)
+      ? runtimeLocationState.find((item) => item.id === activeOnboardingLocation)
       : null) ?? null;
 
   const activeArtifactStateKey = activeArtifact
     ? getArtifactStateKey(
         activeArtifact.accountId,
+        activeArtifact.locationId,
         activeArtifact.moduleId,
         activeArtifact.artifact.key,
         activeArtifact.vendorKey,
@@ -1027,11 +1370,16 @@ export function SentryApp() {
   const activeChecklistStateKey = activeChecklist
     ? getArtifactStateKey(
         activeChecklist.accountId,
+        activeChecklist.locationId,
         activeChecklist.moduleId,
         activeChecklist.artifact.key,
         activeChecklist.vendorKey,
       )
     : null;
+  const scopedUploadModules =
+    activeUploadLocation?.accountId
+      ? resolveUploadModulesForAccount(activeUploadLocation.accountId)
+      : visibleUploadModules;
 
   return (
     <>
@@ -1047,13 +1395,15 @@ export function SentryApp() {
         }}
         onSignOut={handleSignOut}
         onViewChange={handleViewChange}
-        session={session}
+        session={effectiveSession}
         supportMode={supportMode}
         visibleLocationCount={visibleLocations.length}
       >
         <SentryViewRouter
           accounts={wgsAccountState}
           activeView={activeView}
+          activeUploadLocationId={activeUploadLocation?.id ?? visibleLocations[0]?.id ?? null}
+          activeUploadLocationName={activeUploadLocation?.name ?? visibleLocations[0]?.name ?? null}
           approvals={wgsApprovalState}
           averageTrust={averageTrust}
           artifactContractState={artifactContractState}
@@ -1082,7 +1432,7 @@ export function SentryApp() {
           onOpenChecklist={handleArtifactChecklist}
           onOpenOnboarding={handleOpenOnboarding}
           onOpenSchemaEditor={setEditingWorkspace}
-          onOpenUploads={() => handleViewChange("uploads")}
+          onOpenUploads={handleOpenLocationUploads}
           onOpenUser={setEditingWgsUser}
           onQueryChange={setFaqQuery}
           onResolveQueue={handleResolveQueue}
@@ -1093,11 +1443,13 @@ export function SentryApp() {
           onToggleQuestion={(question) => setFaqOpen((current) => (current === question ? null : question))}
           onViewChange={handleViewChange}
           queue={wgsQueueState}
-          role={session.role}
+          role={effectiveSession.role}
           schemaWorkspaces={visibleSchemaWorkspaces}
+          session={effectiveSession}
           totalCaars={totalCaars}
           totalRecovery={totalRecovery}
-          uploadModules={visibleUploadModules}
+          uploadFeedback={uploadFeedback}
+          uploadModules={scopedUploadModules}
           users={wgsUserState}
         />
       </SentryShell>
@@ -1189,7 +1541,7 @@ export function SentryApp() {
           onClose={() => setSelectedCaar(null)}
           onGenerateClaimPack={handleGenerateClaimPack}
           record={selectedCaar}
-          uploadModules={visibleUploadModules}
+          uploadModules={scopedUploadModules}
         />
       ) : null}
 
@@ -1220,5 +1572,58 @@ export function SentryApp() {
 
       {toast ? <Toast message={toast} /> : null}
     </>
+  );
+}
+
+function mapAssignedRestaurantsToLocations(
+  restaurants: DatabaseRestaurant[],
+  session: SessionState,
+) {
+  if (restaurants.length === 0) {
+    return [];
+  }
+
+  return restaurants
+    .filter((restaurant) => restaurant.name.trim().length > 0)
+    .map((restaurant) => {
+      const market = getRestaurantMarket(restaurant);
+      const locationId =
+        restaurant.unit_id?.trim() ||
+        restaurant.store_id?.trim() ||
+        `LOC-DB-${restaurant.id}`;
+
+      return {
+        accountId:
+          session.role === "WGS Manager"
+            ? `mgr:${restaurant.created_by ?? restaurant.id}`
+            : session.accountId ?? `mgr:${session.email.toLowerCase()}`,
+        id: locationId,
+        name: restaurant.name,
+        market,
+        ownerEmail: session.role === "WGS Manager" ? undefined : session.email,
+        ownerManagerId: restaurant.created_by,
+        m01: 0,
+        m02: 0,
+        ium: "--",
+        recovery: "$0",
+        status: "Onboarding" as const,
+        lastCertified: "Pending",
+        modules: [
+          {
+            label: "Evidence",
+            score: 0,
+            note: "Assigned from admin. Onboarding, uploads, and first certification are still pending.",
+          },
+        ],
+      };
+    });
+}
+
+function getRestaurantMarket(restaurant: Pick<DatabaseRestaurant, "city" | "country" | "location" | "state">) {
+  return (
+    [restaurant.city, restaurant.state].filter(Boolean).join(", ") ||
+    restaurant.location?.trim() ||
+    restaurant.country?.trim() ||
+    "New market"
   );
 }

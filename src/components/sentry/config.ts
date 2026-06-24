@@ -21,6 +21,11 @@ export const viewMeta: Record<ViewId, { eyebrow: string; title: string; sub: str
     title: "Activity Log",
     sub: "Timestamped operational events with immutable and draft-state separation.",
   },
+  profile: {
+    eyebrow: "Account",
+    title: "Profile",
+    sub: "Current session identity, role scope, and visible account footprint.",
+  },
   permissions: {
     eyebrow: "Settings",
     title: "Permissions",

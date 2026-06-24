@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type {
   CaarRecord,
   IntakeState,
@@ -35,6 +35,7 @@ type PersistedStateSetters = {
 };
 
 export function useSentryPersistence(state: PersistedStateValues, setters: PersistedStateSetters) {
+  const [hydrated, setHydrated] = useState(false);
   const {
     setArtifactContractState,
     setArtifactIntakeState,
@@ -52,9 +53,16 @@ export function useSentryPersistence(state: PersistedStateValues, setters: Persi
   } = setters;
 
   useEffect(() => {
+    const markHydrated = () => {
+      queueMicrotask(() => setHydrated(true));
+    };
+
     try {
       const raw = window.localStorage.getItem(SENTRY_PERSISTENCE_KEY);
-      if (!raw) return;
+      if (!raw) {
+        markHydrated();
+        return;
+      }
 
       const persisted = JSON.parse(raw) as Partial<PersistedSentryState>;
       if (persisted.caarState) setCaarState(persisted.caarState);
@@ -72,6 +80,8 @@ export function useSentryPersistence(state: PersistedStateValues, setters: Persi
       if (persisted.supportMode) setSupportMode(persisted.supportMode);
     } catch {
       // Ignore invalid local persistence and fall back to defaults.
+    } finally {
+      markHydrated();
     }
   }, [
     setArtifactContractState,
@@ -90,6 +100,9 @@ export function useSentryPersistence(state: PersistedStateValues, setters: Persi
   ]);
 
   useEffect(() => {
+    if (!hydrated) return;
     window.localStorage.setItem(SENTRY_PERSISTENCE_KEY, JSON.stringify(state));
-  }, [state]);
+  }, [hydrated, state]);
+
+  return hydrated;
 }

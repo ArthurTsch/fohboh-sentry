@@ -1,5 +1,12 @@
 import { useMemo, useRef, useState } from "react";
-import type { IntakeState, UploadModule } from "../types";
+import { Badge } from "../ui/primitives";
+import type { IntakeState, UploadModule, UploadReceipt } from "../types";
+
+type UploadCardState = {
+  phase: "idle" | "uploading" | "success" | "review" | "error";
+  receipt?: UploadReceipt;
+  message?: string;
+};
 
 const moduleMeta = {
   M01: {
@@ -59,12 +66,17 @@ const templateHeaders: Record<string, string> = {
 };
 
 export function UploadCenterView({
+  activeLocationId,
+  activeLocationName,
   intakeState,
   modules,
   onArtifactAction,
   onDirectUpload,
   onOpenChecklist,
+  uploadFeedback,
 }: {
+  activeLocationId: string | null;
+  activeLocationName: string | null;
   contractState: Record<string, Record<string, string>>;
   intakeState: Record<string, IntakeState>;
   modules: UploadModule[];
@@ -79,15 +91,17 @@ export function UploadCenterView({
     artifactKey: string,
     file: File,
     vendor?: { key: string; name: string },
-  ) => void;
+  ) => Promise<UploadReceipt | null>;
   onOpenChecklist: (
     moduleId: "M01" | "M02",
     artifactKey: string,
     vendor?: { key: string; name: string },
   ) => void;
   onOpenSchema: () => void;
+  uploadFeedback: UploadReceipt | null;
 }) {
   const [activeModule, setActiveModule] = useState<"M01" | "M02">("M01");
+  const [cardState, setCardState] = useState<Record<string, UploadCardState>>({});
   const [pendingUpload, setPendingUpload] = useState<{
     moduleId: "M01" | "M02";
     artifactKey: string;
@@ -96,13 +110,18 @@ export function UploadCenterView({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeUploadModule = modules.find((module) => module.id === activeModule) ?? modules[0];
   const activeMeta = moduleMeta[activeModule];
-  const moduleArtifactMap = useMemo(() => {
-    return Object.fromEntries(
-      modules.map((module) => [module.id, Object.fromEntries(module.artifacts.map((artifact) => [artifact.key, artifact]))]),
-    ) as Record<"M01" | "M02", Record<string, UploadModule["artifacts"][number]>>;
-  }, [modules]);
   const uploadArtifactKeyFor = (baseKey: string) =>
-    Object.keys(moduleArtifactMap[activeModule] ?? {}).find((key) => key.startsWith(baseKey)) ?? baseKey;
+    activeUploadModule?.artifacts.find((artifact) => artifact.key.startsWith(baseKey))?.key ?? baseKey;
+  const recentReceipt = useMemo(() => {
+    const receipts = Object.values(cardState)
+      .map((value) => value.receipt)
+      .filter((value): value is UploadReceipt => Boolean(value));
+    return receipts.at(-1) ?? uploadFeedback;
+  }, [cardState, uploadFeedback]);
+
+  function getCardKey(moduleId: "M01" | "M02", artifactKey: string, vendorKey: string) {
+    return `${activeLocationId ?? "global"}:${moduleId}:${artifactKey}:${vendorKey}`;
+  }
 
   return (
     <div className="rounded-[24px] border border-[var(--border)] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
@@ -111,12 +130,65 @@ export function UploadCenterView({
         type="file"
         accept=".csv,text/csv,.pdf,application/pdf"
         className="hidden"
-        onChange={(event) => {
+        onChange={async (event) => {
+          const input = event.currentTarget;
           const file = event.target.files?.[0];
           if (file && pendingUpload) {
-            onDirectUpload(pendingUpload.moduleId, pendingUpload.artifactKey, file, pendingUpload.vendor);
+            const uploadKey = getCardKey(
+              pendingUpload.moduleId,
+              pendingUpload.artifactKey,
+              pendingUpload.vendor.key,
+            );
+
+            setCardState((current) => ({
+              ...current,
+              [uploadKey]: {
+                phase: "uploading",
+                message: "Uploading file and validating schema.",
+              },
+            }));
+
+            try {
+              const receipt = await onDirectUpload(
+                pendingUpload.moduleId,
+                pendingUpload.artifactKey,
+                file,
+                pendingUpload.vendor,
+              );
+
+              if (!receipt) {
+                setCardState((current) => ({
+                  ...current,
+                  [uploadKey]: {
+                    phase: "error",
+                    message: "Upload target could not be resolved for this location.",
+                  },
+                }));
+              } else {
+                setCardState((current) => ({
+                  ...current,
+                  [uploadKey]: {
+                    phase: receipt.status === "ready" ? "success" : "review",
+                    message:
+                      receipt.status === "ready"
+                        ? "Upload completed and passed intake checks."
+                        : "Upload completed but still needs review.",
+                    receipt,
+                  },
+                }));
+              }
+            } catch {
+              setCardState((current) => ({
+                ...current,
+                [uploadKey]: {
+                  phase: "error",
+                  message: "Upload failed. Try again with the raw file export.",
+                },
+              }));
+            }
           }
-          event.currentTarget.value = "";
+          setPendingUpload(null);
+          input.value = "";
         }}
       />
       <div className="border-b border-[var(--border)] px-5 py-4">
@@ -124,7 +196,9 @@ export function UploadCenterView({
           Upload Data
         </div>
         <div className="mt-1 text-sm text-[var(--muted)]">
-          Upload native CSV statements exactly as downloaded - no reformatting, no Excel re-save
+          {activeLocationName
+            ? `${activeLocationName} | Upload native CSV statements exactly as downloaded - no reformatting, no Excel re-save`
+            : "Upload native CSV statements exactly as downloaded - no reformatting, no Excel re-save"}
         </div>
       </div>
 
@@ -153,6 +227,7 @@ export function UploadCenterView({
       </div>
 
       <div className="px-5 pt-5">
+        {recentReceipt ? <RecentUploadBanner receipt={recentReceipt} /> : null}
         <div className="rounded-xl border border-[rgba(214,48,49,0.18)] bg-[#2B1403] px-4 py-4 text-[#F3AE62]">
           <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.24em] text-[#FF5C4D]">
             {activeMeta.ruleEyebrow}
@@ -164,14 +239,23 @@ export function UploadCenterView({
       <div className="grid gap-4 px-5 py-4 md:grid-cols-2 xl:grid-cols-2">
         {activeMeta.vendors.map((vendor) => {
           const settlementArtifactKey = uploadArtifactKeyFor(activeMeta.uploadArtifactKey);
-          const manualArtifact = moduleArtifactMap[activeModule]?.[activeMeta.manualArtifactKey];
           const posArtifactKey = activeModule === "M02" ? uploadArtifactKeyFor("m02-pos") : uploadArtifactKeyFor("m01-pos");
           const agreementArtifactKey =
             activeModule === "M02" ? uploadArtifactKeyFor("m02-agreement") : uploadArtifactKeyFor("m01-agreement");
           const bankArtifactKey = activeModule === "M02" ? uploadArtifactKeyFor("m02-bank") : uploadArtifactKeyFor("m01-bank");
+          const settlementCardState = cardState[getCardKey(activeModule, settlementArtifactKey, vendor.key)];
+          const posCardState = posArtifactKey
+            ? cardState[getCardKey(activeModule, posArtifactKey, vendor.key)]
+            : undefined;
+          const agreementCardState = agreementArtifactKey
+            ? cardState[getCardKey(activeModule, agreementArtifactKey, vendor.key)]
+            : undefined;
+          const bankCardState = bankArtifactKey
+            ? cardState[getCardKey(activeModule, bankArtifactKey, vendor.key)]
+            : undefined;
           const intakeFor = (artifactKey: string) => {
-            const stateKey = activeUploadModule
-              ? `${activeUploadModule.accountId}:${activeModule}:${artifactKey}:${vendor.key}`
+            const stateKey = activeUploadModule && activeLocationId
+              ? `${activeUploadModule.accountId}:${activeLocationId}:${activeModule}:${artifactKey}:${vendor.key}`
               : "";
             return stateKey
               ? intakeState[stateKey] ?? { uploaded: false, hash: false, schema: false, fields: false }
@@ -223,7 +307,7 @@ export function UploadCenterView({
                       onSecondary={() =>
                         onArtifactAction(
                           activeModule,
-                          activeMeta.manualArtifactKey,
+                          settlementArtifactKey,
                           {
                             key: vendor.key,
                             name: vendor.name,
@@ -233,6 +317,7 @@ export function UploadCenterView({
                       }
                       intake={settlementIntake}
                       hasUpload={settlementHasUpload}
+                      uploadState={settlementCardState}
                       emptyTitle={`Drop ${vendor.name} CSV or browse`}
                       emptySub="Order-level export | exact portal download"
                     />
@@ -241,6 +326,7 @@ export function UploadCenterView({
                       title="2 | POS Summary by Channel"
                       subtitle="POS net sales breakdown for the same period"
                       primaryLabel="Upload CSV"
+                      secondaryLabel="Manual Entry"
                       onPrimary={() => {
                         if (!posArtifactKey) return;
                         setPendingUpload({
@@ -250,8 +336,22 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
+                      onSecondary={() =>
+                        posArtifactKey
+                          ? onArtifactAction(
+                              activeModule,
+                              posArtifactKey,
+                              {
+                                key: vendor.key,
+                                name: vendor.name,
+                              },
+                              "manual",
+                            )
+                          : undefined
+                      }
                       intake={posIntake ?? undefined}
                       hasUpload={posHasUpload}
+                      uploadState={posCardState}
                       emptyTitle="Drop POS Summary CSV or browse"
                       emptySub="channel | pos_net_sales | commission_variance"
                     />
@@ -285,6 +385,7 @@ export function UploadCenterView({
                       }
                       intake={agreementIntake ?? undefined}
                       hasUpload={agreementHasUpload}
+                      uploadState={agreementCardState}
                       emptyTitle={`Drop signed ${vendor.name} agreement PDF or browse`}
                       emptySub="PDF only | signed executed copy"
                     />
@@ -318,6 +419,7 @@ export function UploadCenterView({
                       }
                       intake={bankIntake ?? undefined}
                       hasUpload={bankHasUpload}
+                      uploadState={bankCardState}
                       emptyTitle="Drop bank statement PDF or browse"
                       emptySub="PDF only | matching period"
                     />
@@ -340,7 +442,7 @@ export function UploadCenterView({
                       onSecondary={() =>
                         onArtifactAction(
                           activeModule,
-                          activeMeta.manualArtifactKey,
+                          settlementArtifactKey,
                           {
                             key: vendor.key,
                             name: vendor.name,
@@ -350,6 +452,7 @@ export function UploadCenterView({
                       }
                       intake={settlementIntake}
                       hasUpload={settlementHasUpload}
+                      uploadState={settlementCardState}
                       emptyTitle={`Drop ${vendor.name} CSV or browse`}
                       emptySub="Transaction-level export | no reformatting"
                     />
@@ -358,6 +461,7 @@ export function UploadCenterView({
                       title="2 | POS Export CSV"
                       subtitle="Matching-period POS export for cross-system reconciliation"
                       primaryLabel="Upload CSV"
+                      secondaryLabel="Manual Entry"
                       onPrimary={() => {
                         if (!posArtifactKey) return;
                         setPendingUpload({
@@ -367,8 +471,22 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
+                      onSecondary={() =>
+                        posArtifactKey
+                          ? onArtifactAction(
+                              activeModule,
+                              posArtifactKey,
+                              {
+                                key: vendor.key,
+                                name: vendor.name,
+                              },
+                              "manual",
+                            )
+                          : undefined
+                      }
                       intake={posIntake ?? undefined}
                       hasUpload={posHasUpload}
+                      uploadState={posCardState}
                       emptyTitle="Drop POS export CSV or browse"
                       emptySub="gross_sales | tenders | transactions"
                     />
@@ -402,6 +520,7 @@ export function UploadCenterView({
                       }
                       intake={agreementIntake ?? undefined}
                       hasUpload={agreementHasUpload}
+                      uploadState={agreementCardState}
                       emptyTitle={`Drop signed ${vendor.name} agreement PDF or browse`}
                       emptySub="PDF only | signed executed copy"
                     />
@@ -435,15 +554,10 @@ export function UploadCenterView({
                       }
                       intake={bankIntake ?? undefined}
                       hasUpload={bankHasUpload}
+                      uploadState={bankCardState}
                       emptyTitle="Drop bank statement PDF or browse"
                       emptySub="PDF only | matching period"
                     />
-
-                    {manualArtifact ? (
-                      <div className="text-[12px] text-[var(--muted)]">
-                        Manual Entry opens the governed contract workflow used for M01 certification.
-                      </div>
-                    ) : null}
                   </div>
                 )}
               </div>
@@ -474,6 +588,71 @@ function IntakeDot({ done, label }: { done: boolean; label: string }) {
   );
 }
 
+function RecentUploadBanner({ receipt }: { receipt: UploadReceipt }) {
+  return (
+    <div
+      className={`mb-5 rounded-xl border px-4 py-4 ${
+        receipt.status === "ready"
+          ? "border-[rgba(0,200,83,0.24)] bg-[rgba(0,200,83,0.06)]"
+          : "border-[rgba(255,152,0,0.3)] bg-[rgba(255,152,0,0.08)]"
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">
+            Recent Upload
+          </div>
+          <div className="mt-2 text-sm font-semibold text-[var(--text)]">{receipt.fileName}</div>
+          <div className="mt-1 text-sm text-[var(--muted)]">
+            {receipt.locationName} | {receipt.moduleId}
+            {receipt.vendorName ? ` | ${receipt.vendorName}` : ""}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={receipt.status === "ready" ? "success" : "warning"}>
+            {receipt.status === "ready" ? "Ready" : "Needs Review"}
+          </Badge>
+          <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+            {formatBytes(receipt.sizeBytes)}
+            {receipt.rows ? ` | ${receipt.rows} rows` : ""}
+            {receipt.matchPct !== undefined ? ` | Schema ${receipt.matchPct}%` : ""}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UploadStateBadge({
+  state,
+  hasUpload,
+}: {
+  state?: UploadCardState;
+  hasUpload: boolean;
+}) {
+  if (state?.phase === "uploading") {
+    return <Badge tone="info">Uploading</Badge>;
+  }
+
+  if (state?.phase === "success") {
+    return <Badge tone="success">Uploaded</Badge>;
+  }
+
+  if (state?.phase === "review") {
+    return <Badge tone="warning">Review</Badge>;
+  }
+
+  if (state?.phase === "error") {
+    return <Badge tone="danger">Failed</Badge>;
+  }
+
+  if (hasUpload) {
+    return <Badge tone="success">Received</Badge>;
+  }
+
+  return <Badge tone="neutral">Pending</Badge>;
+}
+
 function DocumentSection({
   title,
   subtitle,
@@ -483,6 +662,7 @@ function DocumentSection({
   onSecondary,
   intake,
   hasUpload,
+  uploadState,
   emptyTitle,
   emptySub,
 }: {
@@ -494,22 +674,31 @@ function DocumentSection({
   onSecondary?: () => void;
   intake?: IntakeState;
   hasUpload: boolean;
+  uploadState?: UploadCardState;
   emptyTitle: string;
   emptySub: string;
 }) {
   return (
     <div className="rounded-xl border border-[var(--border)] p-3">
-      <div className="mb-2 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
-        {title}
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
+          {title}
+        </div>
+        <UploadStateBadge state={uploadState} hasUpload={hasUpload} />
       </div>
       <div className="mb-3 text-[11px] leading-5 text-[var(--muted)]">{subtitle}</div>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={onPrimary}
-          className="rounded-lg bg-[var(--text)] px-3 py-2 text-[13px] font-semibold text-white transition hover:bg-[var(--accent)]"
+          className={`rounded-lg px-3 py-2 text-[13px] font-semibold text-white transition ${
+            uploadState?.phase === "uploading"
+              ? "cursor-wait bg-[var(--info)]"
+              : "bg-[var(--text)] hover:bg-[var(--accent)]"
+          }`}
+          disabled={uploadState?.phase === "uploading"}
         >
-          {primaryLabel}
+          {uploadState?.phase === "uploading" ? "Uploading..." : primaryLabel}
         </button>
         {secondaryLabel && onSecondary ? (
           <button
@@ -521,6 +710,21 @@ function DocumentSection({
           </button>
         ) : null}
       </div>
+      {uploadState?.message ? (
+        <div
+          className={`mt-3 rounded-lg px-3 py-2 text-[12px] ${
+            uploadState.phase === "error"
+              ? "bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"
+              : uploadState.phase === "review"
+                ? "bg-[rgba(255,152,0,0.1)] text-[#b86a00]"
+                : uploadState.phase === "success"
+                  ? "bg-[rgba(0,200,83,0.08)] text-[var(--success)]"
+                  : "bg-[rgba(0,97,255,0.08)] text-[var(--info)]"
+          }`}
+        >
+          {uploadState.message}
+        </div>
+      ) : null}
       <UploadTile intake={intake} hasUpload={hasUpload} emptyTitle={emptyTitle} emptySub={emptySub} onClick={onPrimary} compact />
     </div>
   );
