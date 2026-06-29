@@ -93,6 +93,232 @@ model restaurant_sentry_state {
   @@index([created_by], map: "idx_restaurant_sentry_state_created_by")
 }
 
+model customers {
+  id             Int       @id @default(autoincrement())
+  name           String
+  plan           String    @default("wgs") @db.VarChar(50)
+  cortex_enabled Boolean   @default(false)
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at     DateTime? @db.Timestamptz(6)
+
+  @@index([name], map: "idx_customers_name")
+}
+
+model users {
+  id            Int       @id @default(autoincrement())
+  customer_id   Int?
+  auth0_sub     String    @unique
+  email         String
+  display_name  String
+  role          String    @db.VarChar(50)
+  active        Boolean   @default(true)
+  last_login_at DateTime? @db.Timestamptz(6)
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([customer_id], map: "idx_users_customer_id")
+  @@index([email], map: "idx_users_email")
+}
+
+model locations_v2 {
+  id           Int       @id @default(autoincrement())
+  customer_id  Int
+  external_id  String
+  name         String
+  address      String?
+  pos_system   String?   @db.VarChar(50)
+  status       String    @default("onboarding") @db.VarChar(50)
+  activated_at DateTime? @db.Timestamptz(6)
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @default(now()) @db.Timestamptz(6)
+  deleted_at   DateTime? @db.Timestamptz(6)
+
+  @@unique([customer_id, external_id], map: "uq_locations_v2_customer_external_id")
+  @@index([customer_id, status], map: "idx_locations_v2_customer_status")
+  @@map("locations_v2")
+}
+
+model location_modules {
+  id           Int       @id @default(autoincrement())
+  location_id  Int
+  module       String    @db.VarChar(10)
+  status       String    @default("pending") @db.VarChar(50)
+  activated_at DateTime? @db.Timestamptz(6)
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([location_id, module], map: "uq_location_modules_location_module")
+  @@index([location_id], map: "idx_location_modules_location_id")
+}
+
+model contract_configs_v2 {
+  id          Int       @id @default(autoincrement())
+  location_id Int
+  module      String    @db.VarChar(10)
+  version     Int
+  terms       Json
+  sealed_by   Int
+  sealed_at   DateTime? @default(now()) @db.Timestamptz(6)
+  sha256      String    @db.Char(64)
+  prev_sha256 String?   @db.Char(64)
+
+  @@unique([location_id, module, version], map: "uq_contract_configs_v2_location_module_version")
+  @@index([location_id, module, version], map: "idx_contract_configs_v2_location_module_version")
+  @@map("contract_configs_v2")
+}
+
+model schema_registry_v2 {
+  id          Int       @id @default(autoincrement())
+  location_id Int
+  module      String    @db.VarChar(10)
+  vendor      String    @db.VarChar(100)
+  version     Int
+  fields      Json
+  sealed_by   Int
+  sealed_at   DateTime? @default(now()) @db.Timestamptz(6)
+  sha256      String    @db.Char(64)
+
+  @@unique([location_id, module, vendor, version], map: "uq_schema_registry_v2_location_module_vendor_version")
+  @@index([location_id, module, vendor, version], map: "idx_schema_registry_v2_location_module_vendor_version")
+  @@map("schema_registry_v2")
+}
+
+model uploads_v2 {
+  id            Int       @id @default(autoincrement())
+  location_id   Int
+  module        String    @db.VarChar(10)
+  file_purpose  String    @db.VarChar(100)
+  vendor        String?   @db.VarChar(100)
+  file_name     String
+  s3_key        String
+  byte_count    BigInt
+  row_count     Int?
+  page_count    Int?
+  sha256        String    @db.Char(64)
+  uploaded_by   Int
+  uploaded_at   DateTime? @default(now()) @db.Timestamptz(6)
+  superseded_by Int?
+
+  @@index([location_id, module], map: "idx_uploads_v2_location_module")
+  @@index([sha256], map: "idx_uploads_v2_sha256")
+  @@map("uploads_v2")
+}
+
+model cert_runs_v2 {
+  id                  Int       @id @default(autoincrement())
+  location_id         Int
+  module              String    @db.VarChar(10)
+  period              String    @db.VarChar(50)
+  contract_config_id  Int
+  schema_registry_ids Json
+  upload_ids          Json
+  rule_set_version    String    @db.VarChar(100)
+  status              String    @default("queued") @db.VarChar(50)
+  started_at          DateTime? @db.Timestamptz(6)
+  completed_at        DateTime? @db.Timestamptz(6)
+  trust_score         Int?
+  variance_cents      BigInt?
+  triggered_by        Int
+  created_at          DateTime? @default(now()) @db.Timestamptz(6)
+  error_message       String?
+
+  @@index([location_id, module, period], map: "idx_cert_runs_v2_location_module_period")
+  @@index([status], map: "idx_cert_runs_v2_status")
+  @@map("cert_runs_v2")
+}
+
+model caars_v2 {
+  id                         Int       @id @default(autoincrement())
+  caar_external_id           String    @unique
+  cert_run_id                Int       @unique
+  location_id                Int
+  module                     String    @db.VarChar(10)
+  period                     String    @db.VarChar(50)
+  status                     String    @db.VarChar(50)
+  court_admissible           Boolean   @default(false)
+  trust_score                Int
+  finding_class              String    @db.VarChar(100)
+  recoverable_variance_cents BigInt
+  canonical_payload_s3_key   String
+  pdf_s3_key                 String?
+  exportpack_s3_key          String?
+  sha256                     String    @db.Char(64)
+  prev_sha256                String?   @db.Char(64)
+  sealed_at                  DateTime? @default(now()) @db.Timestamptz(6)
+  superseded_by              Int?
+  superseded_reason          String?
+
+  @@index([location_id, sealed_at], map: "idx_caars_v2_location_sealed_at")
+  @@index([status], map: "idx_caars_v2_status")
+  @@index([caar_external_id], map: "idx_caars_v2_external_id")
+  @@map("caars_v2")
+}
+
+model caar_artifacts_v2 {
+  id            Int       @id @default(autoincrement())
+  caar_id       Int
+  seq           Int
+  artifact_type String    @db.VarChar(100)
+  name          String
+  s3_key        String
+  byte_count    BigInt
+  sha256        String    @db.Char(64)
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([caar_id, seq], map: "uq_caar_artifacts_v2_caar_seq")
+  @@map("caar_artifacts_v2")
+}
+
+model rule_citations_v2 {
+  id              Int       @id @default(autoincrement())
+  cert_run_id     Int
+  rule_id         String    @db.VarChar(100)
+  rule_version    String    @db.VarChar(50)
+  fired_count     Int       @default(0)
+  variance_cents  BigInt    @default(0)
+  sample_evidence Json?
+
+  @@unique([cert_run_id, rule_id], map: "uq_rule_citations_v2_cert_run_rule")
+  @@index([cert_run_id], map: "idx_rule_citations_v2_cert_run_id")
+  @@index([rule_id], map: "idx_rule_citations_v2_rule_id")
+  @@map("rule_citations_v2")
+}
+
+model mq6_scores_v2 {
+  id           Int       @id @default(autoincrement())
+  cert_run_id  Int
+  dimension    String    @db.VarChar(50)
+  score        Int
+  weight_bps   Int
+  evidence     Json?
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([cert_run_id, dimension], map: "uq_mq6_scores_v2_cert_run_dimension")
+  @@index([cert_run_id], map: "idx_mq6_scores_v2_cert_run_id")
+  @@map("mq6_scores_v2")
+}
+
+model audit_log_v2 {
+  id            Int       @id @default(autoincrement())
+  customer_id   Int?
+  location_id   Int?
+  actor_user_id Int?
+  action        String
+  entity_type   String    @db.VarChar(100)
+  entity_id     String    @db.VarChar(100)
+  summary       String
+  metadata      Json?
+  ip_address    String?   @db.VarChar(64)
+  user_agent    String?
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([customer_id], map: "idx_audit_log_v2_customer_id")
+  @@index([location_id], map: "idx_audit_log_v2_location_id")
+  @@index([actor_user_id], map: "idx_audit_log_v2_actor_user_id")
+  @@index([entity_type, entity_id], map: "idx_audit_log_v2_entity")
+  @@map("audit_log_v2")
+}
+
 model store_analytics_results {
   id               Int       @id @default(autoincrement())
   store_id         String    @db.VarChar(50)
