@@ -93,6 +93,8 @@ export const navigation = [
 
 export const roleClass: Record<Role, string> = {
   Admin: "bg-[rgba(214,48,49,0.08)] text-[var(--accent)] border border-[rgba(214,48,49,0.2)]",
+  SuperAdmin:
+    "bg-[rgba(17,17,17,0.08)] text-[var(--text)] border border-[rgba(17,17,17,0.16)]",
   Manager: "bg-[rgba(255,152,0,0.1)] text-[#b86a00] border border-[rgba(255,152,0,0.24)]",
   Viewer: "bg-[var(--panel-soft)] text-[var(--muted)] border border-[var(--border)]",
   "WGS Manager":

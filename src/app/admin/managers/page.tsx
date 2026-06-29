@@ -142,6 +142,7 @@ export default async function AdminManagersPage({
               >
                 <option value="Manager">Manager</option>
                 <option value="Admin">Admin</option>
+                <option value="SuperAdmin">SuperAdmin</option>
                 <option value="Viewer">Viewer</option>
                 <option value="WGS Manager">WGS Manager</option>
                 <option value="Restaurant Owner">Restaurant Owner</option>

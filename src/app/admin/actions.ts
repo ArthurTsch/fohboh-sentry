@@ -12,12 +12,12 @@ import {
   createSessionCookieValue,
   getSessionCookieOptions,
   MANAGER_SESSION_COOKIE_NAME,
-  requireAdminManagerSession,
+  requireSuperAdminSession,
 } from "@/lib/auth/session";
 
 async function requireAdminSession() {
   try {
-    await requireAdminManagerSession();
+    await requireSuperAdminSession();
   } catch {
     redirect("/admin");
   }
@@ -32,7 +32,7 @@ export async function loginAdminAction(formData: FormData) {
     redirect("/admin?error=invalid-credentials");
   }
 
-  if (result.session.role !== "Admin") {
+  if (result.session.role !== "SuperAdmin") {
     redirect("/admin?error=not-admin");
   }
 

@@ -20,6 +20,7 @@ function mapManagerRole(role: string): Role | null {
   const normalizedRole = role.trim().toLowerCase();
 
   if (normalizedRole === "wgs manager") return "WGS Manager";
+  if (normalizedRole === "superadmin" || normalizedRole === "super admin") return "SuperAdmin";
   if (normalizedRole === "admin") return "Admin";
   if (normalizedRole === "viewer") return "Viewer";
   if (
@@ -34,7 +35,7 @@ function mapManagerRole(role: string): Role | null {
 }
 
 function resolveManagerAccountId(email: string, role: Role): string | null {
-  if (role === "WGS Manager") {
+  if (role === "WGS Manager" || role === "SuperAdmin") {
     return null;
   }
 

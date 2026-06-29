@@ -28,8 +28,10 @@ export function WaterfallView({
   onOpenUploads: (locationId: string) => void;
   role: Role;
 }) {
-  const canUpload = role === "Admin" || role === "Manager" || role === "WGS Manager";
-  const canRunCertification = role === "Admin" || role === "WGS Manager";
+  const canUpload =
+    role === "Admin" || role === "SuperAdmin" || role === "Manager" || role === "WGS Manager";
+  const canRunCertification =
+    role === "Admin" || role === "SuperAdmin" || role === "WGS Manager";
 
   return (
     <SectionCard className="overflow-hidden p-0">

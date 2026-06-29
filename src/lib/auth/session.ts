@@ -103,10 +103,10 @@ export async function requireManagerSession() {
   return session;
 }
 
-export async function requireAdminManagerSession() {
+export async function requireSuperAdminSession() {
   const session = await requireManagerSession();
 
-  if (session.role !== "Admin") {
+  if (session.role !== "SuperAdmin") {
     throw new Error("Forbidden");
   }
 

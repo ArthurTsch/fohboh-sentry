@@ -4,7 +4,7 @@ import { getManagerSession } from "@/lib/auth/session";
 import { loginAdminAction, logoutAdminAction } from "./actions";
 
 export const adminMetadata: Metadata = {
-  title: "Admin | FohBoh Sentry",
+  title: "SuperAdmin | FohBoh Sentry",
   robots: {
     index: false,
     follow: false,
@@ -19,7 +19,7 @@ export type AdminSearchParams = Record<string, SearchParamValue>;
 
 export async function isAdminAuthorized() {
   const session = await getManagerSession();
-  return session?.role === "Admin";
+  return session?.role === "SuperAdmin";
 }
 
 export function getSearchParam(searchParams: AdminSearchParams, key: string) {
@@ -53,11 +53,11 @@ export function AdminLoginScreen({ error }: { error?: string }) {
           Restricted
         </div>
         <h1 className="mt-3 font-[family-name:var(--font-display)] text-4xl font-bold tracking-[-0.05em]">
-          Sentry Admin
+          SuperAdmin
         </h1>
         <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
           This page is intentionally hidden. Sign in with a real manager account that has the
-          `Admin` role to manage manager and restaurant records.
+          `SuperAdmin` role to manage developer-level platform records.
         </p>
 
         {error === "invalid-credentials" ? (
@@ -67,12 +67,12 @@ export function AdminLoginScreen({ error }: { error?: string }) {
         ) : null}
         {error === "not-admin" ? (
           <div className="mt-5 rounded-2xl border border-[rgba(214,48,49,0.2)] bg-[rgba(214,48,49,0.06)] px-4 py-3 text-sm text-[var(--accent)]">
-            This account is not allowed to access Sentry Admin.
+            This account is not allowed to access SuperAdmin.
           </div>
         ) : null}
 
         <form action={loginAdminAction} className="mt-6 space-y-4">
-          <AdminField label="Admin Email">
+          <AdminField label="SuperAdmin Email">
             <input
               type="email"
               name="email"
@@ -80,7 +80,7 @@ export function AdminLoginScreen({ error }: { error?: string }) {
               placeholder="admin@company.com"
             />
           </AdminField>
-          <AdminField label="Admin Password">
+          <AdminField label="SuperAdmin Password">
             <input
               type="password"
               name="password"
@@ -92,7 +92,7 @@ export function AdminLoginScreen({ error }: { error?: string }) {
             type="submit"
             className="w-full rounded-xl bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
           >
-            Open Admin
+            Open SuperAdmin
           </button>
         </form>
       </div>

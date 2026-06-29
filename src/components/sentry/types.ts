@@ -1,4 +1,4 @@
-export type Role = "Admin" | "Manager" | "Viewer" | "WGS Manager";
+export type Role = "Admin" | "SuperAdmin" | "Manager" | "Viewer" | "WGS Manager";
 
 export type ViewId =
   | "dashboard"

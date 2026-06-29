@@ -22,7 +22,7 @@ export function DiyAccessView({
   const [tab, setTab] = useState<DiyTab>("m01");
   const [m01Panel, setM01Panel] = useState<RegistryTab>("mappings");
   const [m02Panel, setM02Panel] = useState<RegistryTab>("mappings");
-  const unlocked = role === "Admin" || role === "WGS Manager";
+  const unlocked = role === "Admin" || role === "SuperAdmin" || role === "WGS Manager";
 
   const m01Workspaces = useMemo(
     () => workspaces.filter((workspace) => workspace.module === "M01"),

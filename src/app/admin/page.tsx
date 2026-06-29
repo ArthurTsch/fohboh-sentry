@@ -26,8 +26,8 @@ export default async function AdminPage({
 
   return (
     <AdminShell
-      title="Sentry Admin"
-      description="Manage hidden admin resources from dedicated sections. Managers and restaurants now have separate views so the database surfaces stay readable."
+      title="SuperAdmin Console"
+      description="Manage hidden developer-level platform resources from dedicated sections. This console is reserved for SuperAdmin access."
     >
       <div className="grid gap-6 md:grid-cols-2">
         <section className="rounded-[28px] border border-[var(--border)] bg-white p-6 shadow-[0_20px_60px_rgba(0,0,0,0.06)]">
@@ -38,7 +38,8 @@ export default async function AdminPage({
             Accounts and access
           </h2>
           <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-            Create and remove manager accounts in the AWS-backed `managers` table.
+            Create and remove manager accounts in the AWS-backed `managers` table, including
+            privileged `SuperAdmin` users.
           </p>
           <Link
             href="/admin/managers"
