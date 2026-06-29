@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Badge } from "../ui/primitives";
 import type { IntakeState, UploadModule, UploadReceipt } from "../types";
+import { getTemplateHeaders } from "@/lib/uploads/definitions";
 
 type UploadCardState = {
   phase: "idle" | "uploading" | "success" | "review" | "error";
@@ -43,27 +44,6 @@ const moduleMeta = {
     templateModule: "M02",
   },
 } as const;
-
-const templateHeaders: Record<string, string> = {
-  heartland:
-    "trans_date,trans_id,card_type,trans_amount,fee_amount,disc_rate,disc_amount,auth_code,terminal_id,batch_id,card_number_last4,trans_type",
-  toast:
-    "date,batch_date,pos_merchant_sales,platform_net_sales,transaction_fees,processing_fees,other_merchant_fees,calculated_recovery_variance,bank_deposit_amount,card_type,entry_method,interchange_rate_applied,transaction_count,notes",
-  square:
-    "date,transaction_id,amount,fee,net_total,card_brand,pan_suffix,device_name,location_name,description,refund_id,dispute_id",
-  worldpay:
-    "txn_date,txn_id,card_brand,txn_amount,disc_rate,disc_amount,interchange_amount,assessment,terminal_id,batch_number,auth_number",
-  chase:
-    "transaction_date,transaction_id,card_type,transaction_amount,disc_rate,disc_amount,interchange_fee,service_fee,authorization_number,mid",
-  ubereats:
-    "date,order_id,item_subtotal,commission_charged,commission_rate_applied,platform_gross_sales,order_status,delivery_fee,tip,tax,settlement_date,menu_item_count,channel,notes",
-  doordash:
-    "order_date,store_id,order_id,order_subtotal,dd_commission_rate,dd_commission_amount,dd_marketing_fee,error_charge,consumer_fee,payout_amount,order_status",
-  grubhub:
-    "date,restaurant_id,order_id,restaurant_food_sales,grubhub_commission,marketing_fee,tax_remitted,adjustment_amount,net_payout,order_type",
-  slice:
-    "order_date,store_id,order_id,order_subtotal,slice_commission,marketing_contribution,adjustment,tax,net_payout",
-};
 
 export function UploadCenterView({
   activeLocationId,
@@ -171,12 +151,15 @@ export function UploadCenterView({
                   },
                 }));
               }
-            } catch {
+            } catch (error) {
               setCardState((current) => ({
                 ...current,
                 [uploadKey]: {
                   phase: "error",
-                  message: "Upload failed. Try again with the raw file export.",
+                  message:
+                    error instanceof Error
+                      ? error.message
+                      : "Upload failed. Try again with the raw file export.",
                 },
               }));
             }
@@ -819,9 +802,9 @@ function UploadTile({
 }
 
 function downloadTemplate(vendorKey: string, module: "M01" | "M02", vendorName: string) {
-  const headers = templateHeaders[vendorKey];
-  if (!headers || typeof window === "undefined") return;
-  const blob = new Blob([`${headers}\n`], { type: "text/csv" });
+  const headers = getTemplateHeaders(vendorKey);
+  if (headers.length === 0 || typeof window === "undefined") return;
+  const blob = new Blob([`${headers.join(",")}\n`], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

@@ -187,6 +187,7 @@ model uploads_v2 {
   id            Int       @id @default(autoincrement())
   location_id   Int
   module        String    @db.VarChar(10)
+  artifact_key  String    @db.VarChar(100)
   file_purpose  String    @db.VarChar(100)
   vendor        String?   @db.VarChar(100)
   file_name     String
@@ -195,11 +196,13 @@ model uploads_v2 {
   row_count     Int?
   page_count    Int?
   sha256        String    @db.Char(64)
+  validation_summary Json?
   uploaded_by   Int
   uploaded_at   DateTime? @default(now()) @db.Timestamptz(6)
   superseded_by Int?
 
   @@index([location_id, module], map: "idx_uploads_v2_location_module")
+  @@index([location_id, module, artifact_key], map: "idx_uploads_v2_location_module_artifact")
   @@index([sha256], map: "idx_uploads_v2_sha256")
   @@map("uploads_v2")
 }

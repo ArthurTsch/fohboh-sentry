@@ -26,7 +26,6 @@ import {
 import {
   buildCertificationResult,
   extractManualMetrics,
-  extractUploadMetrics,
 } from "./caar-engine";
 import { useSentryDerivedState } from "./hooks/useSentryDerivedState";
 import { useSentryPersistence } from "./hooks/useSentryPersistence";
@@ -73,27 +72,6 @@ type ActiveArtifactState = {
   vendorName?: string;
 };
 
-const vendorTemplateHeaders: Record<string, string[]> = {
-  heartland:
-    "trans_date,trans_id,card_type,trans_amount,fee_amount,disc_rate,disc_amount,auth_code,terminal_id,batch_id,card_number_last4,trans_type".split(","),
-  toast:
-    "date,batch_date,pos_merchant_sales,platform_net_sales,transaction_fees,processing_fees,other_merchant_fees,calculated_recovery_variance,bank_deposit_amount,card_type,entry_method,interchange_rate_applied,transaction_count,notes".split(","),
-  square:
-    "date,transaction_id,amount,fee,net_total,card_brand,pan_suffix,device_name,location_name,description,refund_id,dispute_id".split(","),
-  worldpay:
-    "txn_date,txn_id,card_brand,txn_amount,disc_rate,disc_amount,interchange_amount,assessment,terminal_id,batch_number,auth_number".split(","),
-  chase:
-    "transaction_date,transaction_id,card_type,transaction_amount,disc_rate,disc_amount,interchange_fee,service_fee,authorization_number,mid".split(","),
-  ubereats:
-    "date,order_id,item_subtotal,commission_charged,commission_rate_applied,platform_gross_sales,order_status,delivery_fee,tip,tax,settlement_date,menu_item_count,channel,notes".split(","),
-  doordash:
-    "order_date,store_id,order_id,order_subtotal,dd_commission_rate,dd_commission_amount,dd_marketing_fee,error_charge,consumer_fee,payout_amount,order_status".split(","),
-  grubhub:
-    "date,restaurant_id,order_id,restaurant_food_sales,grubhub_commission,marketing_fee,tax_remitted,adjustment_amount,net_payout,order_type".split(","),
-  slice:
-    "order_date,store_id,order_id,order_subtotal,slice_commission,marketing_contribution,adjustment,tax,net_payout".split(","),
-};
-
 type ActiveCertificationState = {
   locationId: string;
   locationName: string;
@@ -136,6 +114,32 @@ type DatabaseCaarRecord = CaarRecord & {
   createdAt?: string | null;
   createdBy?: number | null;
   restaurantId?: number | null;
+};
+
+type PersistedUploadRecord = {
+  artifactKey: string;
+  accountId?: string | null;
+  expectedColumns?: number;
+  fields: boolean;
+  fileName: string;
+  hashValue?: string;
+  id: number;
+  locationId: string;
+  locationName: string;
+  matchedColumns?: number;
+  matchPct?: number;
+  metrics?: IntakeState["metrics"];
+  moduleId: "M01" | "M02";
+  pageCount?: number;
+  rows?: number;
+  schema: boolean;
+  sizeBytes: number;
+  status: "ready" | "review";
+  unmatchedHeaders?: string[];
+  updatedAt?: string;
+  uploaded: boolean;
+  vendorKey?: string;
+  vendorName?: string;
 };
 
 export function SentryApp({ initialSession = null }: { initialSession?: SessionState | null }) {
@@ -290,6 +294,123 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     setCaarState(payload.reports ?? []);
   }, [effectiveSession, persistenceHydrated]);
 
+  const applyPersistedUpload = useCallback((upload: PersistedUploadRecord, accountId: string) => {
+    const locationScopedKey = getArtifactStateKey(
+      accountId,
+      upload.locationId,
+      upload.moduleId,
+      upload.artifactKey,
+      upload.vendorKey,
+    );
+
+    setArtifactIntakeState((state) => ({
+      ...state,
+      [locationScopedKey]: {
+        uploaded: upload.uploaded,
+        hash: Boolean(upload.hashValue),
+        schema: upload.schema,
+        fields: upload.fields,
+        fileName: upload.fileName,
+        rows: upload.rows,
+        hashValue: upload.hashValue,
+        vendorKey: upload.vendorKey,
+        vendorName: upload.vendorName,
+        sizeBytes: upload.sizeBytes,
+        matchPct: upload.matchPct,
+        matchedColumns: upload.matchedColumns,
+        expectedColumns: upload.expectedColumns,
+        metrics: upload.metrics,
+        unmatchedHeaders: upload.unmatchedHeaders,
+        updatedAt: upload.updatedAt,
+      },
+    }));
+
+    setUploadState((current) =>
+      current.map((module) =>
+        module.accountId === accountId && module.id === upload.moduleId
+          ? {
+              ...module,
+              artifacts: module.artifacts.map((artifact) =>
+                artifact.key === upload.artifactKey
+                  ? {
+                      ...artifact,
+                      status: upload.status === "ready" ? "Ready" : "Needs Review",
+                      note:
+                        upload.matchPct !== undefined
+                          ? `${upload.fileName} uploaded. Schema match ${upload.matchPct}%. ${
+                              upload.status === "ready"
+                                ? "Ready for certification intake."
+                                : "WGS review required."
+                            }`
+                          : `${upload.fileName} uploaded and stored for this location.`,
+                    }
+                  : artifact,
+              ),
+            }
+          : module,
+      ),
+    );
+
+    return {
+      receipt: {
+        artifactKey: upload.artifactKey,
+        expectedColumns: upload.expectedColumns,
+        fileName: upload.fileName,
+        hashValue: upload.hashValue,
+        locationId: upload.locationId,
+        locationName: upload.locationName,
+        matchedColumns: upload.matchedColumns,
+        matchPct: upload.matchPct,
+        metrics: upload.metrics,
+        moduleId: upload.moduleId,
+        pageCount: upload.pageCount,
+        rows: upload.rows,
+        sizeBytes: upload.sizeBytes,
+        status: upload.status,
+        unmatchedHeaders: upload.unmatchedHeaders,
+        updatedAt: upload.updatedAt,
+        uploadId: upload.id,
+        uploaded: upload.uploaded,
+        vendorKey: upload.vendorKey,
+        vendorName: upload.vendorName,
+      } satisfies UploadReceipt,
+    };
+  }, []);
+
+  const syncPersistedUploads = useCallback(async function syncUploads(
+    sessionState: SessionState | null = effectiveSession,
+  ) {
+    if (!sessionState || !persistenceHydrated) {
+      return;
+    }
+
+    const response = await fetch("/api/v1/uploads", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      uploads?: PersistedUploadRecord[];
+    };
+
+    const uploadRecords = payload.uploads ?? [];
+    for (const upload of uploadRecords) {
+      const accountId =
+        upload.accountId ??
+        (sessionState.role === "WGS Manager"
+          ? "C001"
+          : sessionState.accountId ?? `mgr:${sessionState.email.toLowerCase()}`);
+      applyPersistedUpload(upload, accountId);
+    }
+  }, [
+    applyPersistedUpload,
+    effectiveSession,
+    persistenceHydrated,
+  ]);
+
   useEffect(() => {
     if (!effectiveSession || !persistenceHydrated) return;
 
@@ -300,10 +421,8 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       if (!sessionState) {
         return;
       }
-      await Promise.all([
-        syncAssignedRestaurants(sessionState),
-        syncAssignedCaars(sessionState),
-      ]);
+      await syncAssignedRestaurants(sessionState);
+      await Promise.all([syncAssignedCaars(sessionState), syncPersistedUploads(sessionState)]);
 
       if (cancelled) return;
     }
@@ -313,7 +432,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     return () => {
       cancelled = true;
     };
-  }, [effectiveSession, persistenceHydrated, syncAssignedCaars, syncAssignedRestaurants]);
+  }, [effectiveSession, persistenceHydrated, syncAssignedCaars, syncAssignedRestaurants, syncPersistedUploads]);
 
   const {
     averageTrust,
@@ -630,113 +749,42 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     file: File,
     vendor?: { key: string; name: string },
   ): Promise<UploadReceipt> {
-    const resolvedVendorKey = vendor?.key ?? target.vendorKey;
-    const resolvedVendorName = vendor?.name ?? target.vendorName;
-    const locationScopedKey = getArtifactStateKey(
-      target.accountId,
-      target.locationId,
-      target.moduleId,
-      target.artifact.key,
-      resolvedVendorKey,
-    );
-    const buffer = await file.arrayBuffer();
-    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-    const hashValue = Array.from(new Uint8Array(hashBuffer))
-      .map((value) => value.toString(16).padStart(2, "0"))
-      .join("")
-      .slice(0, 12);
-    const text = target.artifact.type === "CSV" ? await file.text() : "";
-    const rows =
-      target.artifact.type === "CSV"
-        ? Math.max(text.split(/\r?\n/).filter(Boolean).length - 1, 0)
-        : undefined;
-    const csvLines = target.artifact.type === "CSV" ? text.split(/\r?\n/).filter(Boolean) : [];
-    const headers =
-      target.artifact.type === "CSV"
-        ? (csvLines[0] ?? "")
-            .split(",")
-            .map((header) => header.trim())
-            .filter(Boolean)
-        : [];
-    const dataRows =
-      target.artifact.type === "CSV"
-        ? csvLines.slice(1).map((line) => line.split(",").map((cell) => cell.trim()))
-        : [];
-    const expectedHeaders = resolvedVendorKey ? vendorTemplateHeaders[resolvedVendorKey] ?? [] : [];
-    const matchedColumns = expectedHeaders.filter((header) => headers.includes(header));
-    const unmatchedHeaders = expectedHeaders.filter((header) => !headers.includes(header));
-    const matchPct =
-      expectedHeaders.length > 0 ? Math.round((matchedColumns.length / expectedHeaders.length) * 100) : undefined;
-    const schemaOk = target.artifact.type === "CSV" ? (matchPct === undefined ? false : matchPct >= 60) : true;
-    const fieldsOk = target.artifact.type === "CSV" ? schemaOk && (rows ?? 0) > 0 : true;
-    const metrics =
-      target.artifact.type === "CSV"
-        ? extractUploadMetrics(target.artifact.key, headers, dataRows)
-        : undefined;
+    const formData = new FormData();
+    formData.set("artifactKey", target.artifact.key);
+    formData.set("file", file);
+    formData.set("locationId", target.locationId);
+    formData.set("moduleId", target.moduleId);
+    if (vendor?.key ?? target.vendorKey) {
+      formData.set("vendorKey", vendor?.key ?? target.vendorKey ?? "");
+    }
+    if (vendor?.name ?? target.vendorName) {
+      formData.set("vendorName", vendor?.name ?? target.vendorName ?? "");
+    }
 
-    setArtifactIntakeState((state) => ({
-      ...state,
-      [locationScopedKey]: {
-        uploaded: true,
-        hash: true,
-        schema: schemaOk,
-        fields: fieldsOk,
-        fileName: file.name,
-        rows,
-        hashValue,
-        vendorKey: resolvedVendorKey,
-        vendorName: resolvedVendorName,
-        sizeBytes: file.size,
-        matchPct,
-        matchedColumns: matchedColumns.length || undefined,
-        expectedColumns: expectedHeaders.length || undefined,
-        metrics,
-        unmatchedHeaders: unmatchedHeaders.length > 0 ? unmatchedHeaders : undefined,
-        updatedAt: new Date().toISOString(),
-      },
-    }));
-    setUploadState((current) =>
-      current.map((module) =>
-        module.accountId === target.accountId && module.id === target.moduleId
-          ? {
-              ...module,
-              artifacts: module.artifacts.map((artifact) =>
-                artifact.key === target.artifact.key
-                  ? {
-                      ...artifact,
-                      status: schemaOk && fieldsOk ? "Ready" : "Needs Review",
-                      note:
-                        target.artifact.type === "CSV" && matchPct !== undefined
-                          ? `${file.name} uploaded. Schema match ${matchPct}%. ${
-                              fieldsOk ? "Ready for certification intake." : "WGS review required."
-                            }`
-                          : `${file.name} uploaded. PDF sealed with intake hash and ready for downstream review.`,
-                    }
-                  : artifact,
-              ),
-            }
-          : module,
-      ),
-    );
+    const response = await fetch("/api/v1/uploads", {
+      method: "POST",
+      body: formData,
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string; upload?: PersistedUploadRecord }
+      | null;
+
+    if (!response.ok || !payload?.upload) {
+      const message = payload?.error ?? "Upload failed.";
+      showToast(message);
+      throw new Error(message);
+    }
+
+    const { receipt } = applyPersistedUpload(payload.upload, target.accountId);
     appendLog({
       accountId: target.accountId,
       action: `${target.artifact.label} uploaded into ${target.moduleId}`,
       immutable: true,
       location: target.locationName,
     });
-    const receipt: UploadReceipt = {
-      fileName: file.name,
-      locationId: target.locationId,
-      locationName: target.locationName,
-      matchPct,
-      moduleId: target.moduleId,
-      rows,
-      sizeBytes: file.size,
-      status: schemaOk && fieldsOk ? "ready" : "review",
-      vendorName: resolvedVendorName,
-    };
     setUploadFeedback(receipt);
-    showToast(`${file.name} uploaded and hashed.`);
+    showToast(`${receipt.fileName} uploaded and stored.`);
     return receipt;
   }
 

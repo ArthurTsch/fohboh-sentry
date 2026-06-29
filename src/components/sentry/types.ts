@@ -150,14 +150,25 @@ export type IntakeState = {
 };
 
 export type UploadReceipt = {
+  artifactKey?: string;
+  expectedColumns?: number;
   fileName: string;
+  hashValue?: string;
   locationId: string;
   locationName: string;
+  matchedColumns?: number;
   matchPct?: number;
+  metrics?: IntakeState["metrics"];
   moduleId: "M01" | "M02";
+  pageCount?: number;
   rows?: number;
   sizeBytes: number;
   status: "ready" | "review";
+  unmatchedHeaders?: string[];
+  updatedAt?: string;
+  uploadId?: number;
+  uploaded?: boolean;
+  vendorKey?: string;
   vendorName?: string;
 };
 
