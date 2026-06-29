@@ -1,6 +1,5 @@
 import type { CaarRecord, LocationRecord, Role } from "../types";
 import { HelpTip, SectionCard } from "../ui/primitives";
-import { getTrustTone } from "../utils";
 
 export function WaterfallView({
   caars,

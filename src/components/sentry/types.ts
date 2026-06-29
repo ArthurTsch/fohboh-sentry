@@ -138,6 +138,15 @@ export type IntakeState = {
   matchedColumns?: number;
   expectedColumns?: number;
   unmatchedHeaders?: string[];
+  updatedAt?: string;
+  metrics?: {
+    basisAmount?: number;
+    depositAmount?: number;
+    feeAmount?: number;
+    orderCount?: number;
+    payoutAmount?: number;
+    transactionCount?: number;
+  };
 };
 
 export type UploadReceipt = {

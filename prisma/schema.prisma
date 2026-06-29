@@ -44,6 +44,55 @@ model restaurants {
   @@index([store_id], map: "idx_restaurants_store_id")
 }
 
+model caar_reports {
+  id             Int       @id @default(autoincrement())
+  caar_id        String    @unique @db.VarChar(100)
+  account_id     String?   @db.VarChar(255)
+  restaurant_id  Int?
+  created_by     Int?
+  location_id    String    @db.VarChar(100)
+  location_name  String    @db.VarChar(255)
+  period         String    @db.VarChar(100)
+  trust_score    Int
+  amount_cents   Int
+  amount_display String    @db.VarChar(50)
+  status         String    @db.VarChar(50)
+  exhibits       Int?      @default(0)
+  narrative      String
+  findings       Json
+  dimensions     Json
+  created_at     DateTime? @default(now()) @db.Timestamp(6)
+  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([account_id], map: "idx_caar_reports_account_id")
+  @@index([created_by], map: "idx_caar_reports_created_by")
+  @@index([location_id], map: "idx_caar_reports_location_id")
+  @@index([restaurant_id], map: "idx_caar_reports_restaurant_id")
+}
+
+model restaurant_sentry_state {
+  id                  Int       @id @default(autoincrement())
+  restaurant_id       Int       @unique
+  location_id         String    @unique @db.VarChar(100)
+  account_id          String?   @db.VarChar(255)
+  created_by          Int?
+  status              String    @default("Onboarding") @db.VarChar(50)
+  m01_score           Int       @default(0)
+  m02_score           Int       @default(0)
+  ium                 String?   @default("--") @db.VarChar(50)
+  recovery_display    String?   @default("$0") @db.VarChar(50)
+  last_certified      String?   @default("Pending") @db.VarChar(50)
+  modules_json        Json?
+  onboarding_progress Json?
+  onboarding_checklist Json?
+  completed           Boolean?  @default(false)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  @@index([account_id], map: "idx_restaurant_sentry_state_account_id")
+  @@index([created_by], map: "idx_restaurant_sentry_state_created_by")
+}
+
 model store_analytics_results {
   id               Int       @id @default(autoincrement())
   store_id         String    @db.VarChar(50)

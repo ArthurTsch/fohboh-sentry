@@ -56,7 +56,6 @@ export function SentryViewRouter({
   onExpandAll,
   onFilterChange,
   onOpenCaar,
-  onOpenChecklist,
   onOpenOnboarding,
   onOpenSchemaEditor,
   onOpenUploads,
@@ -115,11 +114,6 @@ export function SentryViewRouter({
   onExpandAll: () => void;
   onFilterChange: (filter: "all" | "immutable" | "editable") => void;
   onOpenCaar: Dispatch<SetStateAction<CaarRecord | null>>;
-  onOpenChecklist: (
-    moduleId: "M01" | "M02",
-    artifactKey: string,
-    vendor?: { key: string; name: string },
-  ) => void;
   onOpenOnboarding: (locationId: string) => void;
   onOpenSchemaEditor: Dispatch<SetStateAction<SchemaWorkspace | null>>;
   onOpenUploads: (locationId: string) => void;
@@ -228,7 +222,6 @@ export function SentryViewRouter({
         modules={uploadModules}
         onArtifactAction={onArtifactAction}
         onDirectUpload={onDirectUpload}
-        onOpenChecklist={onOpenChecklist}
         onOpenSchema={() => onViewChange("schema")}
         uploadFeedback={uploadFeedback}
       />

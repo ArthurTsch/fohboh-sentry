@@ -11,13 +11,25 @@ import type {
 } from "../types";
 import { formatCurrency, parseCurrency } from "../utils";
 
-function matchesSessionScope(location: LocationRecord, session: SessionState) {
+function matchesSessionScope(
+  location: LocationRecord,
+  session: SessionState,
+  scopedAccountId: string | null,
+) {
   if (session.role === "WGS Manager") {
+    if (scopedAccountId) {
+      return location.accountId === scopedAccountId;
+    }
+
     return true;
   }
 
   const sessionEmail = session.email.trim().toLowerCase();
   const locationEmail = location.ownerEmail?.trim().toLowerCase() ?? "";
+
+  if (scopedAccountId && location.accountId === scopedAccountId) {
+    return true;
+  }
 
   if (typeof session.managerId === "number" && location.ownerManagerId === session.managerId) {
     return true;
@@ -62,8 +74,10 @@ export function useSentryDerivedState({
 
   const visibleLocations = useMemo(() => {
     if (!session) return [];
-    return locationState.filter((location) => matchesSessionScope(location, session));
-  }, [locationState, session]);
+    return locationState.filter((location) =>
+      matchesSessionScope(location, session, scopedAccountId),
+    );
+  }, [locationState, scopedAccountId, session]);
 
   const visibleCaars = useMemo(() => {
     if (!session) return [];

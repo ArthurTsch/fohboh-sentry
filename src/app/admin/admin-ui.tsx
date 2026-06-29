@@ -1,7 +1,6 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import type { Metadata } from "next";
-import { ADMIN_COOKIE_NAME, getAdminSessionValue } from "@/lib/admin-auth";
+import { getManagerSession } from "@/lib/auth/session";
 import { loginAdminAction, logoutAdminAction } from "./actions";
 
 export const adminMetadata: Metadata = {
@@ -19,8 +18,8 @@ type SearchParamValue = string | string[] | undefined;
 export type AdminSearchParams = Record<string, SearchParamValue>;
 
 export async function isAdminAuthorized() {
-  const cookieStore = await cookies();
-  return cookieStore.get(ADMIN_COOKIE_NAME)?.value === getAdminSessionValue();
+  const session = await getManagerSession();
+  return session?.role === "Admin";
 }
 
 export function getSearchParam(searchParams: AdminSearchParams, key: string) {
@@ -47,7 +46,7 @@ export function AdminLoginScreen({ error }: { error?: string }) {
           href="/"
           className="inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
         >
-          <span aria-hidden="true">←</span>
+          <span aria-hidden="true">&lt;</span>
           <span>Back</span>
         </Link>
         <div className="mt-5 font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
@@ -57,23 +56,36 @@ export function AdminLoginScreen({ error }: { error?: string }) {
           Sentry Admin
         </h1>
         <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
-          This page is intentionally hidden. Enter the admin password to manage manager and
-          restaurant records.
+          This page is intentionally hidden. Sign in with a real manager account that has the
+          `Admin` role to manage manager and restaurant records.
         </p>
 
-        {error === "invalid-password" ? (
+        {error === "invalid-credentials" ? (
           <div className="mt-5 rounded-2xl border border-[rgba(214,48,49,0.2)] bg-[rgba(214,48,49,0.06)] px-4 py-3 text-sm text-[var(--accent)]">
-            Invalid admin password.
+            Invalid admin credentials.
+          </div>
+        ) : null}
+        {error === "not-admin" ? (
+          <div className="mt-5 rounded-2xl border border-[rgba(214,48,49,0.2)] bg-[rgba(214,48,49,0.06)] px-4 py-3 text-sm text-[var(--accent)]">
+            This account is not allowed to access Sentry Admin.
           </div>
         ) : null}
 
         <form action={loginAdminAction} className="mt-6 space-y-4">
+          <AdminField label="Admin Email">
+            <input
+              type="email"
+              name="email"
+              className={adminInputClassName}
+              placeholder="admin@company.com"
+            />
+          </AdminField>
           <AdminField label="Admin Password">
             <input
               type="password"
               name="password"
               className={adminInputClassName}
-              placeholder="Enter admin password"
+              placeholder="Enter your password"
             />
           </AdminField>
           <button
@@ -131,6 +143,12 @@ export function AdminShell({
               className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
             >
               Restaurants
+            </Link>
+            <Link
+              href="/admin/management"
+              className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+            >
+              Management
             </Link>
             <form action={logoutAdminAction}>
               <button

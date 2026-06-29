@@ -1,11 +1,12 @@
 "use client";
 
 import {
+  useCallback,
   startTransition,
   useDeferredValue,
   useEffect,
+  useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { navigation, viewMeta } from "./config";
 import {
@@ -22,6 +23,11 @@ import {
   wgsQueue,
   wgsUsers,
 } from "./data";
+import {
+  buildCertificationResult,
+  extractManualMetrics,
+  extractUploadMetrics,
+} from "./caar-engine";
 import { useSentryDerivedState } from "./hooks/useSentryDerivedState";
 import { useSentryPersistence } from "./hooks/useSentryPersistence";
 import { AddLocationModal } from "./overlays/AddLocationModal";
@@ -53,7 +59,7 @@ import type {
   WgsOnboardingProgress,
   WgsUser,
 } from "./types";
-import { formatCurrency, getSupportReply } from "./utils";
+import { getSupportReply } from "./utils";
 import { LandingPage } from "./views/LandingPage";
 
 type ActiveArtifactState = {
@@ -96,61 +102,7 @@ type ActiveCertificationState = {
   trustScore: number;
 };
 
-const SESSION_STORAGE_KEY = "sentry-session";
-const SESSION_CHANGE_EVENT = "sentry-session-change";
-let cachedSessionRaw: string | null = null;
-let cachedSessionValue: SessionState | null = null;
 const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
-
-function readSavedSession(): SessionState | null {
-  if (typeof window === "undefined") return null;
-
-  const savedSession = window.localStorage.getItem(SESSION_STORAGE_KEY);
-  if (!savedSession) {
-    cachedSessionRaw = null;
-    cachedSessionValue = null;
-    return null;
-  }
-
-  if (savedSession === cachedSessionRaw) {
-    return cachedSessionValue;
-  }
-
-  try {
-    cachedSessionRaw = savedSession;
-    cachedSessionValue = JSON.parse(savedSession) as SessionState;
-    return cachedSessionValue;
-  } catch {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
-    cachedSessionRaw = null;
-    cachedSessionValue = null;
-    return null;
-  }
-}
-
-function subscribeToSessionStore(callback: () => void) {
-  if (typeof window === "undefined") {
-    return () => undefined;
-  }
-
-  const handleStorage = (event: StorageEvent) => {
-    if (!event.key || event.key === SESSION_STORAGE_KEY) {
-      callback();
-    }
-  };
-
-  const handleSessionChange = () => {
-    callback();
-  };
-
-  window.addEventListener("storage", handleStorage);
-  window.addEventListener(SESSION_CHANGE_EVENT, handleSessionChange);
-
-  return () => {
-    window.removeEventListener("storage", handleStorage);
-    window.removeEventListener(SESSION_CHANGE_EVENT, handleSessionChange);
-  };
-}
 
 type DatabaseRestaurant = {
   city: string | null;
@@ -161,16 +113,36 @@ type DatabaseRestaurant = {
   name: string;
   state: string | null;
   store_id: string | null;
+  sentry_state?: {
+    account_id: string | null;
+    completed: boolean | null;
+    created_by: number | null;
+    ium: string | null;
+    last_certified: string | null;
+    location_id: string;
+    m01_score: number;
+    m02_score: number;
+    modules_json: unknown;
+    onboarding_checklist: unknown;
+    onboarding_progress: unknown;
+    recovery_display: string | null;
+    restaurant_id: number;
+    status: string;
+  } | null;
   unit_id: string | null;
 };
 
-export function SentryApp() {
-  const persistedSession = useSyncExternalStore(
-    subscribeToSessionStore,
-    readSavedSession,
-    () => null,
+type DatabaseCaarRecord = CaarRecord & {
+  createdAt?: string | null;
+  createdBy?: number | null;
+  restaurantId?: number | null;
+};
+
+export function SentryApp({ initialSession = null }: { initialSession?: SessionState | null }) {
+  const locationStatePersistenceStatusRef = useRef<"unknown" | "available" | "missing-table">(
+    "unknown",
   );
-  const [session, setSession] = useState<SessionState | null>(null);
+  const [session, setSession] = useState<SessionState | null>(initialSession);
   const [activeViewOverride, setActiveViewOverride] = useState<ViewId | null>(null);
   const [expandedLocations, setExpandedLocations] = useState<string[]>(["LOC-104"]);
   const [selectedCaar, setSelectedCaar] = useState<CaarRecord | null>(null);
@@ -225,7 +197,7 @@ export function SentryApp() {
     accountName: null,
   });
 
-  const effectiveSession = session ?? persistedSession;
+  const effectiveSession = session;
   const activeView = activeViewOverride ?? (effectiveSession?.role === "WGS Manager" ? "wgs" : "dashboard");
   const runtimeLocationState = effectiveSession ? assignedLocationState : locationState;
 
@@ -264,23 +236,14 @@ export function SentryApp() {
     },
   );
 
-  async function syncAssignedRestaurants(
+  const syncAssignedRestaurants = useCallback(async function syncRestaurants(
     sessionState: SessionState | null = effectiveSession,
   ) {
     if (!sessionState || !persistenceHydrated) {
       return;
     }
 
-    const params = new URLSearchParams({
-      email: sessionState.email,
-      role: sessionState.role,
-    });
-
-    if (typeof sessionState.managerId === "number") {
-      params.set("managerId", String(sessionState.managerId));
-    }
-
-    const response = await fetch(`/api/restaurants?${params.toString()}`, {
+    const response = await fetch("/api/restaurants", {
       cache: "no-store",
     });
 
@@ -292,10 +255,40 @@ export function SentryApp() {
       restaurants?: DatabaseRestaurant[];
     };
 
+    setWgsOnboardingState((current) => ({
+      ...current,
+      ...extractOnboardingState(payload.restaurants ?? []),
+    }));
+    const persistedChecklist = extractOnboardingChecklist(payload.restaurants ?? []);
+    if (persistedChecklist) {
+      setOnboardingState(persistedChecklist);
+    }
     setAssignedLocationState(
       mapAssignedRestaurantsToLocations(payload.restaurants ?? [], sessionState),
     );
-  }
+  }, [effectiveSession, persistenceHydrated]);
+
+  const syncAssignedCaars = useCallback(async function syncCaars(
+    sessionState: SessionState | null = effectiveSession,
+  ) {
+    if (!sessionState || !persistenceHydrated) {
+      return;
+    }
+
+    const response = await fetch("/api/caars", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      reports?: DatabaseCaarRecord[];
+    };
+
+    setCaarState(payload.reports ?? []);
+  }, [effectiveSession, persistenceHydrated]);
 
   useEffect(() => {
     if (!effectiveSession || !persistenceHydrated) return;
@@ -307,34 +300,12 @@ export function SentryApp() {
       if (!sessionState) {
         return;
       }
-      const params = new URLSearchParams({
-        email: sessionState.email,
-        role: sessionState.role,
-      });
+      await Promise.all([
+        syncAssignedRestaurants(sessionState),
+        syncAssignedCaars(sessionState),
+      ]);
 
-      if (typeof sessionState.managerId === "number") {
-        params.set("managerId", String(sessionState.managerId));
-      }
-
-      const response = await fetch(`/api/restaurants?${params.toString()}`, {
-        cache: "no-store",
-      });
-
-      if (!response.ok || cancelled) {
-        return;
-      }
-
-      const payload = (await response.json()) as {
-        restaurants?: DatabaseRestaurant[];
-      };
-
-      if (cancelled) {
-        return;
-      }
-
-      setAssignedLocationState(
-        mapAssignedRestaurantsToLocations(payload.restaurants ?? [], sessionState),
-      );
+      if (cancelled) return;
     }
 
     void run();
@@ -342,7 +313,7 @@ export function SentryApp() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveSession, persistenceHydrated]);
+  }, [effectiveSession, persistenceHydrated, syncAssignedCaars, syncAssignedRestaurants]);
 
   const {
     averageTrust,
@@ -464,61 +435,8 @@ export function SentryApp() {
     ]);
   }
 
-  function deriveModuleScore(accountId: string, locationId: string, moduleId: "M01" | "M02") {
-    const uploadModule = uploadState.find((item) => item.accountId === accountId && item.id === moduleId);
-    if (!uploadModule) return 0;
-
-    const artifacts = uploadModule.artifacts.length;
-    const artifactStates = uploadModule.artifacts.map((artifact) => {
-      const prefix = `${accountId}:${locationId}:${moduleId}:${artifact.key}:`;
-      const matches = Object.entries(artifactIntakeState)
-        .filter(([key, value]) => key.startsWith(prefix) && value.uploaded)
-        .map(([, value]) => value);
-      const bestMatch = matches.find((value) => value.hash && value.schema && value.fields) ?? matches[0] ?? null;
-      return { artifact, intake: bestMatch };
-    });
-    const readyCount = artifactStates.filter(
-      ({ intake }) => intake?.uploaded && intake.hash && intake.schema && intake.fields,
-    ).length;
-    const reviewCount = artifactStates.filter(
-      ({ intake }) => intake?.uploaded && !(intake.hash && intake.schema && intake.fields),
-    ).length;
-    const uploadBonus = uploadModule.artifacts.reduce((sum, artifact) => {
-      const prefix = `${accountId}:${locationId}:${moduleId}:${artifact.key}:`;
-      const intake =
-        Object.entries(artifactIntakeState).find(([key, value]) => key.startsWith(prefix) && value.uploaded)?.[1] ??
-        null;
-      return sum + (intake?.uploaded ? 4 : 0) + (intake?.hash ? 4 : 0);
-    }, 0);
-
-    const base = readyCount * 18 + reviewCount * 8 + uploadBonus + 20;
-    return Math.max(48, Math.min(98, Math.round(base / Math.max(artifacts, 1))));
-  }
-
-  function buildCaarDimensions(m01Score: number, m02Score: number, ready: boolean) {
-    const avg = Math.round((m01Score + m02Score) / 2);
-    return [
-      { name: "Data Completeness", score: Math.min(98, avg + 3), weight: "25%" },
-      { name: "Rule Integrity", score: Math.min(97, avg + 1), weight: "20%" },
-      {
-        name: "Cross-System Reconciliation",
-        score: ready ? Math.min(95, avg) : Math.max(55, avg - 12),
-        weight: "25%",
-      },
-      {
-        name: "Source Authenticity",
-        score: ready ? Math.min(96, avg + 2) : Math.max(50, avg - 8),
-        weight: "15%",
-      },
-      { name: "Auditability", score: Math.min(94, avg), weight: "10%" },
-      { name: "Data Freshness", score: Math.min(92, avg + 4), weight: "5%" },
-    ];
-  }
-
   function handleLogin(nextSession: SessionState) {
     startTransition(() => {
-      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession));
-      window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
       setSession(nextSession);
       if (nextSession.role !== "WGS Manager") {
         setSupportMode({ active: false, accountId: null, accountName: null });
@@ -527,10 +445,12 @@ export function SentryApp() {
     });
   }
 
-  function handleSignOut() {
+  async function handleSignOut() {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+    }).catch(() => null);
+
     startTransition(() => {
-      window.localStorage.removeItem(SESSION_STORAGE_KEY);
-      window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
       setSession(null);
       setSelectedCaar(null);
       setChatOpen(false);
@@ -605,6 +525,31 @@ export function SentryApp() {
         creatorEmail: effectiveSession?.email ?? null,
         locationName: draft.name,
         managerId: effectiveSession?.managerId ?? null,
+        sentryState: {
+          completed: false,
+          ium: "--",
+          lastCertified: "Pending",
+          locationId: draft.locId.trim() || undefined,
+          m01Score: 0,
+          m02Score: 0,
+          modules: [
+            ...(draft.m01
+              ? [{ label: "M01", score: 0, note: `${draft.processor} schema and contract config still pending seal.` }]
+              : []),
+            ...(draft.m02
+              ? [{ label: "M02", score: 0, note: `${draft.dsps.join(", ")} evidence package still being configured.` }]
+              : []),
+            {
+              label: "Evidence",
+              score: 0,
+              note: "Onboarding started. WGS review and first upload cycle are pending.",
+            },
+          ],
+          onboardingChecklist: onboardingState,
+          onboardingProgress: createWgsOnboardingProgress(),
+          recoveryDisplay: "$0",
+          status: "Onboarding",
+        },
         unitId: draft.locId.trim() || null,
       }),
     });
@@ -619,12 +564,14 @@ export function SentryApp() {
       restaurant?: {
         address?: string | null;
         id: number;
+        locationId?: string | null;
         name: string;
         unitId?: string | null;
       };
     };
     const createdRestaurant = payload.restaurant;
     const locationId =
+      createdRestaurant?.locationId?.trim() ||
       createdRestaurant?.unitId?.trim() ||
       draft.locId.trim() ||
       `LOC-DB-${createdRestaurant?.id ?? Date.now()}`;
@@ -665,6 +612,10 @@ export function SentryApp() {
     setShowAddLocation(false);
     setActiveViewOverride("onboarding");
     setActiveOnboardingLocation(location.id);
+    void persistLocationState(location, {
+      onboardingChecklist: onboardingState,
+      onboardingProgress: createWgsOnboardingProgress(),
+    });
     appendLog({
       accountId: location.accountId,
       action: `Location added for onboarding: ${location.name}`,
@@ -699,12 +650,17 @@ export function SentryApp() {
       target.artifact.type === "CSV"
         ? Math.max(text.split(/\r?\n/).filter(Boolean).length - 1, 0)
         : undefined;
+    const csvLines = target.artifact.type === "CSV" ? text.split(/\r?\n/).filter(Boolean) : [];
     const headers =
       target.artifact.type === "CSV"
-        ? (text.split(/\r?\n/, 1)[0] ?? "")
+        ? (csvLines[0] ?? "")
             .split(",")
             .map((header) => header.trim())
             .filter(Boolean)
+        : [];
+    const dataRows =
+      target.artifact.type === "CSV"
+        ? csvLines.slice(1).map((line) => line.split(",").map((cell) => cell.trim()))
         : [];
     const expectedHeaders = resolvedVendorKey ? vendorTemplateHeaders[resolvedVendorKey] ?? [] : [];
     const matchedColumns = expectedHeaders.filter((header) => headers.includes(header));
@@ -713,6 +669,10 @@ export function SentryApp() {
       expectedHeaders.length > 0 ? Math.round((matchedColumns.length / expectedHeaders.length) * 100) : undefined;
     const schemaOk = target.artifact.type === "CSV" ? (matchPct === undefined ? false : matchPct >= 60) : true;
     const fieldsOk = target.artifact.type === "CSV" ? schemaOk && (rows ?? 0) > 0 : true;
+    const metrics =
+      target.artifact.type === "CSV"
+        ? extractUploadMetrics(target.artifact.key, headers, dataRows)
+        : undefined;
 
     setArtifactIntakeState((state) => ({
       ...state,
@@ -730,7 +690,9 @@ export function SentryApp() {
         matchPct,
         matchedColumns: matchedColumns.length || undefined,
         expectedColumns: expectedHeaders.length || undefined,
+        metrics,
         unmatchedHeaders: unmatchedHeaders.length > 0 ? unmatchedHeaders : undefined,
+        updatedAt: new Date().toISOString(),
       },
     }));
     setUploadState((current) =>
@@ -776,6 +738,60 @@ export function SentryApp() {
     setUploadFeedback(receipt);
     showToast(`${file.name} uploaded and hashed.`);
     return receipt;
+  }
+
+  async function persistLocationState(
+    location: (typeof locations)[number],
+    options?: {
+      onboardingChecklist?: Record<string, boolean[]>;
+      onboardingProgress?: WgsOnboardingProgress;
+    },
+  ) {
+    if (locationStatePersistenceStatusRef.current === "missing-table") {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/location-states", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          accountId: location.accountId,
+          completed: options?.onboardingProgress?.completed ?? location.status !== "Onboarding",
+          createdBy: effectiveSession?.managerId ?? location.ownerManagerId ?? null,
+          ium: location.ium,
+          lastCertified: location.lastCertified,
+          locationId: location.id,
+          m01Score: location.m01,
+          m02Score: location.m02,
+          modules: location.modules,
+          onboardingChecklist: options?.onboardingChecklist ?? onboardingState,
+          onboardingProgress: options?.onboardingProgress ?? null,
+          recoveryDisplay: location.recovery,
+          status: location.status,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        if (response.status === 503) {
+          locationStatePersistenceStatusRef.current = "missing-table";
+          showToast(
+            payload?.error ??
+              "Location-state persistence is disabled until the database migration is applied.",
+          );
+          return;
+        }
+        showToast(payload?.error ?? "Location state save failed.");
+        return;
+      }
+
+      locationStatePersistenceStatusRef.current = "available";
+    } catch {
+      showToast("Location state save failed.");
+    }
   }
 
   async function handleArtifactFileSelected(file: File) {
@@ -833,28 +849,6 @@ export function SentryApp() {
     });
   }
 
-  function handleArtifactChecklist(
-    moduleId: "M01" | "M02",
-    artifactKey: string,
-    vendor?: { key: string; name: string },
-  ) {
-    const targetLocation = activeUploadLocation ?? visibleLocations[0];
-    const uploadModule = targetLocation
-      ? resolveUploadModulesForAccount(targetLocation.accountId).find((item) => item.id === moduleId)
-      : null;
-    const artifact = uploadModule?.artifacts.find((item) => item.key === artifactKey);
-    if (!uploadModule || !artifact || !targetLocation) return;
-    setActiveChecklist({
-      accountId: uploadModule.accountId,
-      artifact,
-      locationId: targetLocation.id,
-      locationName: targetLocation.name,
-      moduleId,
-      vendorKey: vendor?.key,
-      vendorName: vendor?.name,
-    });
-  }
-
   function handleSaveWorkspace(workspace: SchemaWorkspace) {
     setSchemaState((current) =>
       current.map((item) =>
@@ -893,10 +887,23 @@ export function SentryApp() {
   }
 
   function handleToggleChecklist(stepId: string, itemIndex: number) {
-    setOnboardingState((current) => ({
-      ...current,
-      [stepId]: current[stepId].map((item, index) => (index === itemIndex ? !item : item)),
-    }));
+    setOnboardingState((current) => {
+      const next = {
+        ...current,
+        [stepId]: current[stepId].map((item, index) => (index === itemIndex ? !item : item)),
+      };
+      const targetLocationId = activeOnboardingLocation ?? activeUploadLocation?.id ?? visibleLocations[0]?.id;
+      const targetLocation = targetLocationId
+        ? runtimeLocationState.find((item) => item.id === targetLocationId)
+        : null;
+      if (targetLocation) {
+        void persistLocationState(targetLocation, {
+          onboardingChecklist: next,
+          onboardingProgress: wgsOnboardingState[targetLocation.id],
+        });
+      }
+      return next;
+    });
   }
 
   function handleResolveQueue(ticketId: string) {
@@ -981,37 +988,43 @@ export function SentryApp() {
         ([fieldKey, fieldValue]) => fieldKey !== "__entry_mode" && Boolean(fieldValue),
       ).length;
       const requiredSatisfied = providedValues >= 3;
+      const metrics = extractManualMetrics(activeArtifact.artifact.key, manualValues);
       next = {
         ...current,
         uploaded: true,
         hash: requiredSatisfied,
         schema: requiredSatisfied,
         fields: requiredSatisfied,
+        fileName:
+          current.fileName ??
+          `${activeArtifact.locationName} ${activeArtifact.artifact.label} Manual Entry`,
+        metrics,
+        rows:
+          current.rows ??
+          Math.max(metrics.orderCount ?? 0, metrics.transactionCount ?? 0, providedValues),
+        updatedAt: new Date().toISOString(),
       };
     } else {
-      next = current.uploaded
-        ? current.hash
-          ? current.schema
-            ? {
-                ...current,
-                fields: true,
-              }
-            : {
-                ...current,
-                schema: true,
-              }
+      if (!current.uploaded) {
+        showToast("Upload the source file first before advancing intake checks.");
+        return;
+      }
+      next = current.hash
+        ? current.schema
+          ? {
+              ...current,
+              fields: true,
+              updatedAt: new Date().toISOString(),
+            }
           : {
               ...current,
-              hash: true,
+              schema: true,
+              updatedAt: new Date().toISOString(),
             }
         : {
-            uploaded: true,
-            hash: false,
-            schema: false,
-            fields: false,
-            fileName: `${activeArtifact.artifact.key}.csv`,
-            rows: Math.floor(Math.random() * 1800) + 120,
-            hashValue: Math.random().toString(16).slice(2, 14),
+            ...current,
+            hash: true,
+            updatedAt: new Date().toISOString(),
           };
     }
 
@@ -1088,9 +1101,16 @@ export function SentryApp() {
       ...current,
       [locationId]: next,
     }));
+    const location = runtimeLocationState.find((item) => item.id === locationId);
+    if (location) {
+      void persistLocationState(location, {
+        onboardingChecklist: onboardingState,
+        onboardingProgress: next,
+      });
+    }
   }
 
-  function handleCompleteOnboarding(locationId: string) {
+function handleCompleteOnboarding(locationId: string) {
     const location = runtimeLocationState.find((item) => item.id === locationId);
     const progress = wgsOnboardingState[locationId];
     if (!location || !progress) return;
@@ -1117,7 +1137,31 @@ export function SentryApp() {
         completed: true,
       },
     }));
+    const completedProgress = {
+      ...progress,
+      completed: true,
+    };
+    const completedStatus: "Certified" | "At Risk" =
+      Math.round((location.m01 + location.m02) / 2) >= 85 ? "Certified" : "At Risk";
     setActiveOnboardingLocation(null);
+    const persistedLocation = {
+      ...location,
+      lastCertified: new Date().toISOString().slice(0, 10),
+      modules: location.modules.map((module) =>
+        module.label === "Evidence"
+          ? {
+              ...module,
+              score: Math.min(92, 60 + uploadCount * 6),
+              note: `${uploadCount} onboarding uploads captured. WGS activation workflow completed and ready for ongoing certification.`,
+            }
+          : module,
+      ),
+      status: completedStatus,
+    };
+    void persistLocationState(persistedLocation, {
+      onboardingChecklist: onboardingState,
+      onboardingProgress: completedProgress,
+    });
     appendLog({
       accountId: location.accountId,
       action: `${location.name} onboarding completed and marked live`,
@@ -1227,77 +1271,26 @@ export function SentryApp() {
     const location = runtimeLocationState.find((item) => item.id === locationId);
     if (!location) return;
 
-    const m01Score = deriveModuleScore(location.accountId, location.id, "M01");
-    const m02Score = deriveModuleScore(location.accountId, location.id, "M02");
-    const trustScore = Math.round((m01Score + m02Score) / 2);
-    const ready = trustScore >= 85;
-    const amountValue = Math.max(12000, Math.round((m01Score * 180 + m02Score * 160) * 1.3));
-    const dimensions = buildCaarDimensions(m01Score, m02Score, ready);
-    const period = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
-    const caarId = `CAAR-${new Date().toISOString().slice(2, 10).replace(/-/g, "")}-${location.id.replace("LOC-", "")}`;
-    const nextRecord: CaarRecord = {
-      accountId: location.accountId,
-      amount: formatCurrency(amountValue),
-      dimensions,
-      exhibits: uploadState
-        .filter((module) => module.accountId === location.accountId)
-        .reduce((sum, module) => sum + module.artifacts.length, 0),
-      findings: ready
-        ? [
-            `Certification run cleared release gates for ${location.name}.`,
-            `Cross-system reconciliation now supports a legal-grade recovery position.`,
-            `Current recovery variance is supported by the active sealed schema and intake evidence.`,
-          ]
-        : [
-            `Certification completed for ${location.name}, but release is blocked by evidence or reconciliation gaps.`,
-            `Trust Score remains below the CAAR threshold and requires further intake remediation.`,
-            `Review missing upload readiness and schema controls before external delivery.`,
-          ],
-      id: caarId,
-      locationId,
-      locationName: location.name,
-      narrative: ready
-        ? "The certification engine completed all four phases and produced a release-grade CAAR candidate."
-        : "The certification engine completed, but one or more evidence gates still block court-admissible release.",
-      period,
-      status: ready ? "Court Admissible" : "Needs Remediation",
-      trustScore,
-    };
+    const certification = buildCertificationResult({
+      artifactContractState,
+      artifactIntakeState,
+      location,
+      uploadModules: resolveUploadModulesForAccount(location.accountId),
+    });
 
     updateRuntimeLocation(locationId, (item) => ({
       ...item,
       lastCertified: new Date().toISOString().slice(0, 10),
-      m01: m01Score,
-      m02: m02Score,
-      modules: item.modules.map((module) =>
-        module.label === "M01"
-          ? {
-              ...module,
-              score: m01Score,
-              note: ready
-                ? "Certification run completed and locked."
-                : "Certification completed with unresolved release controls.",
-            }
-          : module.label === "M02"
-            ? {
-                ...module,
-                score: m02Score,
-                note: ready
-                  ? "Delivery evidence package cleared release."
-                  : "Delivery evidence package still requires remediation.",
-              }
-            : {
-                ...module,
-                score: ready ? 94 : 76,
-                note: ready
-                  ? "Evidence chain and intake verification are complete."
-                  : "Evidence chain is present but still missing one or more release checks.",
-              },
-      ),
-      recovery: formatCurrency(amountValue),
-      status: ready ? "Certified" : "At Risk",
+      m01: certification.updatedModules.find((module) => module.label === "M01")?.score ?? item.m01,
+      m02: certification.updatedModules.find((module) => module.label === "M02")?.score ?? item.m02,
+      modules: certification.updatedModules,
+      recovery: certification.updatedRecovery,
+      status: certification.status,
     }));
-    setCaarState((current) => [nextRecord, ...current.filter((item) => item.locationId !== locationId)]);
+    setCaarState((current) => [
+      certification.record,
+      ...current.filter((item) => item.locationId !== locationId),
+    ]);
     appendLog({
       accountId: location.accountId,
       action: `Certification completed for ${location.name}`,
@@ -1307,33 +1300,52 @@ export function SentryApp() {
     setActiveCertification({
       locationId,
       locationName: location.name,
-      ready,
-      steps: [
-        {
-          done: true,
-          label: "Define Semantic Truths",
-          detail: "Native uploads and contract evidence were validated against the active schema.",
-        },
-        {
-          done: true,
-          label: "Define Deterministic Law",
-          detail: "Governed rules and sealed contract config were bound for this run.",
-        },
-        {
-          done: true,
-          label: "Execute Loop A",
-          detail: "M01 and M02 module scoring completed with deterministic rule application.",
-        },
-        {
-          done: true,
-          label: "Certify & Lock",
-          detail: ready
-            ? "Vault write and CAAR candidate generation completed."
-            : "Run completed, but release remains blocked pending remediation.",
-        },
-      ],
-      trustScore,
+      ready: certification.ready,
+      steps: certification.steps,
+      trustScore: certification.trustScore,
     });
+
+    const updatedLocation = {
+      ...location,
+      lastCertified: new Date().toISOString().slice(0, 10),
+      m01: certification.updatedModules.find((module) => module.label === "M01")?.score ?? location.m01,
+      m02: certification.updatedModules.find((module) => module.label === "M02")?.score ?? location.m02,
+      modules: certification.updatedModules,
+      recovery: certification.updatedRecovery,
+      status: certification.status,
+    };
+    void persistLocationState(updatedLocation, {
+      onboardingChecklist: onboardingState,
+      onboardingProgress: wgsOnboardingState[location.id],
+    });
+    void persistCaarReport(certification.record, location.accountId);
+  }
+
+  async function persistCaarReport(record: CaarRecord, accountId: string) {
+    try {
+      const response = await fetch("/api/caars", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          accountId,
+          managerId: effectiveSession?.managerId ?? null,
+          record,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        showToast(payload?.error ?? "CAAR saved locally, but database save failed.");
+        return;
+      }
+
+      await syncAssignedCaars();
+      showToast(`${record.id} saved to the database.`);
+    } catch {
+      showToast("CAAR saved locally, but database save failed.");
+    }
   }
 
   if (!effectiveSession) {
@@ -1429,7 +1441,6 @@ export function SentryApp() {
           onExpandAll={handleExpandAll}
           onFilterChange={setLogFilter}
           onOpenCaar={setSelectedCaar}
-          onOpenChecklist={handleArtifactChecklist}
           onOpenOnboarding={handleOpenOnboarding}
           onOpenSchemaEditor={setEditingWorkspace}
           onOpenUploads={handleOpenLocationUploads}
@@ -1588,35 +1599,113 @@ function mapAssignedRestaurantsToLocations(
     .map((restaurant) => {
       const market = getRestaurantMarket(restaurant);
       const locationId =
+        restaurant.sentry_state?.location_id?.trim() ||
         restaurant.unit_id?.trim() ||
         restaurant.store_id?.trim() ||
         `LOC-DB-${restaurant.id}`;
+      const modules = parseStoredModules(restaurant.sentry_state?.modules_json);
+      const status = toLocationStatus(restaurant.sentry_state?.status);
 
       return {
-        accountId:
+        accountId: restaurant.sentry_state?.account_id || (
           session.role === "WGS Manager"
             ? `mgr:${restaurant.created_by ?? restaurant.id}`
-            : session.accountId ?? `mgr:${session.email.toLowerCase()}`,
+            : session.accountId ?? `mgr:${session.email.toLowerCase()}`
+        ),
         id: locationId,
         name: restaurant.name,
         market,
         ownerEmail: session.role === "WGS Manager" ? undefined : session.email,
-        ownerManagerId: restaurant.created_by,
-        m01: 0,
-        m02: 0,
-        ium: "--",
-        recovery: "$0",
-        status: "Onboarding" as const,
-        lastCertified: "Pending",
-        modules: [
-          {
-            label: "Evidence",
-            score: 0,
-            note: "Assigned from admin. Onboarding, uploads, and first certification are still pending.",
-          },
-        ],
+        ownerManagerId: restaurant.sentry_state?.created_by ?? restaurant.created_by,
+        m01: restaurant.sentry_state?.m01_score ?? 0,
+        m02: restaurant.sentry_state?.m02_score ?? 0,
+        ium: restaurant.sentry_state?.ium ?? "--",
+        recovery: restaurant.sentry_state?.recovery_display ?? "$0",
+        status,
+        lastCertified: restaurant.sentry_state?.last_certified ?? "Pending",
+        modules:
+          modules.length > 0
+            ? modules
+            : [
+                {
+                  label: "Evidence",
+                  score: 0,
+                  note: "Assigned from admin. Onboarding, uploads, and first certification are still pending.",
+                },
+              ],
       };
     });
+}
+
+function extractOnboardingState(restaurants: DatabaseRestaurant[]) {
+  return restaurants.reduce<Record<string, WgsOnboardingProgress>>((accumulator, restaurant) => {
+    const locationId =
+      restaurant.sentry_state?.location_id?.trim() ||
+      restaurant.unit_id?.trim() ||
+      restaurant.store_id?.trim() ||
+      `LOC-DB-${restaurant.id}`;
+    const progress = parseOnboardingProgress(restaurant.sentry_state?.onboarding_progress);
+    if (progress) {
+      accumulator[locationId] = progress;
+    }
+    return accumulator;
+  }, {});
+}
+
+function extractOnboardingChecklist(restaurants: DatabaseRestaurant[]) {
+  for (const restaurant of restaurants) {
+    const raw = restaurant.sentry_state?.onboarding_checklist;
+    if (raw && typeof raw === "object") {
+      return raw as Record<string, boolean[]>;
+    }
+  }
+  return null;
+}
+
+function parseStoredModules(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (item): item is { label: string; note: string; score: number } =>
+        typeof item === "object" &&
+        item !== null &&
+        "label" in item &&
+        "note" in item &&
+        "score" in item,
+    )
+    .map((item) => ({
+      label: String(item.label),
+      note: String(item.note),
+      score: Number(item.score) || 0,
+    }));
+}
+
+function parseOnboardingProgress(value: unknown): WgsOnboardingProgress | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Partial<WgsOnboardingProgress>;
+  return {
+    checks:
+      raw.checks && typeof raw.checks === "object"
+        ? raw.checks
+        : {},
+    completed: Boolean(raw.completed),
+    selectedVendors: {
+      m01: Array.isArray(raw.selectedVendors?.m01) ? raw.selectedVendors.m01 : [],
+      m02: Array.isArray(raw.selectedVendors?.m02) ? raw.selectedVendors.m02 : [],
+    },
+    stepIndex: typeof raw.stepIndex === "number" ? raw.stepIndex : 0,
+    uploads:
+      raw.uploads && typeof raw.uploads === "object"
+        ? raw.uploads
+        : {},
+  };
+}
+
+function toLocationStatus(value: string | undefined): "Certified" | "At Risk" | "Onboarding" {
+  if (value === "Certified" || value === "At Risk" || value === "Onboarding") {
+    return value;
+  }
+  return "Onboarding" as const;
 }
 
 function getRestaurantMarket(restaurant: Pick<DatabaseRestaurant, "city" | "country" | "location" | "state">) {

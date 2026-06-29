@@ -72,7 +72,6 @@ export function UploadCenterView({
   modules,
   onArtifactAction,
   onDirectUpload,
-  onOpenChecklist,
   uploadFeedback,
 }: {
   activeLocationId: string | null;
@@ -92,11 +91,6 @@ export function UploadCenterView({
     file: File,
     vendor?: { key: string; name: string },
   ) => Promise<UploadReceipt | null>;
-  onOpenChecklist: (
-    moduleId: "M01" | "M02",
-    artifactKey: string,
-    vendor?: { key: string; name: string },
-  ) => void;
   onOpenSchema: () => void;
   uploadFeedback: UploadReceipt | null;
 }) {

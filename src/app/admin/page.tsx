@@ -65,6 +65,25 @@ export default async function AdminPage({
             Open Restaurants
           </Link>
         </section>
+
+        <section className="rounded-[28px] border border-[var(--border)] bg-white p-6 shadow-[0_20px_60px_rgba(0,0,0,0.06)]">
+          <div className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
+            Management
+          </div>
+          <h2 className="mt-3 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
+            Saved CAAR reports
+          </h2>
+          <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
+            Review CAAR records saved to Postgres, check ownership per manager, and remove stale
+            reports when needed.
+          </p>
+          <Link
+            href="/admin/management"
+            className="mt-6 inline-flex rounded-xl bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+          >
+            Open Management
+          </Link>
+        </section>
       </div>
     </AdminShell>
   );

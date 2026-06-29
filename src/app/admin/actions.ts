@@ -6,42 +6,49 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import {
-  ADMIN_COOKIE_NAME,
-  getAdminSessionValue,
-  verifyAdminPassword,
-} from "@/lib/admin-auth";
+  authenticateManager,
+} from "@/lib/auth/manager-auth";
+import {
+  createSessionCookieValue,
+  getSessionCookieOptions,
+  MANAGER_SESSION_COOKIE_NAME,
+  requireAdminManagerSession,
+} from "@/lib/auth/session";
 
 async function requireAdminSession() {
-  const cookieStore = await cookies();
-  const sessionCookie = cookieStore.get(ADMIN_COOKIE_NAME)?.value;
-
-  if (sessionCookie !== getAdminSessionValue()) {
-    throw new Error("Unauthorized");
+  try {
+    await requireAdminManagerSession();
+  } catch {
+    redirect("/admin");
   }
 }
 
 export async function loginAdminAction(formData: FormData) {
+  const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const result = await authenticateManager(email, password);
 
-  if (!verifyAdminPassword(password)) {
-    redirect("/admin?error=invalid-password");
+  if (!result.ok) {
+    redirect("/admin?error=invalid-credentials");
+  }
+
+  if (result.session.role !== "Admin") {
+    redirect("/admin?error=not-admin");
   }
 
   const cookieStore = await cookies();
-  cookieStore.set(ADMIN_COOKIE_NAME, getAdminSessionValue(), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/admin",
-    maxAge: 60 * 60 * 8,
-  });
+  cookieStore.set(
+    MANAGER_SESSION_COOKIE_NAME,
+    createSessionCookieValue(result.session),
+    getSessionCookieOptions(),
+  );
 
   redirect("/admin");
 }
 
 export async function logoutAdminAction() {
   const cookieStore = await cookies();
-  cookieStore.delete(ADMIN_COOKIE_NAME);
+  cookieStore.delete(MANAGER_SESSION_COOKIE_NAME);
   redirect("/admin");
 }
 
@@ -291,4 +298,25 @@ export async function deleteRestaurantAction(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/admin/restaurants");
   redirect("/admin/restaurants?restaurant=deleted");
+}
+
+export async function deleteCaarReportAction(formData: FormData) {
+  await requireAdminSession();
+
+  const id = Number(formData.get("id"));
+  if (!Number.isFinite(id)) {
+    redirect("/admin/management?caar=invalid-id");
+  }
+
+  try {
+    await prisma.caar_reports.delete({
+      where: { id },
+    });
+  } catch {
+    redirect("/admin/management?caar=server-error");
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/management");
+  redirect("/admin/management?caar=deleted");
 }

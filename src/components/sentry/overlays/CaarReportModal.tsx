@@ -282,8 +282,8 @@ export function CaarReportModal({
               <ValueChip label="Certified Variance" value={record.amount} accent />
             </div>
             <div className="mt-4 space-y-3">
-              {record.findings.map((finding) => (
-                <div key={finding} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
+              {record.findings.map((finding, index) => (
+                <div key={`${record.id}:finding:${index}`} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
                   {finding}
                 </div>
               ))}

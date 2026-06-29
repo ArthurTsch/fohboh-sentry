@@ -1,41 +1,56 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@/app/generated/prisma/client";
+import { requireManagerSession } from "@/lib/auth/session";
 import prisma from "@/lib/prisma";
 
-export async function GET(request: Request) {
+function isMissingSentryStateTable(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "P2021" &&
+    "meta" in error &&
+    typeof error.meta === "object" &&
+    error.meta !== null &&
+    "modelName" in error.meta &&
+    error.meta.modelName === "restaurant_sentry_state"
+  );
+}
+
+function getAuthErrorResponse(error: unknown) {
+  if (!(error instanceof Error)) return null;
+  if (error.message === "Unauthorized") {
+    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+  }
+  if (error.message === "Forbidden") {
+    return NextResponse.json({ error: "Forbidden." }, { status: 403 });
+  }
+  return null;
+}
+
+function toNullableJsonInput(value: unknown) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (value === null) {
+    return Prisma.JsonNull;
+  }
+
+  return value as Prisma.InputJsonValue;
+}
+
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url);
-    const managerIdRaw = searchParams.get("managerId")?.trim() ?? "";
-    const managerId =
-      managerIdRaw.length > 0 && /^-?\d+$/.test(managerIdRaw)
-        ? Number(managerIdRaw)
-        : Number.NaN;
-    const email = searchParams.get("email")?.trim() ?? "";
-    const role = searchParams.get("role")?.trim().toLowerCase() ?? "";
-    const resolvedManager =
-      !Number.isFinite(managerId) && email
-        ? await prisma.managers.findFirst({
-            where: {
-              email: {
-                equals: email,
-                mode: "insensitive",
-              },
-            },
-            select: {
-              id: true,
-            },
-          })
-        : null;
-    const effectiveManagerId = Number.isFinite(managerId)
-      ? managerId
-      : (resolvedManager?.id ?? NaN);
+    const session = await requireManagerSession();
 
     const restaurants = await prisma.restaurants.findMany({
       where: {
         active: true,
-        ...(role === "wgs manager"
+        ...(session.role === "WGS Manager"
           ? {}
-          : Number.isFinite(effectiveManagerId)
-            ? { created_by: effectiveManagerId }
+          : typeof session.managerId === "number"
+            ? { created_by: session.managerId }
             : { id: -1 }),
       },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],
@@ -52,8 +67,72 @@ export async function GET(request: Request) {
       },
     });
 
-    return NextResponse.json({ restaurants });
+    let stateRows:
+      | Array<{
+          account_id: string | null;
+          completed: boolean | null;
+          created_by: number | null;
+          ium: string | null;
+          last_certified: string | null;
+          location_id: string;
+          m01_score: number;
+          m02_score: number;
+          modules_json: unknown;
+          onboarding_checklist: unknown;
+          onboarding_progress: unknown;
+          recovery_display: string | null;
+          restaurant_id: number;
+          status: string;
+        }>
+      = [];
+
+    if (restaurants.length) {
+      try {
+        stateRows = await prisma.restaurant_sentry_state.findMany({
+          where: {
+            restaurant_id: {
+              in: restaurants.map((restaurant) => restaurant.id),
+            },
+          },
+          select: {
+            account_id: true,
+            completed: true,
+            created_by: true,
+            ium: true,
+            last_certified: true,
+            location_id: true,
+            m01_score: true,
+            m02_score: true,
+            modules_json: true,
+            onboarding_checklist: true,
+            onboarding_progress: true,
+            recovery_display: true,
+            restaurant_id: true,
+            status: true,
+          },
+        });
+      } catch (error) {
+        if (!isMissingSentryStateTable(error)) {
+          throw error;
+        }
+      }
+    }
+    const stateByRestaurantId = new Map(
+      stateRows.map((row) => [row.restaurant_id, row]),
+    );
+
+    return NextResponse.json({
+      restaurants: restaurants.map((restaurant) => ({
+        ...restaurant,
+        sentry_state: stateByRestaurantId.get(restaurant.id) ?? null,
+      })),
+    });
   } catch (error) {
+    const authResponse = getAuthErrorResponse(error);
+    if (authResponse) {
+      return authResponse;
+    }
+
     console.error("Fetch restaurants failed:", error);
     return NextResponse.json(
       { error: "Unable to load restaurants right now." },
@@ -64,12 +143,30 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const session = await requireManagerSession();
+    if (session.role === "Viewer") {
+      return NextResponse.json({ error: "This account cannot create locations." }, { status: 403 });
+    }
+
     const body = (await request.json()) as {
       accountId?: string | null;
       address?: string;
       creatorEmail?: string;
       locationName?: string;
       managerId?: number | null;
+      sentryState?: {
+        completed?: boolean;
+        ium?: string;
+        lastCertified?: string;
+        locationId?: string;
+        m01Score?: number;
+        m02Score?: number;
+        modules?: unknown;
+        onboardingChecklist?: unknown;
+        onboardingProgress?: unknown;
+        recoveryDisplay?: string;
+        status?: string;
+      } | null;
       unitId?: string;
     };
 
@@ -79,28 +176,16 @@ export async function POST(request: Request) {
     }
 
     const unitId = body.unitId?.trim() || null;
-    const creatorEmail = body.creatorEmail?.trim() ?? "";
-    const creator =
-      creatorEmail.length > 0
-        ? await prisma.managers.findFirst({
-            where: {
-              email: {
-                equals: creatorEmail,
-                mode: "insensitive",
-              },
-            },
-            select: {
-              id: true,
-            },
-          })
-        : null;
+    const createdBy = typeof session.managerId === "number" ? session.managerId : null;
+    const resolvedAccountId =
+      session.role === "WGS Manager"
+        ? body.accountId ?? null
+        : session.accountId ?? body.accountId ?? null;
 
     const restaurant = await prisma.restaurants.create({
       data: {
         active: true,
-        created_by:
-          creator?.id ??
-          (typeof body.managerId === "number" ? body.managerId : null),
+        created_by: createdBy,
         location: body.address?.trim() || null,
         name: locationName,
         store_id: unitId,
@@ -110,20 +195,58 @@ export async function POST(request: Request) {
         id: true,
         location: true,
         name: true,
+        store_id: true,
         unit_id: true,
       },
     });
 
+    const locationId =
+      body.sentryState?.locationId?.trim() ||
+      restaurant.unit_id?.trim() ||
+      restaurant.store_id?.trim() ||
+      `LOC-DB-${restaurant.id}`;
+
+    try {
+      await prisma.restaurant_sentry_state.create({
+        data: {
+          account_id: resolvedAccountId,
+          completed: body.sentryState?.completed ?? false,
+          created_by: createdBy,
+          ium: body.sentryState?.ium ?? "--",
+          last_certified: body.sentryState?.lastCertified ?? "Pending",
+          location_id: locationId,
+          m01_score: body.sentryState?.m01Score ?? 0,
+          m02_score: body.sentryState?.m02Score ?? 0,
+          modules_json: toNullableJsonInput(body.sentryState?.modules),
+          onboarding_checklist: toNullableJsonInput(body.sentryState?.onboardingChecklist),
+          onboarding_progress: toNullableJsonInput(body.sentryState?.onboardingProgress),
+          recovery_display: body.sentryState?.recoveryDisplay ?? "$0",
+          restaurant_id: restaurant.id,
+          status: body.sentryState?.status ?? "Onboarding",
+        },
+      });
+    } catch (error) {
+      if (!isMissingSentryStateTable(error)) {
+        throw error;
+      }
+    }
+
     return NextResponse.json({
       restaurant: {
-        accountId: body.accountId ?? null,
+        accountId: resolvedAccountId,
         address: restaurant.location,
         id: restaurant.id,
+        locationId,
         name: restaurant.name,
         unitId: restaurant.unit_id,
       },
     });
   } catch (error) {
+    const authResponse = getAuthErrorResponse(error);
+    if (authResponse) {
+      return authResponse;
+    }
+
     if (
       typeof error === "object" &&
       error !== null &&
