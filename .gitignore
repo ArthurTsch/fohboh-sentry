@@ -47,4 +47,4 @@ next-env.d.ts
 
 /docs
 index.html
-sentry.html
+public/sentry.html
