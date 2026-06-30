@@ -70,6 +70,12 @@ export function AdminLoginScreen({ error }: { error?: string }) {
             This account is not allowed to access SuperAdmin.
           </div>
         ) : null}
+        {error === "session-config" ? (
+          <div className="mt-5 rounded-2xl border border-[rgba(214,48,49,0.2)] bg-[rgba(214,48,49,0.06)] px-4 py-3 text-sm text-[var(--accent)]">
+            SuperAdmin login is not configured in production. Set `SENTRY_SESSION_SECRET` in
+            Vercel project environment variables.
+          </div>
+        ) : null}
 
         <form action={loginAdminAction} className="mt-6 space-y-4">
           <AdminField label="SuperAdmin Email">

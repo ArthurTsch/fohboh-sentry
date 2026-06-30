@@ -11,6 +11,7 @@ import {
 import {
   createSessionCookieValue,
   getSessionCookieOptions,
+  hasSessionSecretConfigured,
   MANAGER_SESSION_COOKIE_NAME,
   requireSuperAdminSession,
 } from "@/lib/auth/session";
@@ -34,6 +35,10 @@ export async function loginAdminAction(formData: FormData) {
 
   if (result.session.role !== "SuperAdmin") {
     redirect("/admin?error=not-admin");
+  }
+
+  if (!hasSessionSecretConfigured()) {
+    redirect("/admin?error=session-config");
   }
 
   const cookieStore = await cookies();

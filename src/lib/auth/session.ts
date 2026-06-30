@@ -25,6 +25,12 @@ function getSessionSecret() {
   return DEV_FALLBACK_SECRET;
 }
 
+export function hasSessionSecretConfigured() {
+  return Boolean(
+    process.env.SENTRY_SESSION_SECRET?.trim() || process.env.AUTH_SECRET?.trim(),
+  );
+}
+
 function sign(value: string) {
   return createHmac("sha256", getSessionSecret()).update(value).digest("base64url");
 }
@@ -90,7 +96,12 @@ export function parseSessionCookieValue(rawValue: string | undefined) {
 
 export async function getManagerSession() {
   const cookieStore = await cookies();
-  return parseSessionCookieValue(cookieStore.get(MANAGER_SESSION_COOKIE_NAME)?.value);
+  try {
+    return parseSessionCookieValue(cookieStore.get(MANAGER_SESSION_COOKIE_NAME)?.value);
+  } catch (error) {
+    console.error("Session cookie parse failed:", error);
+    return null;
+  }
 }
 
 export async function requireManagerSession() {
