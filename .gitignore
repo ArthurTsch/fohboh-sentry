@@ -46,3 +46,5 @@ next-env.d.ts
 /src/app/generated/prisma
 
 /docs
+index.html
+sentry.html

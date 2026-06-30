@@ -15,7 +15,7 @@ export function DiyAccessView({
   workspaces,
 }: {
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
-  onSealWorkspace: (workspace: SchemaWorkspace) => void;
+  onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   role: Role;
   workspaces: SchemaWorkspace[];
 }) {
@@ -178,7 +178,7 @@ function RegistryWorkspacePanel({
   onChangePanel: (panel: RegistryTab) => void;
   onChangeVendor: (vendor: string) => void;
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
-  onSealWorkspace: (workspace: SchemaWorkspace) => void;
+  onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   workspace: SchemaWorkspace;
   workspaces: SchemaWorkspace[];
 }) {

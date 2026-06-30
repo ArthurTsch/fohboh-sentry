@@ -12,8 +12,8 @@ export function SchemaEditorModal({
 }: {
   workspace: SchemaWorkspace;
   onClose: () => void;
-  onSave: (workspace: SchemaWorkspace) => void;
-  onSeal: (workspace: SchemaWorkspace) => void;
+  onSave: (workspace: SchemaWorkspace) => void | Promise<void>;
+  onSeal: (workspace: SchemaWorkspace) => void | Promise<void>;
 }) {
   const [draft, setDraft] = useState<SchemaWorkspace>(workspace);
   const [tab, setTab] = useState<TabId>("mappings");

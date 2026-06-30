@@ -256,9 +256,13 @@ export type SchemaWorkspace = {
   module: "M01" | "M02";
   vendor: string;
   account: string;
+  locationId?: string;
+  locationName?: string;
+  status?: "draft" | "sealed";
   fields: SchemaField[];
   contract: ContractField[];
   vault: {
+    state?: "draft" | "sealed";
     version: string;
     hash: string;
     sealedBy: string;

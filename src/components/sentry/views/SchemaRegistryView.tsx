@@ -8,7 +8,7 @@ export function SchemaRegistryView({
   workspaces,
 }: {
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
-  onSealWorkspace: (workspace: SchemaWorkspace) => void;
+  onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   workspaces: SchemaWorkspace[];
 }) {
   return (
@@ -31,7 +31,7 @@ function SchemaWorkspaceCard({
   workspace,
 }: {
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
-  onSealWorkspace: (workspace: SchemaWorkspace) => void;
+  onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   workspace: SchemaWorkspace;
 }) {
   const verified = workspace.fields.filter((field) => field.confidence === "Verified");

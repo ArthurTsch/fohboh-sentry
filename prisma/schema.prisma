@@ -155,15 +155,18 @@ model contract_configs_v2 {
   id          Int       @id @default(autoincrement())
   location_id Int
   module      String    @db.VarChar(10)
+  vendor      String    @db.VarChar(100)
   version     Int
   terms       Json
+  status      String    @default("sealed") @db.VarChar(20)
   sealed_by   Int
   sealed_at   DateTime? @default(now()) @db.Timestamptz(6)
   sha256      String    @db.Char(64)
   prev_sha256 String?   @db.Char(64)
+  source_upload_id Int?
 
-  @@unique([location_id, module, version], map: "uq_contract_configs_v2_location_module_version")
-  @@index([location_id, module, version], map: "idx_contract_configs_v2_location_module_version")
+  @@unique([location_id, module, vendor, version], map: "uq_contract_configs_v2_location_module_vendor_version")
+  @@index([location_id, module, vendor, version], map: "idx_contract_configs_v2_location_module_vendor_version")
   @@map("contract_configs_v2")
 }
 
@@ -174,6 +177,8 @@ model schema_registry_v2 {
   vendor      String    @db.VarChar(100)
   version     Int
   fields      Json
+  status      String    @default("sealed") @db.VarChar(20)
+  sample_headers Json?
   sealed_by   Int
   sealed_at   DateTime? @default(now()) @db.Timestamptz(6)
   sha256      String    @db.Char(64)

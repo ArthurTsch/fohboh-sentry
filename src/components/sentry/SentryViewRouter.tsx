@@ -121,7 +121,7 @@ export function SentryViewRouter({
   onQueryChange: Dispatch<SetStateAction<string>>;
   onResolveQueue: (ticketId: string) => void;
   onRunCertification: (locationId: string) => void;
-  onSealWorkspace: (workspace: SchemaWorkspace) => void;
+  onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   onToggleChecklist: (stepId: string, itemIndex: number) => void;
   onToggleLocation: (id: string) => void;
   onToggleQuestion: (question: string) => void;

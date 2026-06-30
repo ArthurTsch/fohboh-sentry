@@ -142,6 +142,8 @@ type PersistedUploadRecord = {
   vendorName?: string;
 };
 
+type PersistedWorkspaceRecord = SchemaWorkspace;
+
 export function SentryApp({ initialSession = null }: { initialSession?: SessionState | null }) {
   const locationStatePersistenceStatusRef = useRef<"unknown" | "available" | "missing-table">(
     "unknown",
@@ -294,6 +296,72 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     setCaarState(payload.reports ?? []);
   }, [effectiveSession, persistenceHydrated]);
 
+  const applyPersistedWorkspace = useCallback((workspace: PersistedWorkspaceRecord) => {
+    setSchemaState((current) => {
+      const next = [...current];
+      const index = next.findIndex(
+        (item) =>
+          item.accountId === workspace.accountId &&
+          item.module === workspace.module &&
+          item.vendor === workspace.vendor,
+      );
+      if (index === -1) {
+        next.push(workspace);
+      } else {
+        next[index] = workspace;
+      }
+      return next;
+    });
+
+    if (workspace.locationId) {
+      const contractKey = getArtifactStateKey(
+        workspace.accountId,
+        workspace.locationId,
+        workspace.module,
+        workspace.module === "M01" ? "m01-contract" : "m02-contract",
+      );
+
+      const nextContractValues =
+        workspace.module === "M01"
+          ? mapM01WorkspaceContractToArtifactValues(workspace)
+          : mapM02WorkspaceContractToArtifactValues(workspace);
+
+      setArtifactContractState((current) => ({
+        ...current,
+        [contractKey]: nextContractValues,
+      }));
+    }
+  }, []);
+
+  const syncGovernanceWorkspaces = useCallback(async function syncWorkspaces(
+    sessionState: SessionState | null = effectiveSession,
+  ) {
+    if (!sessionState || !persistenceHydrated) {
+      return;
+    }
+
+    const response = await fetch("/api/v1/governance/workspaces", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      workspaces?: PersistedWorkspaceRecord[];
+    };
+
+    const persistedWorkspaces = payload.workspaces ?? [];
+    if (persistedWorkspaces.length === 0) {
+      return;
+    }
+
+    for (const workspace of persistedWorkspaces) {
+      applyPersistedWorkspace(workspace);
+    }
+  }, [applyPersistedWorkspace, effectiveSession, persistenceHydrated]);
+
   const applyPersistedUpload = useCallback((upload: PersistedUploadRecord, accountId: string) => {
     const locationScopedKey = getArtifactStateKey(
       accountId,
@@ -422,7 +490,11 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         return;
       }
       await syncAssignedRestaurants(sessionState);
-      await Promise.all([syncAssignedCaars(sessionState), syncPersistedUploads(sessionState)]);
+      await Promise.all([
+        syncAssignedCaars(sessionState),
+        syncPersistedUploads(sessionState),
+        syncGovernanceWorkspaces(sessionState),
+      ]);
 
       if (cancelled) return;
     }
@@ -432,7 +504,14 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     return () => {
       cancelled = true;
     };
-  }, [effectiveSession, persistenceHydrated, syncAssignedCaars, syncAssignedRestaurants, syncPersistedUploads]);
+  }, [
+    effectiveSession,
+    persistenceHydrated,
+    syncAssignedCaars,
+    syncAssignedRestaurants,
+    syncGovernanceWorkspaces,
+    syncPersistedUploads,
+  ]);
 
   const {
     averageTrust,
@@ -897,39 +976,50 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     });
   }
 
-  function handleSaveWorkspace(workspace: SchemaWorkspace) {
-    setSchemaState((current) =>
-      current.map((item) =>
-        item.account === workspace.account && item.module === workspace.module && item.vendor === workspace.vendor
-          ? workspace
-          : item,
-      ),
-    );
+  async function persistWorkspace(workspace: SchemaWorkspace, action: "draft" | "seal") {
+    const response = await fetch("/api/v1/governance/workspaces", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        action,
+        workspace,
+      }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string; workspace?: PersistedWorkspaceRecord }
+      | null;
+
+    if (!response.ok || !payload?.workspace) {
+      showToast(payload?.error ?? "Unable to save the governance workspace.");
+      return null;
+    }
+
+    applyPersistedWorkspace(payload.workspace);
     setEditingWorkspace(null);
+    return payload.workspace;
+  }
+
+  async function handleSaveWorkspace(workspace: SchemaWorkspace) {
+    const savedWorkspace = await persistWorkspace(workspace, "draft");
+    if (!savedWorkspace) {
+      return;
+    }
     showToast("Schema draft saved.");
   }
 
-  function handleSealWorkspace(workspace: SchemaWorkspace) {
-    const sealedBy = session?.email ?? "system";
-    const sealedWorkspace: SchemaWorkspace = {
-      ...workspace,
-      vault: {
-        ...workspace.vault,
-        version: `${workspace.module.toLowerCase()}-v${Math.floor(Math.random() * 90) + 20}`,
-        hash: `sha256:${Math.random().toString(16).slice(2, 14)}`,
-        sealedBy,
-        sealedAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-      },
-      fields: workspace.fields.map((field) =>
-        field.required ? { ...field, confidence: "Verified" } : field,
-      ),
-    };
-    handleSaveWorkspace(sealedWorkspace);
+  async function handleSealWorkspace(workspace: SchemaWorkspace) {
+    const sealedWorkspace = await persistWorkspace(workspace, "seal");
+    if (!sealedWorkspace) {
+      return;
+    }
     appendLog({
-      accountId: workspace.accountId,
-      action: `${workspace.module} ${workspace.vendor} contract config sealed to vault`,
+      accountId: sealedWorkspace.accountId,
+      action: `${sealedWorkspace.module} ${sealedWorkspace.vendor} contract config sealed to vault`,
       immutable: true,
-      location: workspace.account,
+      location: sealedWorkspace.account,
     });
     showToast("Workspace sealed to vault.");
   }
@@ -1763,4 +1853,41 @@ function getRestaurantMarket(restaurant: Pick<DatabaseRestaurant, "city" | "coun
     restaurant.country?.trim() ||
     "New market"
   );
+}
+
+function mapM01WorkspaceContractToArtifactValues(workspace: SchemaWorkspace) {
+  return {
+    __entry_mode: "manual",
+    contract_type: getContractValue(workspace.contract, "Pricing Model"),
+    effective_date: getContractValue(workspace.contract, "Effective Date"),
+    markup_bps: extractNumericValue(getContractValue(workspace.contract, "Processor Markup")),
+    pricing_model: getContractValue(workspace.contract, "Pricing Model"),
+    processor_name: workspace.vendor,
+    txn_fee: extractNumericValue(getContractValue(workspace.contract, "Per Transaction Fee")),
+  };
+}
+
+function mapM02WorkspaceContractToArtifactValues(workspace: SchemaWorkspace) {
+  const rate = extractNumericValue(getContractValue(workspace.contract, "Commission Rate"));
+
+  return {
+    __entry_mode: "manual",
+    commission_base: getContractValue(workspace.contract, "Commission Base"),
+    delivery_active: "true",
+    effective_date: getContractValue(workspace.contract, "Effective Date"),
+    rate_catering: rate,
+    rate_delivery: rate,
+    rate_member: rate,
+    rate_pickup: rate,
+    rate_sponsored: rate,
+    store_id: getContractValue(workspace.contract, "Restaurant UUID"),
+  };
+}
+
+function getContractValue(contract: SchemaWorkspace["contract"], label: string) {
+  return contract.find((field) => field.label === label)?.value?.trim() ?? "";
+}
+
+function extractNumericValue(value: string) {
+  return value.replace(/[^0-9.-]/g, "");
 }
