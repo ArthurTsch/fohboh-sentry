@@ -76,6 +76,12 @@ export function AdminLoginScreen({ error }: { error?: string }) {
             Vercel project environment variables.
           </div>
         ) : null}
+        {error === "server-error" ? (
+          <div className="mt-5 rounded-2xl border border-[rgba(214,48,49,0.2)] bg-[rgba(214,48,49,0.06)] px-4 py-3 text-sm text-[var(--accent)]">
+            SuperAdmin login failed on the server. In production this usually means the database
+            is unreachable, the `managers` table is missing, or the account record is invalid.
+          </div>
+        ) : null}
 
         <form action={loginAdminAction} className="mt-6 space-y-4">
           <AdminField label="SuperAdmin Email">

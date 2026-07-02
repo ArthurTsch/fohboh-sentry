@@ -31,73 +31,89 @@ export async function loginAdminAction(formData: FormData) {
   const requestContext = await getRequestContextFromHeaders();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
-  const limiter = checkRateLimit({
-    key: `superadmin-login:${requestContext.ipAddress ?? "unknown"}:${email.toLowerCase()}`,
-    limit: 8,
-    windowMs: 15 * 60 * 1000,
-  });
-  if (!limiter.allowed) {
-    redirect("/admin?error=rate-limit");
-  }
-  const result = await authenticateManager(email, password);
+  try {
+    const limiter = checkRateLimit({
+      key: `superadmin-login:${requestContext.ipAddress ?? "unknown"}:${email.toLowerCase()}`,
+      limit: 8,
+      windowMs: 15 * 60 * 1000,
+    });
+    if (!limiter.allowed) {
+      redirect("/admin?error=rate-limit");
+    }
+    const result = await authenticateManager(email, password);
 
-  if (!result.ok) {
-    await writeAuditLog({
-      action: "superadmin_login_failed",
-      entityId: email.toLowerCase() || "unknown",
-      entityType: "auth_session",
-      ipAddress: requestContext.ipAddress,
-      metadata: {
-        reason: result.error,
-        requestId: requestContext.requestId,
-      },
-      summary: `Superadmin login failed for ${email || "unknown email"}.`,
-      userAgent: requestContext.userAgent,
-    }).catch(() => null);
-    redirect("/admin?error=invalid-credentials");
-  }
+    if (!result.ok) {
+      await writeAuditLog({
+        action: "superadmin_login_failed",
+        entityId: email.toLowerCase() || "unknown",
+        entityType: "auth_session",
+        ipAddress: requestContext.ipAddress,
+        metadata: {
+          reason: result.error,
+          requestId: requestContext.requestId,
+        },
+        summary: `Superadmin login failed for ${email || "unknown email"}.`,
+        userAgent: requestContext.userAgent,
+      }).catch(() => null);
+      redirect("/admin?error=invalid-credentials");
+    }
 
-  if (result.session.role !== "SuperAdmin") {
+    if (result.session.role !== "SuperAdmin") {
+      await writeAuditLog({
+        action: "superadmin_login_denied",
+        actorUserId: result.session.managerId ?? null,
+        entityId: result.session.email,
+        entityType: "auth_session",
+        ipAddress: requestContext.ipAddress,
+        metadata: {
+          reason: "not-superadmin",
+          requestId: requestContext.requestId,
+        },
+        summary: `Denied superadmin login for ${result.session.email}.`,
+        userAgent: requestContext.userAgent,
+      }).catch(() => null);
+      redirect("/admin?error=not-admin");
+    }
+
+    if (!hasSessionSecretConfigured()) {
+      redirect("/admin?error=session-config");
+    }
+
+    const cookieStore = await cookies();
+    cookieStore.set(
+      MANAGER_SESSION_COOKIE_NAME,
+      createSessionCookieValue(result.session),
+      getSessionCookieOptions(),
+    );
     await writeAuditLog({
-      action: "superadmin_login_denied",
+      action: "superadmin_login_succeeded",
       actorUserId: result.session.managerId ?? null,
       entityId: result.session.email,
       entityType: "auth_session",
       ipAddress: requestContext.ipAddress,
       metadata: {
-        reason: "not-superadmin",
         requestId: requestContext.requestId,
       },
-      summary: `Denied superadmin login for ${result.session.email}.`,
+      summary: `Superadmin login succeeded for ${result.session.email}.`,
       userAgent: requestContext.userAgent,
     }).catch(() => null);
-    redirect("/admin?error=not-admin");
+
+    redirect("/admin");
+  } catch (error) {
+    await writeAuditLog({
+      action: "superadmin_login_error",
+      entityId: email.toLowerCase() || "unknown",
+      entityType: "auth_session",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        error: error instanceof Error ? error.message : "unknown",
+        requestId: requestContext.requestId,
+      },
+      summary: `Superadmin login errored for ${email || "unknown email"}.`,
+      userAgent: requestContext.userAgent,
+    }).catch(() => null);
+    redirect("/admin?error=server-error");
   }
-
-  if (!hasSessionSecretConfigured()) {
-    redirect("/admin?error=session-config");
-  }
-
-  const cookieStore = await cookies();
-  cookieStore.set(
-    MANAGER_SESSION_COOKIE_NAME,
-    createSessionCookieValue(result.session),
-    getSessionCookieOptions(),
-  );
-  await writeAuditLog({
-    action: "superadmin_login_succeeded",
-    actorUserId: result.session.managerId ?? null,
-    entityId: result.session.email,
-    entityType: "auth_session",
-    ipAddress: requestContext.ipAddress,
-    metadata: {
-      requestId: requestContext.requestId,
-    },
-    summary: `Superadmin login succeeded for ${result.session.email}.`,
-    userAgent: requestContext.userAgent,
-  }).catch(() => null);
-
-  redirect("/admin");
 }
 
 export async function logoutAdminAction() {
