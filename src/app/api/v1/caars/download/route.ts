@@ -21,9 +21,9 @@ const ARTIFACT_CONFIG = {
     suffix: "canonical-payload.json",
   },
   exportpack: {
-    contentType: "application/json; charset=utf-8",
+    contentType: "application/zip",
     field: "exportpack_s3_key",
-    suffix: "claim-pack.json",
+    suffix: "ExportPack.zip",
   },
   pdf: {
     contentType: "application/pdf",

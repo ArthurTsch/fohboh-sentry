@@ -309,9 +309,11 @@ async function getScopedRestaurant(
 }
 
 export async function executePersistedCertification({
+  cadence = "monthly_final",
   locationId,
   session,
 }: {
+  cadence?: "monthly_final" | "weekly_preliminary";
   locationId: string;
   session: SessionState;
 }): Promise<CertificationExecutionResult> {
@@ -465,6 +467,7 @@ export async function executePersistedCertification({
   const certification = buildCertificationResult({
     artifactContractState,
     artifactIntakeState,
+    cadence,
     location: {
       accountId: restaurant.accountId,
       id: restaurant.locationId,
@@ -481,7 +484,7 @@ export async function executePersistedCertification({
           ? restaurant.status
           : "Onboarding",
     } satisfies LocationRecord,
-    period,
+    period: cadence === "weekly_preliminary" ? `${period} (Weekly Preliminary)` : period,
     recordId: `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${inputHash.slice(0, 8).toUpperCase()}`,
     runAt: evaluationDate,
     uploadModules: resolveUploadModulesForAccount(restaurant.accountId, activeModules),
@@ -597,14 +600,24 @@ export async function executePersistedCertification({
         data: {
           completed_at: new Date(),
           contract_config_id: contract.id,
-          error_message: assessment.ready ? null : assessment.findings.join(" "),
+          error_message:
+            cadence === "weekly_preliminary"
+              ? `Weekly preliminary run. ${assessment.findings.join(" ")}`
+              : assessment.ready
+                ? null
+                : assessment.findings.join(" "),
           location_id: locationV2.id,
           module: assessment.moduleId,
           period,
-          rule_set_version: "phase5-v1",
+          rule_set_version: certification.ruleSetVersion,
           schema_registry_ids: toJsonValue(moduleSchemaIds),
           started_at: new Date(),
-          status: assessment.ready ? "completed" : "needs_remediation",
+          status:
+            cadence === "weekly_preliminary"
+              ? "completed"
+              : assessment.ready
+                ? "completed"
+                : "needs_remediation",
           trust_score: assessment.score,
           triggered_by: managerId,
           upload_ids: toJsonValue(moduleUploadIds),
@@ -641,18 +654,19 @@ export async function executePersistedCertification({
         })),
       });
 
-      if (assessment.findings.length > 0) {
+      if (assessment.ruleCitations.length > 0) {
         await tx.rule_citations_v2.createMany({
-          data: assessment.findings.map((finding, index) => ({
+          data: assessment.ruleCitations.map((citation) => ({
             cert_run_id: run.id,
-            fired_count: 1,
-            rule_id: `${assessment.moduleId.toLowerCase()}-finding-${String(index + 1).padStart(2, "0")}`,
-            rule_version: "phase5-v1",
+            fired_count: citation.firedCount,
+            rule_id: citation.ruleId,
+            rule_version: citation.ruleVersion,
             sample_evidence: toJsonValue({
-              finding,
+              module: assessment.moduleId,
+              samples: citation.sampleEvidence,
               uploadIds: moduleUploadIds,
             }),
-            variance_cents: varianceCents,
+            variance_cents: BigInt(citation.varianceCents),
           })),
         });
       }
@@ -667,6 +681,7 @@ export async function executePersistedCertification({
           location_id: locationV2.id,
           metadata: toJsonValue({
             caarId: certification.record.id,
+            cadence,
             findings: assessment.findings,
             module: assessment.moduleId,
             trustScore: assessment.score,

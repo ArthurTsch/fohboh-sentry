@@ -49,19 +49,26 @@ export async function POST(request: Request) {
       return withRequestHeaders(response, requestContext);
     }
 
-    const body = (await request.json()) as { locationId?: string | null };
+    const body = (await request.json()) as {
+      cadence?: "monthly_final" | "weekly_preliminary" | null;
+      locationId?: string | null;
+    };
     const locationId = body.locationId?.trim() ?? "";
+    const cadence =
+      body.cadence === "weekly_preliminary" ? "weekly_preliminary" : "monthly_final";
     if (!locationId) {
       return withRequestHeaders(NextResponse.json({ error: "locationId is required." }, { status: 400 }), requestContext);
     }
 
     const result = await executePersistedCertification({
+      cadence,
       locationId,
       session,
     });
 
     return withRequestHeaders(NextResponse.json({
       certification: {
+        cadence: result.certification.cadence,
         ready: result.certification.ready,
         record: result.record,
         status: result.certification.status,

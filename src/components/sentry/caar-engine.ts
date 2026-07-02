@@ -6,6 +6,13 @@ import type {
   LocationRecord,
   UploadModule,
 } from "./types";
+import {
+  getRuleSetVersion,
+  runDeterministicModuleEngine,
+  type FindingClass,
+  type Mq6Score,
+  type RuleCitation,
+} from "@/lib/mge/engine";
 
 export type CertificationStep = {
   detail: string;
@@ -13,11 +20,35 @@ export type CertificationStep = {
   label: string;
 };
 
+export type ModuleAssessment = {
+  artifactCoverage: number;
+  dimensions: Record<
+    | "Auditability"
+    | "Cross-System Reconciliation"
+    | "Data Completeness"
+    | "Data Freshness"
+    | "Rule Integrity"
+    | "Source Authenticity",
+    number
+  >;
+  findingClass: FindingClass;
+  findings: string[];
+  moduleId: "M01" | "M02";
+  mq6: Record<string, Mq6Score>;
+  note: string;
+  ready: boolean;
+  recoveryValue: number;
+  ruleCitations: RuleCitation[];
+  score: number;
+};
+
 export type CertificationResult = {
   assessments: ModuleAssessment[];
   amountValue: number;
+  cadence: "monthly_final" | "weekly_preliminary";
   ready: boolean;
   record: CaarRecord;
+  ruleSetVersion: string;
   status: LocationRecord["status"];
   steps: CertificationStep[];
   trustScore: number;
@@ -25,50 +56,55 @@ export type CertificationResult = {
   updatedRecovery: string;
 };
 
-export type ModuleAssessment = {
-  artifactCoverage: number;
-  dimensions: Record<"Auditability" | "Cross-System Reconciliation" | "Data Completeness" | "Data Freshness" | "Rule Integrity" | "Source Authenticity", number>;
-  findings: string[];
-  moduleId: "M01" | "M02";
-  note: string;
-  ready: boolean;
-  recoveryValue: number;
-  score: number;
-};
-
 type ContractState = Record<string, Record<string, string>>;
 type DimensionName = keyof ModuleAssessment["dimensions"];
 
 const DIMENSION_ORDER: DimensionName[] = [
   "Data Completeness",
-  "Rule Integrity",
-  "Cross-System Reconciliation",
-  "Source Authenticity",
-  "Auditability",
   "Data Freshness",
+  "Source Authenticity",
+  "Cross-System Reconciliation",
+  "Rule Integrity",
+  "Auditability",
 ];
 
-const DIMENSION_WEIGHTS: Record<CaarDimension["name"], number> = {
-  "Auditability": 0.1,
-  "Cross-System Reconciliation": 0.25,
-  "Data Completeness": 0.25,
-  "Data Freshness": 0.05,
-  "Rule Integrity": 0.2,
-  "Source Authenticity": 0.15,
+const DIMENSION_LABELS: Record<CaarDimension["name"], string> = {
+  Auditability: "20%",
+  "Cross-System Reconciliation": "25%",
+  "Data Completeness": "10%",
+  "Data Freshness": "10%",
+  "Rule Integrity": "15%",
+  "Source Authenticity": "20%",
 };
 
-const DIMENSION_LABELS: Record<CaarDimension["name"], string> = {
-  "Auditability": "10%",
-  "Cross-System Reconciliation": "25%",
-  "Data Completeness": "25%",
-  "Data Freshness": "5%",
-  "Rule Integrity": "20%",
-  "Source Authenticity": "15%",
+const DIMENSION_WEIGHTS: Record<CaarDimension["name"], number> = {
+  Auditability: 0.2,
+  "Cross-System Reconciliation": 0.25,
+  "Data Completeness": 0.1,
+  "Data Freshness": 0.1,
+  "Rule Integrity": 0.15,
+  "Source Authenticity": 0.2,
 };
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
 export function buildCertificationResult({
   artifactContractState,
   artifactIntakeState,
+  cadence = "monthly_final",
   location,
   period,
   recordId,
@@ -77,6 +113,7 @@ export function buildCertificationResult({
 }: {
   artifactContractState: ContractState;
   artifactIntakeState: Record<string, IntakeState>;
+  cadence?: "monthly_final" | "weekly_preliminary";
   location: LocationRecord;
   period?: string;
   recordId?: string;
@@ -84,16 +121,20 @@ export function buildCertificationResult({
   uploadModules: UploadModule[];
 }): CertificationResult {
   const evaluationDate = runAt ?? new Date();
+  const ruleSetVersion = getRuleSetVersion(cadence);
   const modules = (["M01", "M02"] as const)
-    .map((moduleId) => assessModule({
-      accountId: location.accountId,
-      artifactContractState,
-      artifactIntakeState,
-      evaluationDate,
-      locationId: location.id,
-      moduleId,
-      uploadModules,
-    }))
+    .map((moduleId) =>
+      assessModule({
+        accountId: location.accountId,
+        artifactContractState,
+        artifactIntakeState,
+        cadence,
+        evaluationDate,
+        locationId: location.id,
+        moduleId,
+        uploadModules,
+      }),
+    )
     .filter((module): module is ModuleAssessment => module !== null);
 
   const activeModules = modules.length > 0 ? modules : [emptyModule("M01"), emptyModule("M02")];
@@ -101,7 +142,8 @@ export function buildCertificationResult({
     name,
     score: clamp(
       round(
-      activeModules.reduce((sum, assessment) => sum + assessment.dimensions[name], 0) / activeModules.length,
+        activeModules.reduce((sum, assessment) => sum + assessment.dimensions[name], 0) /
+          Math.max(activeModules.length, 1),
       ),
       0,
       100,
@@ -110,31 +152,34 @@ export function buildCertificationResult({
   }));
   const trustScore = clamp(
     round(
-      overallDimensions.reduce((sum, dimension) => sum + dimension.score * DIMENSION_WEIGHTS[dimension.name], 0),
+      overallDimensions.reduce(
+        (sum, dimension) => sum + dimension.score * DIMENSION_WEIGHTS[dimension.name],
+        0,
+      ),
     ),
     0,
     100,
   );
-  const ready = activeModules.every((module) => module.ready) && trustScore >= 85;
-  const amountValue = Math.max(0, round(activeModules.reduce((sum, module) => sum + module.recoveryValue, 0)));
-  const stamp = evaluationDate
-    .toISOString()
-    .replace(/[-:TZ.]/g, "")
-    .slice(2, 14);
-  const resolvedPeriod = period ?? new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    year: "numeric",
-  }).format(evaluationDate);
+  const ready =
+    cadence === "monthly_final" &&
+    activeModules.every((module) => module.ready) &&
+    trustScore >= 85;
+  const amountValue = Math.max(
+    0,
+    round(activeModules.reduce((sum, module) => sum + module.recoveryValue, 0)),
+  );
+  const stamp = evaluationDate.toISOString().replace(/[-:TZ.]/g, "").slice(2, 14);
+  const resolvedPeriod = period ?? `${MONTH_NAMES[evaluationDate.getUTCMonth()]} ${evaluationDate.getUTCFullYear()}`;
   const record: CaarRecord = {
     accountId: location.accountId,
     amount: formatCurrency(amountValue),
     dimensions: overallDimensions,
-    exhibits: activeModules.reduce((sum, assessment) => sum + Math.round((assessment.artifactCoverage / 100) * 5), 0),
-    findings: buildOverallFindings(location.name, activeModules, ready, amountValue),
+    exhibits: estimateExhibitCount(activeModules),
+    findings: buildOverallFindings(location.name, activeModules, cadence, ready, amountValue),
     id: recordId ?? `CAAR-${stamp}-${location.id.replace(/[^0-9A-Za-z]/g, "")}`,
     locationId: location.id,
     locationName: location.name,
-    narrative: buildNarrative(location.name, activeModules, trustScore, ready),
+    narrative: buildNarrative(location.name, activeModules, cadence, trustScore, ready),
     period: resolvedPeriod,
     status: ready ? "Court Admissible" : "Needs Remediation",
     trustScore,
@@ -143,37 +188,30 @@ export function buildCertificationResult({
   const updatedModules = mergeLocationModules(location.modules, activeModules);
   const evidenceScore = clamp(
     round(
-      activeModules.reduce((sum, assessment) => sum + assessment.dimensions["Source Authenticity"], 0) /
-        Math.max(activeModules.length, 1),
+      activeModules.reduce(
+        (sum, assessment) => sum + assessment.dimensions["Source Authenticity"],
+        0,
+      ) / Math.max(activeModules.length, 1),
     ),
     0,
     100,
   );
   const evidenceNote = ready
-    ? "Evidence package is fully hashed, schema-validated, and certification-ready."
-    : "Evidence package still has unresolved authenticity, completeness, or reconciliation gaps.";
-  if (!updatedModules.some((moduleState) => moduleState.label === "Evidence")) {
-    updatedModules.push({
-      label: "Evidence",
-      note: evidenceNote,
-      score: evidenceScore,
-    });
-  } else {
-    for (const moduleState of updatedModules) {
-      if (moduleState.label === "Evidence") {
-        moduleState.score = evidenceScore;
-        moduleState.note = evidenceNote;
-      }
-    }
-  }
+    ? "Evidence package is fully authenticated, governed, and certification-ready."
+    : cadence === "weekly_preliminary"
+      ? "Weekly preliminary run completed. Final bank-reconciliation evidence is deferred until the monthly final."
+      : "Evidence package still has unresolved authenticity, completeness, or reconciliation gaps.";
+  upsertEvidenceModule(updatedModules, evidenceScore, evidenceNote);
 
   return {
     assessments: activeModules,
     amountValue,
+    cadence,
     ready,
     record,
+    ruleSetVersion,
     status: ready ? "Certified" : trustScore >= 55 ? "At Risk" : "Onboarding",
-    steps: buildCertificationSteps(activeModules, ready),
+    steps: buildCertificationSteps(activeModules, cadence, ready),
     trustScore,
     updatedModules,
     updatedRecovery: formatCurrency(amountValue),
@@ -183,13 +221,39 @@ export function buildCertificationResult({
 export function extractUploadMetrics(artifactKey: string, headers: string[], rows: string[][]) {
   const normalizedHeaders = headers.map(normalizeHeader);
   const metrics = {
+    adjustmentAmount: 0,
     basisAmount: 0,
+    chargebackCount: 0,
+    commissionRateAppliedAvg: 0,
     depositAmount: 0,
+    deliveryFeeAmount: 0,
+    deliveryOrderCount: 0,
+    errorChargeAmount: 0,
     feeAmount: 0,
+    interchangeFeeAmount: 0,
+    marketingFeeAmount: 0,
+    mcCreditAmount: 0,
+    mcCreditFeeAmount: 0,
+    mcDebitAmount: 0,
+    mcDebitFeeAmount: 0,
+    memberOrderCount: 0,
+    otherFeeAmount: 0,
     orderCount: 0,
+    pickupOrderCount: 0,
+    promoOrderCount: 0,
     payoutAmount: 0,
+    refundCount: 0,
+    serviceFeeAmount: 0,
+    taxRemittedAmount: 0,
+    tipAmount: 0,
     transactionCount: 0,
+    voidCount: 0,
+    visaCreditAmount: 0,
+    visaCreditFeeAmount: 0,
+    visaDebitAmount: 0,
+    visaDebitFeeAmount: 0,
   };
+  let commissionRateSampleCount = 0;
 
   for (const row of rows) {
     const valueFor = (...names: string[]) =>
@@ -227,6 +291,15 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
       "slice_commission",
       "transaction_fees",
     );
+    metrics.interchangeFeeAmount += read("interchange_fee", "interchange_amount");
+    metrics.serviceFeeAmount += read("service_fee", "processing_fees", "transaction_fees");
+    metrics.otherFeeAmount += read("other_merchant_fees", "assessment");
+    metrics.marketingFeeAmount += read("marketing_fee", "marketing_contribution");
+    metrics.taxRemittedAmount += read("tax_remitted", "tax");
+    metrics.tipAmount += read("tip");
+    metrics.adjustmentAmount += read("adjustment_amount", "adjustment");
+    metrics.errorChargeAmount += read("error_charge");
+    metrics.deliveryFeeAmount += read("delivery_fee", "consumer_fee");
     metrics.payoutAmount += read(
       "payout_amount",
       "net_payout",
@@ -240,11 +313,68 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
       "net_payout",
       "payout_amount",
     );
+
+    const commissionRateApplied = read("commission_rate_applied", "dd_commission_rate");
+    if (commissionRateApplied > 0) {
+      metrics.commissionRateAppliedAvg += commissionRateApplied;
+      commissionRateSampleCount += 1;
+    }
+
+    const orderTypeIndex = valueFor("order_type", "channel");
+    const orderType = orderTypeIndex >= 0 ? String(row[orderTypeIndex] ?? "").toLowerCase() : "";
+    if (orderType.includes("pickup")) metrics.pickupOrderCount += 1;
+    if (orderType.includes("delivery")) metrics.deliveryOrderCount += 1;
+    if (orderType.includes("dashpass") || orderType.includes("member") || orderType.includes("uber one")) {
+      metrics.memberOrderCount += 1;
+    }
+
+    if (read("marketing_fee", "marketing_contribution") > 0) {
+      metrics.promoOrderCount += 1;
+    }
+
+    const orderStatusIndex = valueFor("order_status", "trans_type", "description");
+    const orderStatus = orderStatusIndex >= 0 ? String(row[orderStatusIndex] ?? "").toLowerCase() : "";
+    if (orderStatus.includes("refund")) metrics.refundCount += 1;
+    if (orderStatus.includes("void")) metrics.voidCount += 1;
+
+    const disputeIndex = valueFor("dispute_id");
+    if (disputeIndex >= 0 && String(row[disputeIndex] ?? "").trim()) {
+      metrics.chargebackCount += 1;
+    }
+    const refundIdIndex = valueFor("refund_id");
+    if (refundIdIndex >= 0 && String(row[refundIdIndex] ?? "").trim()) {
+      metrics.refundCount += 1;
+    }
+
+    const cardTypeIndex = valueFor("card_type", "card_brand");
+    if (cardTypeIndex >= 0) {
+      const cardType = String(row[cardTypeIndex] ?? "").toLowerCase();
+      const amount = read("trans_amount", "amount", "txn_amount", "transaction_amount");
+      const fee = read("fee_amount", "fee", "disc_amount", "interchange_amount", "interchange_fee");
+      if (cardType.includes("visa") && cardType.includes("debit")) {
+        metrics.visaDebitAmount += amount;
+        metrics.visaDebitFeeAmount += fee;
+      } else if (cardType.includes("visa")) {
+        metrics.visaCreditAmount += amount;
+        metrics.visaCreditFeeAmount += fee;
+      } else if ((cardType.includes("master") || cardType.includes("mc")) && cardType.includes("debit")) {
+        metrics.mcDebitAmount += amount;
+        metrics.mcDebitFeeAmount += fee;
+      } else if (cardType.includes("master") || cardType.includes("mc")) {
+        metrics.mcCreditAmount += amount;
+        metrics.mcCreditFeeAmount += fee;
+      }
+    }
+  }
+
+  if (commissionRateSampleCount > 0) {
+    metrics.commissionRateAppliedAvg = round(metrics.commissionRateAppliedAvg / commissionRateSampleCount);
   }
 
   metrics.transactionCount =
     round(sumColumn(normalizedHeaders, rows, ["transaction_count"])) || rows.length;
-  metrics.orderCount = round(sumColumn(normalizedHeaders, rows, ["order_count", "menu_item_count"])) || rows.length;
+  metrics.orderCount =
+    round(sumColumn(normalizedHeaders, rows, ["order_count", "menu_item_count"])) || rows.length;
 
   if (artifactKey.includes("bank")) {
     metrics.basisAmount = 0;
@@ -263,12 +393,43 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
 export function extractManualMetrics(artifactKey: string, values: Record<string, string>) {
   void artifactKey;
   return {
-    basisAmount: readValue(values, ["gross_volume", "gross_sales", "channel_sales", "platform_gross_sales", "total_dsp_deposits"]),
+    adjustmentAmount: readValue(values, ["adjustment_amount"]),
+    basisAmount: readValue(values, [
+      "gross_volume",
+      "gross_sales",
+      "channel_sales",
+      "platform_gross_sales",
+      "total_dsp_deposits",
+    ]),
+    chargebackCount: readValue(values, ["chargeback_count"]),
+    commissionRateAppliedAvg: readValue(values, ["commission_rate_applied"]),
     depositAmount: readValue(values, ["total_dsp_deposits"]),
+    deliveryFeeAmount: readValue(values, ["delivery_fee_total"]),
+    deliveryOrderCount: readValue(values, ["delivery_order_count"]),
+    errorChargeAmount: readValue(values, ["error_charge_total"]),
     feeAmount: readValue(values, ["fees_total", "commission_total"]),
+    interchangeFeeAmount: readValue(values, ["interchange_fee_total"]),
+    marketingFeeAmount: readValue(values, ["marketing_fee_total"]),
+    mcCreditAmount: readValue(values, ["mc_credit_amount"]),
+    mcCreditFeeAmount: readValue(values, ["mc_credit_fee_amount"]),
+    mcDebitAmount: readValue(values, ["mc_debit_amount"]),
+    mcDebitFeeAmount: readValue(values, ["mc_debit_fee_amount"]),
+    memberOrderCount: readValue(values, ["member_order_count"]),
+    otherFeeAmount: readValue(values, ["other_fee_total"]),
     orderCount: readValue(values, ["order_count", "transaction_count"]),
+    pickupOrderCount: readValue(values, ["pickup_order_count"]),
+    promoOrderCount: readValue(values, ["promo_order_count"]),
     payoutAmount: readValue(values, ["payout_total"]),
+    refundCount: readValue(values, ["refund_count"]),
+    serviceFeeAmount: readValue(values, ["service_fee_total"]),
+    taxRemittedAmount: readValue(values, ["tax_remitted_total"]),
+    tipAmount: readValue(values, ["tip_total"]),
     transactionCount: readValue(values, ["transaction_count", "order_count"]),
+    voidCount: readValue(values, ["void_count"]),
+    visaCreditAmount: readValue(values, ["visa_credit_amount"]),
+    visaCreditFeeAmount: readValue(values, ["visa_credit_fee_amount"]),
+    visaDebitAmount: readValue(values, ["visa_debit_amount"]),
+    visaDebitFeeAmount: readValue(values, ["visa_debit_fee_amount"]),
   };
 }
 
@@ -276,6 +437,7 @@ function assessModule({
   accountId,
   artifactContractState,
   artifactIntakeState,
+  cadence,
   evaluationDate,
   locationId,
   moduleId,
@@ -284,133 +446,71 @@ function assessModule({
   accountId: string;
   artifactContractState: ContractState;
   artifactIntakeState: Record<string, IntakeState>;
+  cadence: "monthly_final" | "weekly_preliminary";
   evaluationDate: Date;
   locationId: string;
   moduleId: "M01" | "M02";
   uploadModules: UploadModule[];
 }): ModuleAssessment | null {
-  const uploadModule = uploadModules.find((item) => item.accountId === accountId && item.id === moduleId);
-  if (!uploadModule) {
-    return null;
-  }
+  const uploadModule = uploadModules.find(
+    (item) => item.accountId === accountId && item.id === moduleId,
+  );
+  if (!uploadModule) return null;
 
   const artifacts = uploadModule.artifacts.map((artifact) => {
-    const intake = resolveArtifactIntake(artifactIntakeState, accountId, locationId, moduleId, artifact.key);
-    const contract = resolveContractValues(artifactContractState, accountId, locationId, moduleId, artifact.key);
-    const manuallyReady =
-      Boolean(contract) &&
-      Object.entries(contract ?? {}).filter(([key, value]) => key !== "__entry_mode" && Boolean(value)).length >= 3;
-    const uploaded = Boolean(intake?.uploaded || manuallyReady);
-    const hashed = Boolean(intake?.hash || manuallyReady);
-    const schema = Boolean(intake?.schema || manuallyReady);
-    const fields = Boolean(intake?.fields || manuallyReady);
+    const intake = resolveArtifactIntake(
+      artifactIntakeState,
+      accountId,
+      locationId,
+      moduleId,
+      artifact.key,
+    );
+    const contractValues = resolveContractValues(
+      artifactContractState,
+      accountId,
+      locationId,
+      moduleId,
+      artifact.key,
+    );
+    const manualReady =
+      Boolean(contractValues) &&
+      Object.entries(contractValues ?? {}).filter(
+        ([key, value]) => key !== "__entry_mode" && Boolean(value),
+      ).length >= 3;
+
     return {
-      artifact,
-      contract,
-      fields,
-      hashed,
-      intake,
-      manuallyReady,
-      schema,
-      uploaded,
+      contractValues,
+      fields: Boolean(intake?.fields || manualReady),
+      hash: Boolean(intake?.hash || manualReady),
+      key: artifact.key,
+      label: artifact.label,
+      metrics: intake?.metrics,
+      schema: Boolean(intake?.schema || manualReady),
+      type: artifact.type,
+      updatedAt: intake?.updatedAt,
+      uploaded: Boolean(intake?.uploaded || manualReady),
     };
   });
 
-  const uploadedCount = artifacts.filter((artifact) => artifact.uploaded).length;
-  const hashedCount = artifacts.filter((artifact) => artifact.hashed).length;
-  const schemaArtifacts = artifacts.filter((artifact) => artifact.artifact.type === "CSV");
-  const readyCount = artifacts.filter((artifact) => artifact.uploaded && artifact.hashed && artifact.schema && artifact.fields).length;
-  const completeness = round((uploadedCount / Math.max(artifacts.length, 1)) * 100);
-  const authenticity = round((hashedCount / Math.max(artifacts.length, 1)) * 100);
-  const schemaIntegrity = schemaArtifacts.length
-    ? round(
-        schemaArtifacts.reduce((sum, artifact) => {
-          if (!artifact.uploaded) return sum;
-          return sum + (artifact.intake?.matchPct ?? (artifact.schema ? 100 : 40));
-        }, 0) / Math.max(schemaArtifacts.length, 1),
-      )
-    : 100;
-  const contractArtifact = artifacts.find((artifact) => artifact.artifact.key.includes("contract"));
-  const agreementArtifact = artifacts.find((artifact) => artifact.artifact.key.includes("agreement"));
-  const statementArtifact = artifacts.find((artifact) => artifact.artifact.key.includes(moduleId === "M01" ? "processor" : "settlement"));
-  const posArtifact = artifacts.find((artifact) => artifact.artifact.key.includes("pos"));
-  const bankArtifact = artifacts.find((artifact) => artifact.artifact.key.includes("bank"));
-  const governance = clamp(
-    round(
-      (contractReadiness(contractArtifact?.contract) * 0.6) +
-        ((agreementArtifact?.uploaded ? 100 : 0) * 0.2) +
-        ((schemaIntegrity || 0) * 0.2),
-    ),
-    0,
-    100,
-  );
-  const freshness = clamp(
-    round(
-      artifacts.reduce((sum, artifact) => {
-        const updatedAt = artifact.intake?.updatedAt;
-        if (!updatedAt) return sum;
-        const ageDays = Math.max(
-          0,
-          Math.floor((evaluationDate.getTime() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24)),
-        );
-        return sum + (ageDays <= 7 ? 96 : ageDays <= 31 ? 88 : ageDays <= 62 ? 74 : 58);
-      }, uploadedCount > 0 ? 0 : 48) / Math.max(uploadedCount, 1),
-    ),
-    0,
-    100,
-  );
-
-  const reconciliation = computeReconciliationScore(moduleId, {
-    bank: bankArtifact?.intake,
-    pos: posArtifact?.intake,
-    statement: statementArtifact?.intake,
-  });
-
-  const dimensions: ModuleAssessment["dimensions"] = {
-    "Auditability": clamp(round((readyCount / Math.max(artifacts.length, 1)) * 100), 0, 100),
-    "Cross-System Reconciliation": reconciliation,
-    "Data Completeness": completeness,
-    "Data Freshness": freshness,
-    "Rule Integrity": clamp(round((schemaIntegrity * 0.45) + (governance * 0.55)), 0, 100),
-    "Source Authenticity": authenticity,
-  };
-  const score = clamp(
-    round(
-      DIMENSION_ORDER.reduce((sum, name) => sum + dimensions[name] * DIMENSION_WEIGHTS[name], 0),
-    ),
-    0,
-    100,
-  );
-  const recoveryValue = moduleId === "M01"
-    ? computeM01Recovery(statementArtifact?.intake, contractArtifact?.contract)
-    : computeM02Recovery(statementArtifact?.intake, posArtifact?.intake, contractArtifact?.contract);
-
-  const findings = buildModuleFindings(moduleId, {
-    agreementUploaded: Boolean(agreementArtifact?.uploaded),
-    authenticity,
-    bankUploaded: Boolean(bankArtifact?.uploaded),
-    completeness,
-    contractReady: contractReadiness(contractArtifact?.contract) >= 80,
-    posUploaded: Boolean(posArtifact?.uploaded),
-    reconciliation,
-    schemaIntegrity,
-    statementUploaded: Boolean(statementArtifact?.uploaded),
+  const result = runDeterministicModuleEngine({
+    artifacts,
+    cadence,
+    evaluationDate,
+    moduleId,
   });
 
   return {
-    artifactCoverage: completeness,
-    dimensions,
-    findings,
+    artifactCoverage: result.artifactCoverage,
+    dimensions: result.dimensions,
+    findingClass: result.findingClass,
+    findings: result.findings,
     moduleId,
-    note: buildModuleNote(moduleId, score, findings),
-    ready:
-      score >= 85 &&
-      Boolean(statementArtifact?.uploaded) &&
-      Boolean(posArtifact?.uploaded) &&
-      Boolean(bankArtifact?.uploaded) &&
-      contractReadiness(contractArtifact?.contract) >= 80,
-    recoveryValue,
-    score,
+    mq6: result.mq6,
+    note: buildModuleNote(moduleId, result.score, result.findings, result.ruleCitations.length),
+    ready: result.ready,
+    recoveryValue: result.recoveryValue,
+    ruleCitations: result.ruleCitations,
+    score: result.score,
   };
 }
 
@@ -445,177 +545,103 @@ function resolveContractValues(
   return key ? state[key] : null;
 }
 
-function computeReconciliationScore(
-  moduleId: "M01" | "M02",
-  {
-    bank,
-    pos,
-    statement,
-  }: {
-    bank?: IntakeState | null;
-    pos?: IntakeState | null;
-    statement?: IntakeState | null;
-  },
-) {
-  let score = 0;
-  if (statement?.uploaded) score += 35;
-  if (pos?.uploaded) score += 25;
-  if (bank?.uploaded) score += 25;
-  if (statement?.schema) score += 5;
-  if (pos?.schema) score += 5;
-  if (bank?.hash) score += 5;
-
-  const statementBasis = statement?.metrics?.basisAmount ?? 0;
-  const posBasis = pos?.metrics?.basisAmount ?? 0;
-  const payout = statement?.metrics?.payoutAmount ?? 0;
-  const deposit = bank?.metrics?.depositAmount ?? 0;
-
-  if (statementBasis > 0 && posBasis > 0) {
-    const delta = Math.abs(statementBasis - posBasis) / Math.max(statementBasis, posBasis, 1);
-    score += delta <= 0.05 ? 10 : delta <= 0.12 ? 5 : 0;
-  }
-
-  if (payout > 0 && deposit > 0) {
-    const delta = Math.abs(payout - deposit) / Math.max(payout, deposit, 1);
-    score += delta <= 0.05 ? 10 : delta <= 0.12 ? 5 : 0;
-  } else if (moduleId === "M01" && bank?.uploaded) {
-    score += 4;
-  }
-
-  return clamp(score, 0, 100);
-}
-
-function computeM01Recovery(statement?: IntakeState | null, contract?: Record<string, string> | null) {
-  const basisAmount = statement?.metrics?.basisAmount ?? 0;
-  const actualFees = statement?.metrics?.feeAmount ?? 0;
-  const transactionCount = statement?.metrics?.transactionCount ?? statement?.rows ?? 0;
-  const markupBps = parseNumber(contract?.markup_bps);
-  const txnFee = parseNumber(contract?.txn_fee);
-  const expected = basisAmount * (markupBps / 10000) + transactionCount * txnFee;
-  return Math.max(0, actualFees - expected);
-}
-
-function computeM02Recovery(
-  statement?: IntakeState | null,
-  pos?: IntakeState | null,
-  contract?: Record<string, string> | null,
-) {
-  const basisAmount = statement?.metrics?.basisAmount ?? pos?.metrics?.basisAmount ?? 0;
-  const actualCommission =
-    statement?.metrics?.feeAmount ??
-    0;
-  const payout = statement?.metrics?.payoutAmount ?? 0;
-  const inferredCommission = actualCommission > 0 ? actualCommission : Math.max(0, basisAmount - payout);
-  const channelRates = [
-    parseNumber(contract?.rate_delivery),
-    parseNumber(contract?.rate_member),
-    parseNumber(contract?.rate_pickup),
-    parseNumber(contract?.rate_catering),
-    parseNumber(contract?.rate_sponsored),
-  ].filter((value) => value > 0);
-  const effectiveRate = channelRates.length
-    ? channelRates.reduce((sum, value) => sum + value, 0) / channelRates.length
-    : 0;
-  const expected = basisAmount * (effectiveRate / 100);
-  return Math.max(0, inferredCommission - expected);
-}
-
-function buildModuleFindings(
-  moduleId: "M01" | "M02",
-  status: {
-    agreementUploaded: boolean;
-    authenticity: number;
-    bankUploaded: boolean;
-    completeness: number;
-    contractReady: boolean;
-    posUploaded: boolean;
-    reconciliation: number;
-    schemaIntegrity: number;
-    statementUploaded: boolean;
-  },
-) {
-  const findings: string[] = [];
-  const label = moduleId === "M01" ? "processor" : "DSP";
-
-  if (!status.statementUploaded) findings.push(`Missing ${label} statement upload for the certification period.`);
-  if (!status.posUploaded) findings.push("POS reconciliation export is missing.");
-  if (!status.bankUploaded) findings.push("Bank deposit evidence is missing, which blocks D3 reconciliation.");
-  if (!status.agreementUploaded) findings.push("Signed agreement PDF is not attached to the evidence package.");
-  if (!status.contractReady) findings.push("Contract config is incomplete or not sufficiently keyed for deterministic scoring.");
-  if (status.schemaIntegrity < 80) findings.push("Schema match is below acceptable threshold and requires WGS review.");
-  if (status.authenticity < 80) findings.push("One or more uploaded artifacts are not fully hash-verified.");
-  if (status.reconciliation < 85 && status.statementUploaded && status.posUploaded) {
-    findings.push("Cross-system reconciliation remains incomplete or outside tolerance.");
-  }
-  if (status.completeness >= 100 && status.reconciliation >= 85 && status.contractReady) {
-    findings.push(
-      moduleId === "M01"
-        ? "Processor, POS, bank, and contract evidence cleared the M01 release gate."
-        : "Settlement, POS, bank, and commission controls cleared the M02 release gate.",
-    );
-  }
-
-  return findings;
-}
-
 function buildNarrative(
   locationName: string,
   modules: ModuleAssessment[],
+  cadence: "monthly_final" | "weekly_preliminary",
   trustScore: number,
   ready: boolean,
 ) {
   const moduleSummary = modules
-    .map((module) => `${module.moduleId} scored ${module.score} with ${module.artifactCoverage}% evidence coverage`)
+    .map(
+      (module) =>
+        `${module.moduleId} scored ${module.score} with ${module.ruleCitations.length} deterministic citation${module.ruleCitations.length === 1 ? "" : "s"}`,
+    )
     .join("; ");
+
   if (ready) {
-    return `${locationName} completed the certification pipeline successfully. ${moduleSummary}. The evidence package is sufficient for court-admissible release.`;
+    return `${locationName} completed the certification pipeline successfully. ${moduleSummary}. The evidence package is sufficient for court-admissible release at Trust Score ${trustScore}.`;
   }
-  return `${locationName} completed certification analysis but remains below release threshold. ${moduleSummary}. Remediation is still required before external delivery.`;
+  if (cadence === "weekly_preliminary") {
+    return `${locationName} completed a weekly preliminary certification. ${moduleSummary}. Bank-reconciliation proof is deferred until the monthly final cadence, so this output remains operational and non-court-admissible by design.`;
+  }
+  return `${locationName} completed deterministic certification analysis but remains below the final release threshold. ${moduleSummary}. Remediation is still required before external delivery.`;
 }
 
 function buildOverallFindings(
   locationName: string,
   modules: ModuleAssessment[],
+  cadence: "monthly_final" | "weekly_preliminary",
   ready: boolean,
   amountValue: number,
 ) {
-  const findings = modules.flatMap((module) => module.findings.slice(0, 2));
+  const findings = modules.flatMap((module) => module.findings.slice(0, 3));
   if (amountValue > 0) {
-    findings.unshift(`${locationName} currently shows ${formatCurrency(amountValue)} in computed certified variance across active modules.`);
+    findings.unshift(
+      `${locationName} currently shows ${formatCurrency(amountValue)} in computed recoverable variance across active modules.`,
+    );
   }
   if (ready) {
-    findings.unshift(`Certification run cleared all core evidence and reconciliation gates for ${locationName}.`);
+    findings.unshift(
+      `Certification run cleared all deterministic evidence and reconciliation gates for ${locationName}.`,
+    );
+  } else if (cadence === "weekly_preliminary") {
+    findings.unshift(
+      `Weekly preliminary certification for ${locationName} completed without the final bank-statement gate. This output is intended for early detection, not final external release.`,
+    );
   } else {
-    findings.unshift(`Certification run for ${locationName} remains blocked by one or more evidence, schema, or reconciliation controls.`);
+    findings.unshift(
+      `Certification run for ${locationName} remains blocked by one or more evidence, governance, or reconciliation controls.`,
+    );
   }
-  return findings.slice(0, 6);
+  return dedupe(findings).slice(0, 8);
 }
 
-function buildCertificationSteps(modules: ModuleAssessment[], ready: boolean): CertificationStep[] {
-  const completeness = round(modules.reduce((sum, module) => sum + module.artifactCoverage, 0) / Math.max(modules.length, 1));
-  const ruleIntegrity = round(modules.reduce((sum, module) => sum + module.dimensions["Rule Integrity"], 0) / Math.max(modules.length, 1));
-  const reconciliation = round(modules.reduce((sum, module) => sum + module.dimensions["Cross-System Reconciliation"], 0) / Math.max(modules.length, 1));
+function buildCertificationSteps(
+  modules: ModuleAssessment[],
+  cadence: "monthly_final" | "weekly_preliminary",
+  ready: boolean,
+): CertificationStep[] {
+  const completeness = round(
+    modules.reduce((sum, module) => sum + module.artifactCoverage, 0) /
+      Math.max(modules.length, 1),
+  );
+  const ruleIntegrity = round(
+    modules.reduce((sum, module) => sum + module.dimensions["Rule Integrity"], 0) /
+      Math.max(modules.length, 1),
+  );
+  const reconciliation = round(
+    modules.reduce(
+      (sum, module) => sum + module.dimensions["Cross-System Reconciliation"],
+      0,
+    ) / Math.max(modules.length, 1),
+  );
   return [
     {
-      done: completeness >= 60,
-      detail: `${completeness}% of required artifacts were present for the active certification scope.`,
+      detail: `${completeness}% of required governed artifacts passed structural completeness.`,
+      done: completeness >= 80,
       label: "Define Semantic Truths",
     },
     {
-      done: ruleIntegrity >= 70,
-      detail: `${ruleIntegrity}% rule-integrity confidence based on schema match and contract config readiness.`,
+      detail: `${ruleIntegrity}% rule-integrity confidence based on governed contract, statement, and schema inputs.`,
+      done: ruleIntegrity >= 100,
       label: "Define Deterministic Law",
     },
     {
-      done: reconciliation >= 65,
-      detail: `${reconciliation}% reconciliation confidence across source, POS, and bank evidence.`,
+      detail:
+        cadence === "weekly_preliminary"
+          ? `${reconciliation}% reconciliation confidence across source and POS evidence. Final bank tie-out is deferred.`
+          : `${reconciliation}% reconciliation confidence across source, POS, and bank evidence.`,
+      done: reconciliation >= (cadence === "weekly_preliminary" ? 66 : 85),
       label: "Execute Loop A",
     },
     {
-      done: ready,
       detail: ready
         ? "Release threshold met and CAAR was generated."
-        : "Run completed, but release remains blocked until missing controls are resolved.",
+        : cadence === "weekly_preliminary"
+          ? "Preliminary run completed. Monthly Final is still required for court-admissible release."
+          : "Run completed, but release remains blocked until missing controls are resolved.",
+      done: ready,
       label: "Certify & Lock",
     },
   ];
@@ -642,18 +668,37 @@ function mergeLocationModules(
   return nextModules;
 }
 
-function contractReadiness(values?: Record<string, string> | null) {
-  if (!values) return 0;
-  const relevantEntries = Object.entries(values).filter(([key, value]) => key !== "__entry_mode" && Boolean(value));
-  if (relevantEntries.length === 0) return 0;
-  return clamp(round((relevantEntries.length / 8) * 100), 0, 100);
+function upsertEvidenceModule(
+  modules: LocationModuleState[],
+  score: number,
+  note: string,
+) {
+  const existingIndex = modules.findIndex((module) => module.label === "Evidence");
+  const nextState = {
+    label: "Evidence",
+    note,
+    score,
+  };
+  if (existingIndex === -1) {
+    modules.push(nextState);
+  } else {
+    modules[existingIndex] = nextState;
+  }
 }
 
-function buildModuleNote(moduleId: "M01" | "M02", score: number, findings: string[]) {
-  if (score >= 85) {
+function buildModuleNote(
+  moduleId: "M01" | "M02",
+  score: number,
+  findings: string[],
+  citationCount: number,
+) {
+  if (score >= 85 && citationCount === 0) {
     return moduleId === "M01"
-      ? "Processor evidence, contract, and reconciliation gates are all release-ready."
+      ? "Processor evidence, contract, and reconciliation gates are release-ready."
       : "DSP settlement, contract, and reconciliation controls are release-ready.";
+  }
+  if (citationCount > 0) {
+    return `${citationCount} deterministic ${moduleId} rule citation${citationCount === 1 ? "" : "s"} require review.`;
   }
   return findings[0] ?? `${moduleId} still requires evidence remediation before release.`;
 }
@@ -662,20 +707,54 @@ function emptyModule(moduleId: "M01" | "M02"): ModuleAssessment {
   return {
     artifactCoverage: 0,
     dimensions: {
-      "Auditability": 0,
+      Auditability: 0,
       "Cross-System Reconciliation": 0,
       "Data Completeness": 0,
       "Data Freshness": 0,
       "Rule Integrity": 0,
       "Source Authenticity": 0,
     },
+    findingClass: "INCONCLUSIVE",
     findings: [`${moduleId} has no certification artifacts yet.`],
     moduleId,
+    mq6: {
+      auditability: { badge: "FAIL", detail: "No audit trail exists yet.", scorePct: 0 },
+      cross_system_reconciliation: {
+        badge: "FAIL",
+        detail: "No reconciliation evidence exists yet.",
+        scorePct: 0,
+      },
+      data_completeness: {
+        badge: "FAIL",
+        detail: "No governed artifacts exist yet.",
+        scorePct: 0,
+      },
+      data_freshness: { badge: "FAIL", detail: "No uploads exist yet.", scorePct: 0 },
+      rule_integrity: {
+        badge: "FAIL",
+        detail: "No deterministic rule execution could occur.",
+        scorePct: 0,
+      },
+      source_authenticity: {
+        badge: "FAIL",
+        detail: "No authenticated source evidence exists yet.",
+        scorePct: 0,
+      },
+    },
     note: `${moduleId} has no certification artifacts yet.`,
     ready: false,
     recoveryValue: 0,
+    ruleCitations: [],
     score: 0,
   };
+}
+
+function estimateExhibitCount(modules: ModuleAssessment[]) {
+  return modules.reduce((sum, module) => sum + Math.max(module.ruleCitations.length, 2), 0);
+}
+
+function dedupe(values: string[]) {
+  return [...new Set(values)];
 }
 
 function sumColumn(headers: string[], rows: string[][], names: string[]) {

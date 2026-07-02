@@ -255,6 +255,24 @@ export async function POST(request: Request) {
     if (session.role === "Viewer") {
       return NextResponse.json({ error: "This account cannot modify governance workspaces." }, { status: 403 });
     }
+    const body = (await request.json()) as {
+      action?: "draft" | "seal";
+      workspace?: SchemaWorkspace;
+    };
+    const action = body.action;
+
+    if (action === "seal" && session.role !== "WGS Manager" && session.role !== "SuperAdmin") {
+      return NextResponse.json(
+        { error: "Only WGS can seal Schema Registry and Contract Config records." },
+        { status: 403 },
+      );
+    }
+    if (action === "draft" && session.role !== "Admin" && session.role !== "WGS Manager" && session.role !== "SuperAdmin") {
+      return NextResponse.json(
+        { error: "Only Admin or WGS can edit governance workspaces." },
+        { status: 403 },
+      );
+    }
     if (typeof session.managerId !== "number") {
       return NextResponse.json(
         { error: "This account is missing a database-backed manager identity." },
@@ -262,13 +280,6 @@ export async function POST(request: Request) {
       );
     }
     const managerId = session.managerId;
-
-    const body = (await request.json()) as {
-      action?: "draft" | "seal";
-      workspace?: SchemaWorkspace;
-    };
-
-    const action = body.action;
     const workspace = body.workspace;
 
     if (!workspace || (action !== "draft" && action !== "seal")) {

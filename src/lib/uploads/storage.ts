@@ -46,3 +46,9 @@ export async function readArtifactBlob(objectKey: string) {
   const targetPath = path.join(root, ...objectKey.split("/"));
   return readFile(targetPath);
 }
+
+export async function readUploadBlob(objectKey: string) {
+  const root = resolveStorageRoot("SENTRY_UPLOAD_DIR", ["storage", "uploads-v2"]);
+  const targetPath = path.join(root, ...objectKey.split("/"));
+  return readFile(targetPath);
+}

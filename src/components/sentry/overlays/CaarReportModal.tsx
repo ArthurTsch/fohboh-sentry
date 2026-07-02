@@ -197,7 +197,7 @@ export function CaarReportModal({
             disabled={!claimReady}
             className="rounded-lg bg-[var(--text)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-45"
           >
-            Generate Claim Pack
+            Generate ExportPack
           </button>
           <button
             type="button"
@@ -478,7 +478,7 @@ export function CaarReportModal({
               <AttestRow label="Timestamp" value={`${record.period.replace(/\s+/g, "-")}-08:13:56Z`} />
               <AttestRow
                 label="Integrity Hash"
-                value={claimReady ? `sha256:${record.id.toLowerCase()}-f2a9c1e8b347` : "SHA-256 pending final claim-pack generation"}
+                value={claimReady ? `sha256:${record.id.toLowerCase()}-f2a9c1e8b347` : "SHA-256 pending final ExportPack generation"}
                 accent={claimReady}
               />
             </div>

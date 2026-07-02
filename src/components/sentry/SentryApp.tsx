@@ -30,6 +30,7 @@ import { useSentryDerivedState } from "./hooks/useSentryDerivedState";
 import { useSentryPersistence } from "./hooks/useSentryPersistence";
 import { AddLocationModal } from "./overlays/AddLocationModal";
 import { ArtifactWorkflowModal } from "./overlays/ArtifactWorkflowModal";
+import { CertificationCadenceModal } from "./overlays/CertificationCadenceModal";
 import { CertificationRunModal } from "./overlays/CertificationRunModal";
 import { CaarReportModal } from "./overlays/CaarReportModal";
 import { RequestAccessModal } from "./overlays/RequestAccessModal";
@@ -76,11 +77,17 @@ type ActiveArtifactState = {
 };
 
 type ActiveCertificationState = {
+  cadence: "monthly_final" | "weekly_preliminary";
   locationId: string;
   locationName: string;
   ready: boolean;
   steps: { detail: string; done: boolean; label: string }[];
   trustScore: number;
+};
+
+type PendingCertificationRequest = {
+  locationId: string;
+  locationName: string;
 };
 
 const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
@@ -147,6 +154,7 @@ type PersistedUploadRecord = {
 
 type PersistedCertificationResponse = {
   certification?: {
+    cadence?: "monthly_final" | "weekly_preliminary";
     ready: boolean;
     record: CaarRecord;
     status: "Certified" | "At Risk" | "Onboarding";
@@ -217,6 +225,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   const [artifactIntakeState, setArtifactIntakeState] = useState<Record<string, IntakeState>>({});
   const [artifactContractState, setArtifactContractState] = useState<Record<string, Record<string, string>>>({});
   const [activeCertification, setActiveCertification] = useState<ActiveCertificationState | null>(null);
+  const [pendingCertificationRequest, setPendingCertificationRequest] = useState<PendingCertificationRequest | null>(null);
   const [activeUploadLocation, setActiveUploadLocation] = useState<{
     accountId: string;
     id: string;
@@ -1483,17 +1492,17 @@ function handleCompleteOnboarding(locationId: string) {
       | null;
 
     if (!response.ok) {
-      showToast(payload?.error ?? `Unable to generate claim pack for ${record.id}.`);
+      showToast(payload?.error ?? `Unable to generate ExportPack for ${record.id}.`);
       return;
     }
 
     appendLog({
       accountId: record.accountId,
-      action: `Claim pack generated for ${record.id}`,
+      action: `ExportPack generated for ${record.id}`,
       immutable: true,
       location: record.locationName,
     });
-    showToast(`Claim pack generated for ${record.id}.`);
+    showToast(`ExportPack generated for ${record.id}.`);
     if (payload?.downloadUrl) {
       window.open(payload.downloadUrl, "_blank", "noopener,noreferrer");
     } else {
@@ -1585,9 +1594,21 @@ function handleCompleteOnboarding(locationId: string) {
     showToast("Support ticket added to the WGS queue.");
   }
 
-  async function handleRunCertification(locationId: string) {
+  function handleRunCertification(locationId: string) {
     const location = runtimeLocationState.find((item) => item.id === locationId);
     if (!location) return;
+    setPendingCertificationRequest({
+      locationId,
+      locationName: location.name,
+    });
+  }
+
+  async function executeRunCertification(cadence: "monthly_final" | "weekly_preliminary") {
+    const request = pendingCertificationRequest;
+    if (!request) return;
+    const location = runtimeLocationState.find((item) => item.id === request.locationId);
+    if (!location) return;
+    setPendingCertificationRequest(null);
 
     const response = await fetch("/api/v1/certifications/run", {
       method: "POST",
@@ -1595,7 +1616,8 @@ function handleCompleteOnboarding(locationId: string) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        locationId,
+          cadence,
+          locationId: request.locationId,
       }),
     });
 
@@ -1610,35 +1632,40 @@ function handleCompleteOnboarding(locationId: string) {
 
     const { certification } = payload;
 
-    updateRuntimeLocation(locationId, (item) => ({
-      ...item,
-      lastCertified: payload.location?.lastCertified ?? item.lastCertified,
+      updateRuntimeLocation(request.locationId, (item) => ({
+        ...item,
+        lastCertified: payload.location?.lastCertified ?? item.lastCertified,
       m01: payload.location?.m01 ?? item.m01,
       m02: payload.location?.m02 ?? item.m02,
       modules: payload.location?.modules ?? certification.updatedModules,
       recovery: payload.location?.recovery ?? certification.updatedRecovery,
       status: payload.location?.status ?? certification.status,
     }));
-    setCaarState((current) => [
-      certification.record,
-      ...current.filter((item) => item.locationId !== locationId),
-    ]);
+      setCaarState((current) => [
+        certification.record,
+        ...current.filter((item) => item.locationId !== request.locationId),
+      ]);
     appendLog({
       accountId: location.accountId,
       action: `Certification completed for ${location.name}`,
       immutable: true,
       location: location.name,
     });
-    setActiveCertification({
-      locationId,
-      locationName: location.name,
-      ready: certification.ready,
-      steps: certification.steps,
-      trustScore: certification.trustScore,
-    });
-    await Promise.all([syncAssignedRestaurants(), syncAssignedCaars()]);
-    showToast(`${certification.record.id} certified and saved.`);
-  }
+      setActiveCertification({
+        cadence: certification.cadence ?? cadence,
+        locationId: request.locationId,
+        locationName: location.name,
+        ready: certification.ready,
+        steps: certification.steps,
+        trustScore: certification.trustScore,
+      });
+      await Promise.all([syncAssignedRestaurants(), syncAssignedCaars()]);
+      showToast(
+        cadence === "weekly_preliminary"
+          ? `${certification.record.id} preliminary certification saved.`
+          : `${certification.record.id} certified and saved.`,
+      );
+    }
 
   if (!effectiveSession) {
     return (
@@ -1850,8 +1877,17 @@ function handleCompleteOnboarding(locationId: string) {
         />
       ) : null}
 
+      {pendingCertificationRequest ? (
+        <CertificationCadenceModal
+          locationName={pendingCertificationRequest.locationName}
+          onClose={() => setPendingCertificationRequest(null)}
+          onSubmit={executeRunCertification}
+        />
+      ) : null}
+
       {activeCertification ? (
         <CertificationRunModal
+          cadence={activeCertification.cadence}
           locationName={activeCertification.locationName}
           onClose={() => setActiveCertification(null)}
           openCaar={() => {

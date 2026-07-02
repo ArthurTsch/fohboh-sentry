@@ -5,6 +5,7 @@ type CertificationStep = {
 };
 
 export function CertificationRunModal({
+  cadence,
   locationName,
   onClose,
   openCaar,
@@ -12,6 +13,7 @@ export function CertificationRunModal({
   steps,
   trustScore,
 }: {
+  cadence: "monthly_final" | "weekly_preliminary";
   locationName: string;
   onClose: () => void;
   openCaar: () => void;
@@ -30,7 +32,9 @@ export function CertificationRunModal({
             {locationName}
           </div>
           <div className="mt-1 text-sm text-[var(--muted)]">
-            Semantic Truths {"->"} Deterministic Law {"->"} Loop A {"->"} Certify {"&"} Lock
+            {cadence === "weekly_preliminary"
+              ? "Weekly Preliminary -> Semantic Truths -> Deterministic Law -> Loop A"
+              : "Monthly Final -> Semantic Truths -> Deterministic Law -> Loop A -> Certify & Lock"}
           </div>
         </div>
 
@@ -61,7 +65,9 @@ export function CertificationRunModal({
             <div className="text-sm text-[var(--muted)]">
               {ready
                 ? "CAAR release threshold met. Claim-pack generation is available."
-                : "Evidence or reconciliation gates still block court-admissible release."}
+                : cadence === "weekly_preliminary"
+                  ? "Preliminary certification completed. Monthly Final is still required for court-admissible release."
+                  : "Evidence or reconciliation gates still block court-admissible release."}
             </div>
           </div>
           <div className="flex gap-2">

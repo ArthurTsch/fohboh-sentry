@@ -140,12 +140,37 @@ export type IntakeState = {
   unmatchedHeaders?: string[];
   updatedAt?: string;
   metrics?: {
+    adjustmentAmount?: number;
     basisAmount?: number;
+    chargebackCount?: number;
+    commissionRateAppliedAvg?: number;
     depositAmount?: number;
+    deliveryFeeAmount?: number;
+    deliveryOrderCount?: number;
+    errorChargeAmount?: number;
     feeAmount?: number;
+    interchangeFeeAmount?: number;
+    marketingFeeAmount?: number;
+    memberOrderCount?: number;
+    otherFeeAmount?: number;
     orderCount?: number;
+    pickupOrderCount?: number;
+    promoOrderCount?: number;
     payoutAmount?: number;
+    refundCount?: number;
+    serviceFeeAmount?: number;
+    taxRemittedAmount?: number;
+    tipAmount?: number;
     transactionCount?: number;
+    voidCount?: number;
+    visaCreditAmount?: number;
+    visaCreditFeeAmount?: number;
+    visaDebitAmount?: number;
+    visaDebitFeeAmount?: number;
+    mcCreditAmount?: number;
+    mcCreditFeeAmount?: number;
+    mcDebitAmount?: number;
+    mcDebitFeeAmount?: number;
   };
 };
 
