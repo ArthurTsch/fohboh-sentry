@@ -15,7 +15,7 @@ export function SupportChat({
   chatOpen: boolean;
   messages: ChatMessage[];
   onClose: () => void;
-  onCreateTicket: () => void;
+  onCreateTicket: () => void | Promise<void>;
   onInputChange: (value: string) => void;
   onSend: (prompt?: string) => void;
   onToggle: () => void;

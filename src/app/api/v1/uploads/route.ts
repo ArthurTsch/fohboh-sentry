@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { Prisma } from "@/app/generated/prisma/client";
 import type { SessionState } from "@/components/sentry/types";
 import { requireManagerSession } from "@/lib/auth/session";
+import { logServerError, writeAuditLog } from "@/lib/ops/audit";
+import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
+import { checkRateLimit } from "@/lib/ops/rate-limit";
 import prisma from "@/lib/prisma";
 import { getArtifactPurpose, getExpectedKind } from "@/lib/uploads/definitions";
 import {
@@ -251,18 +254,35 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const requestContext = getRequestContextFromRequest(request);
   try {
     const session = await requireManagerSession();
     if (session.role === "Viewer") {
-      return NextResponse.json({ error: "This account cannot upload files." }, { status: 403 });
-    }
-    if (typeof session.managerId !== "number") {
-      return NextResponse.json(
-        { error: "This account is missing a database-backed manager identity." },
-        { status: 403 },
+      return withRequestHeaders(
+        NextResponse.json({ error: "This account cannot upload files." }, { status: 403 }),
+        requestContext,
       );
     }
+    if (typeof session.managerId !== "number") {
+      return withRequestHeaders(NextResponse.json(
+        { error: "This account is missing a database-backed manager identity." },
+        { status: 403 },
+      ), requestContext);
+    }
     const uploaderId = session.managerId;
+    const limiter = checkRateLimit({
+      key: `upload:${uploaderId}:${requestContext.ipAddress ?? "unknown"}`,
+      limit: 120,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!limiter.allowed) {
+      const response = NextResponse.json(
+        { error: "Upload rate limit reached. Try again later." },
+        { status: 429 },
+      );
+      response.headers.set("retry-after", String(Math.ceil((limiter.resetAt - Date.now()) / 1000)));
+      return withRequestHeaders(response, requestContext);
+    }
 
     const formData = await request.formData();
     const file = formData.get("file");
@@ -273,40 +293,40 @@ export async function POST(request: Request) {
     const vendorName = String(formData.get("vendorName") ?? "").trim() || null;
 
     if (!(file instanceof File)) {
-      return NextResponse.json({ error: "A file upload is required." }, { status: 400 });
+      return withRequestHeaders(NextResponse.json({ error: "A file upload is required." }, { status: 400 }), requestContext);
     }
 
     if (!locationId || !artifactKey || (moduleId !== "M01" && moduleId !== "M02")) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "locationId, moduleId, and artifactKey are required." },
         { status: 400 },
-      );
+      ), requestContext);
     }
 
     if (file.size <= 0) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "Uploaded file is empty. Use the raw export from the source system." },
         { status: 400 },
-      );
+      ), requestContext);
     }
 
     if (file.size > MAX_UPLOAD_BYTES) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "Maximum upload size is 100MB per file." },
         { status: 413 },
-      );
+      ), requestContext);
     }
 
     const expectedKind = getExpectedKind(artifactKey);
     if (expectedKind === "manual") {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "This artifact is manual-entry only and does not accept file uploads." },
         { status: 400 },
-      );
+      ), requestContext);
     }
 
     if (detectWrongDocumentKind(expectedKind, file)) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         {
           error:
             expectedKind === "csv"
@@ -314,17 +334,17 @@ export async function POST(request: Request) {
               : "This upload expects a PDF file, not a CSV.",
         },
         { status: 400 },
-      );
+      ), requestContext);
     }
 
     const restaurants = await getScopedRestaurants(session);
     const restaurant = restaurants.find((candidate) => candidate.location_id === locationId);
 
     if (!restaurant) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "Upload target could not be resolved for this location." },
         { status: 404 },
-      );
+      ), requestContext);
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -390,10 +410,31 @@ export async function POST(request: Request) {
         });
       }
 
+      await writeAuditLog(
+        {
+          action: "upload_received",
+          actorUserId: uploaderId,
+          entityId: String(upload.id),
+          entityType: "uploads_v2",
+          ipAddress: requestContext.ipAddress,
+          locationId: restaurant.id,
+          metadata: {
+            artifactKey,
+            fileName: file.name,
+            moduleId,
+            requestId: requestContext.requestId,
+            vendorKey,
+          },
+          summary: `Uploaded ${file.name} for ${restaurant.name} (${moduleId}/${artifactKey}).`,
+          userAgent: requestContext.userAgent,
+        },
+        tx,
+      );
+
       return upload;
     });
 
-    return NextResponse.json({
+    return withRequestHeaders(NextResponse.json({
       upload: buildUploadResponse({
         artifactKey,
         id: created.id,
@@ -403,27 +444,29 @@ export async function POST(request: Request) {
         moduleId,
         validation,
       }),
-    });
+    }), requestContext);
   } catch (error) {
     const authResponse = getAuthErrorResponse(error);
     if (authResponse) {
-      return authResponse;
+      return withRequestHeaders(authResponse, requestContext);
     }
 
     if (isMissingUploadSchema(error)) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         {
           error:
             "The uploads_v2 Phase 3 migration has not been applied yet. Update the database before using persisted uploads.",
         },
         { status: 503 },
-      );
+      ), requestContext);
     }
 
-    console.error("Persist upload failed:", error);
-    return NextResponse.json(
+    logServerError("upload_persist_failed", error, {
+      requestId: requestContext.requestId,
+    });
+    return withRequestHeaders(NextResponse.json(
       { error: "Unable to persist this upload right now." },
       { status: 500 },
-    );
+    ), requestContext);
   }
 }

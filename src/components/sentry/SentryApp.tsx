@@ -24,7 +24,6 @@ import {
   wgsUsers,
 } from "./data";
 import {
-  buildCertificationResult,
   extractManualMetrics,
 } from "./caar-engine";
 import { useSentryDerivedState } from "./hooks/useSentryDerivedState";
@@ -47,15 +46,19 @@ import type {
   CaarRecord,
   ChatMessage,
   IntakeState,
+  LocationRecord,
   LogRecord,
   RequestAccessDraft,
   SchemaWorkspace,
   SessionState,
   SupportModeState,
   UploadArtifact,
+  UploadModule,
   UploadReceipt,
   ViewId,
+  WgsApproval,
   WgsOnboardingProgress,
+  WgsQueueItem,
   WgsUser,
 } from "./types";
 import { getSupportReply } from "./utils";
@@ -142,7 +145,30 @@ type PersistedUploadRecord = {
   vendorName?: string;
 };
 
+type PersistedCertificationResponse = {
+  certification?: {
+    ready: boolean;
+    record: CaarRecord;
+    status: "Certified" | "At Risk" | "Onboarding";
+    steps: { detail: string; done: boolean; label: string }[];
+    trustScore: number;
+    updatedModules: { label: string; note: string; score: number }[];
+    updatedRecovery: string;
+  };
+  location?: {
+    id: string;
+    lastCertified: string;
+    m01: number;
+    m02: number;
+    modules: { label: string; note: string; score: number }[];
+    recovery: string;
+    status: "Certified" | "At Risk" | "Onboarding";
+  };
+};
+
 type PersistedWorkspaceRecord = SchemaWorkspace;
+type PersistedSupportTicket = WgsQueueItem;
+type PersistedAccessRequest = WgsApproval;
 
 export function SentryApp({ initialSession = null }: { initialSession?: SessionState | null }) {
   const locationStatePersistenceStatusRef = useRef<"unknown" | "available" | "missing-table">(
@@ -205,7 +231,15 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
 
   const effectiveSession = session;
   const activeView = activeViewOverride ?? (effectiveSession?.role === "WGS Manager" ? "wgs" : "dashboard");
-  const runtimeLocationState = effectiveSession ? assignedLocationState : locationState;
+  const runtimeLocationState = effectiveSession
+    ? applyLifecycleNotesToLocations({
+        artifactContractState,
+        artifactIntakeState,
+        locations: assignedLocationState,
+        schemaState,
+        uploadState,
+      })
+    : locationState;
 
   const deferredFaqQuery = useDeferredValue(faqQuery);
 
@@ -479,6 +513,66 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     persistenceHydrated,
   ]);
 
+  const syncSupportTickets = useCallback(async function syncTickets(
+    sessionState: SessionState | null = effectiveSession,
+  ) {
+    if (!sessionState || !persistenceHydrated) {
+      return;
+    }
+
+    if (
+      sessionState.role !== "WGS Manager" &&
+      sessionState.role !== "SuperAdmin" &&
+      sessionState.role !== "Admin"
+    ) {
+      return;
+    }
+
+    const response = await fetch("/api/v1/support/tickets", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      tickets?: PersistedSupportTicket[];
+    };
+
+    setWgsQueueState(payload.tickets ?? []);
+  }, [effectiveSession, persistenceHydrated]);
+
+  const syncAccessRequests = useCallback(async function syncRequests(
+    sessionState: SessionState | null = effectiveSession,
+  ) {
+    if (!sessionState || !persistenceHydrated) {
+      return;
+    }
+
+    if (
+      sessionState.role !== "WGS Manager" &&
+      sessionState.role !== "SuperAdmin" &&
+      sessionState.role !== "Admin"
+    ) {
+      return;
+    }
+
+    const response = await fetch("/api/v1/access-requests", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      requests?: PersistedAccessRequest[];
+    };
+
+    setWgsApprovalState(payload.requests ?? []);
+  }, [effectiveSession, persistenceHydrated]);
+
   useEffect(() => {
     if (!effectiveSession || !persistenceHydrated) return;
 
@@ -494,6 +588,8 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         syncAssignedCaars(sessionState),
         syncPersistedUploads(sessionState),
         syncGovernanceWorkspaces(sessionState),
+        syncSupportTickets(sessionState),
+        syncAccessRequests(sessionState),
       ]);
 
       if (cancelled) return;
@@ -509,8 +605,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     persistenceHydrated,
     syncAssignedCaars,
     syncAssignedRestaurants,
+    syncAccessRequests,
     syncGovernanceWorkspaces,
     syncPersistedUploads,
+    syncSupportTickets,
   ]);
 
   const {
@@ -1044,8 +1142,17 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     });
   }
 
-  function handleResolveQueue(ticketId: string) {
+  async function handleResolveQueue(ticketId: string) {
     const ticket = wgsQueueState.find((item) => item.id === ticketId);
+    const response = await fetch(`/api/v1/support/tickets/${encodeURIComponent(ticketId)}`, {
+      method: "PATCH",
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      showToast(payload?.error ?? `Unable to resolve ticket ${ticketId}.`);
+      return;
+    }
+
     setWgsQueueState((current) => current.filter((item) => item.id !== ticketId));
     if (ticket) {
       appendLog({
@@ -1058,8 +1165,17 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     showToast(`Ticket ${ticketId} marked resolved.`);
   }
 
-  function handleApprove(approvalId: string) {
+  async function handleApprove(approvalId: string) {
     const approval = wgsApprovalState.find((item) => item.id === approvalId);
+    const response = await fetch(`/api/v1/access-requests/${encodeURIComponent(approvalId)}`, {
+      method: "PATCH",
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      showToast(payload?.error ?? `Unable to review approval ${approvalId}.`);
+      return;
+    }
+
     setWgsApprovalState((current) => current.filter((item) => item.id !== approvalId));
     if (approval) {
       appendLog({
@@ -1335,7 +1451,42 @@ function handleCompleteOnboarding(locationId: string) {
     showToast(`${user.firstName} ${user.lastName} deactivated.`);
   }
 
-  function handleGenerateClaimPack(record: CaarRecord) {
+  function handleDownloadCaarPdf(record: CaarRecord) {
+    window.open(
+      `/api/v1/caars/download?caarId=${encodeURIComponent(record.id)}&artifact=pdf`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
+  function handleDownloadClaimPack(record: CaarRecord) {
+    window.open(
+      `/api/v1/caars/download?caarId=${encodeURIComponent(record.id)}&artifact=exportpack`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }
+
+  async function handleGenerateClaimPack(record: CaarRecord) {
+    const response = await fetch("/api/v1/caars/claim-pack", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        caarId: record.id,
+      }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | { downloadUrl?: string; error?: string }
+      | null;
+
+    if (!response.ok) {
+      showToast(payload?.error ?? `Unable to generate claim pack for ${record.id}.`);
+      return;
+    }
+
     appendLog({
       accountId: record.accountId,
       action: `Claim pack generated for ${record.id}`,
@@ -1343,28 +1494,46 @@ function handleCompleteOnboarding(locationId: string) {
       location: record.locationName,
     });
     showToast(`Claim pack generated for ${record.id}.`);
+    if (payload?.downloadUrl) {
+      window.open(payload.downloadUrl, "_blank", "noopener,noreferrer");
+    } else {
+      handleDownloadClaimPack(record);
+    }
   }
 
-  function handleRequestAccess(draft: RequestAccessDraft) {
-    const nextId = `APR-${String(wgsApprovalState.length + 20).padStart(3, "0")}`;
-    const scopeDetails = [
-      draft.locations ? `${draft.locations} locations` : null,
-      draft.processors.length > 0 ? `processors: ${draft.processors.join(", ")}` : null,
-      draft.dsps.length > 0 ? `DSPs: ${draft.dsps.join(", ")}` : null,
-      draft.monthlyVolume ? `volume: ${draft.monthlyVolume}` : null,
-    ]
-      .filter(Boolean)
-      .join(" | ");
-
-    setWgsApprovalState((current) => [
-      {
-        id: nextId,
-        account: draft.company,
-        type: "Access Request",
-        summary: `${draft.name || draft.email} requested ${draft.modules.join(" + ")} via ${draft.modulePlan}.${scopeDetails ? ` ${scopeDetails}.` : ""}`,
+  async function handleRequestAccess(draft: RequestAccessDraft) {
+    const response = await fetch("/api/v1/access-requests", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
-      ...current,
-    ]);
+      body: JSON.stringify({
+        company: draft.company,
+        dsps: draft.dsps,
+        email: draft.email,
+        locations: draft.locations,
+        modulePlan: draft.modulePlan,
+        modules: draft.modules,
+        monthlyVolume: draft.monthlyVolume,
+        name: draft.name,
+        notes: draft.notes,
+        phone: draft.phone,
+        processors: draft.processors,
+      }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string; request?: PersistedAccessRequest }
+      | null;
+
+    if (!response.ok) {
+      showToast(payload?.error ?? "Unable to submit access request.");
+      return;
+    }
+
+    if (payload?.request && effectiveSession?.role === "WGS Manager") {
+      setWgsApprovalState((current) => [payload.request!, ...current]);
+    }
     appendLog({
       accountId: getScopedAccountId(),
       action: `Request access submitted for ${draft.company}`,
@@ -1376,26 +1545,37 @@ function handleCompleteOnboarding(locationId: string) {
     showToast("Access request submitted for WGS review.");
   }
 
-  function handleCreateSupportTicket(text: string) {
+  async function handleCreateSupportTicket(text: string) {
     const message = text.trim();
     if (!message) {
       showToast("Add a support message before creating a ticket.");
       return;
     }
     const accountName = getScopedAccountName();
-    setWgsQueueState((current) => [
-      {
-        id: `TCK-${String(current.length + 400).padStart(3, "0")}`,
-        account: accountName,
-        issue: message,
-        priority:
-          message.toLowerCase().includes("trust score") || message.toLowerCase().includes("failed")
-            ? "High"
-            : "Medium",
-        age: "Now",
+    const response = await fetch("/api/v1/support/tickets", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
-      ...current,
-    ]);
+      body: JSON.stringify({
+        accountId: getScopedAccountId(),
+        accountName,
+        issue: message,
+      }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string; ticket?: PersistedSupportTicket }
+      | null;
+
+    if (!response.ok) {
+      showToast(payload?.error ?? "Unable to create support ticket right now.");
+      return;
+    }
+
+    if (payload?.ticket && (effectiveSession?.role === "WGS Manager" || effectiveSession?.role === "SuperAdmin" || effectiveSession?.role === "Admin")) {
+      setWgsQueueState((current) => [payload.ticket!, ...current]);
+    }
     appendLog({
       accountId: getScopedAccountId(),
       action: `Support ticket created: ${message}`,
@@ -1405,25 +1585,39 @@ function handleCompleteOnboarding(locationId: string) {
     showToast("Support ticket added to the WGS queue.");
   }
 
-  function handleRunCertification(locationId: string) {
+  async function handleRunCertification(locationId: string) {
     const location = runtimeLocationState.find((item) => item.id === locationId);
     if (!location) return;
 
-    const certification = buildCertificationResult({
-      artifactContractState,
-      artifactIntakeState,
-      location,
-      uploadModules: resolveUploadModulesForAccount(location.accountId),
+    const response = await fetch("/api/v1/certifications/run", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        locationId,
+      }),
     });
+
+    const payload = (await response.json().catch(() => null)) as
+      | ({ error?: string } & PersistedCertificationResponse)
+      | null;
+
+    if (!response.ok || !payload?.certification || !payload.location) {
+      showToast(payload?.error ?? "Unable to run certification right now.");
+      return;
+    }
+
+    const { certification } = payload;
 
     updateRuntimeLocation(locationId, (item) => ({
       ...item,
-      lastCertified: new Date().toISOString().slice(0, 10),
-      m01: certification.updatedModules.find((module) => module.label === "M01")?.score ?? item.m01,
-      m02: certification.updatedModules.find((module) => module.label === "M02")?.score ?? item.m02,
-      modules: certification.updatedModules,
-      recovery: certification.updatedRecovery,
-      status: certification.status,
+      lastCertified: payload.location?.lastCertified ?? item.lastCertified,
+      m01: payload.location?.m01 ?? item.m01,
+      m02: payload.location?.m02 ?? item.m02,
+      modules: payload.location?.modules ?? certification.updatedModules,
+      recovery: payload.location?.recovery ?? certification.updatedRecovery,
+      status: payload.location?.status ?? certification.status,
     }));
     setCaarState((current) => [
       certification.record,
@@ -1442,48 +1636,8 @@ function handleCompleteOnboarding(locationId: string) {
       steps: certification.steps,
       trustScore: certification.trustScore,
     });
-
-    const updatedLocation = {
-      ...location,
-      lastCertified: new Date().toISOString().slice(0, 10),
-      m01: certification.updatedModules.find((module) => module.label === "M01")?.score ?? location.m01,
-      m02: certification.updatedModules.find((module) => module.label === "M02")?.score ?? location.m02,
-      modules: certification.updatedModules,
-      recovery: certification.updatedRecovery,
-      status: certification.status,
-    };
-    void persistLocationState(updatedLocation, {
-      onboardingChecklist: onboardingState,
-      onboardingProgress: wgsOnboardingState[location.id],
-    });
-    void persistCaarReport(certification.record, location.accountId);
-  }
-
-  async function persistCaarReport(record: CaarRecord, accountId: string) {
-    try {
-      const response = await fetch("/api/caars", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          accountId,
-          managerId: effectiveSession?.managerId ?? null,
-          record,
-        }),
-      });
-
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        showToast(payload?.error ?? "CAAR saved locally, but database save failed.");
-        return;
-      }
-
-      await syncAssignedCaars();
-      showToast(`${record.id} saved to the database.`);
-    } catch {
-      showToast("CAAR saved locally, but database save failed.");
-    }
+    await Promise.all([syncAssignedRestaurants(), syncAssignedCaars()]);
+    showToast(`${certification.record.id} certified and saved.`);
   }
 
   if (!effectiveSession) {
@@ -1578,6 +1732,7 @@ function handleCompleteOnboarding(locationId: string) {
           onEnterSupportMode={handleEnterSupportMode}
           onExpandAll={handleExpandAll}
           onFilterChange={setLogFilter}
+          onDownloadPdf={handleDownloadCaarPdf}
           onOpenCaar={setSelectedCaar}
           onOpenOnboarding={handleOpenOnboarding}
           onOpenSchemaEditor={setEditingWorkspace}
@@ -1688,6 +1843,7 @@ function handleCompleteOnboarding(locationId: string) {
         <CaarReportModal
           artifactIntakeState={artifactIntakeState}
           onClose={() => setSelectedCaar(null)}
+          onDownloadPdf={handleDownloadCaarPdf}
           onGenerateClaimPack={handleGenerateClaimPack}
           record={selectedCaar}
           uploadModules={scopedUploadModules}
@@ -1890,4 +2046,177 @@ function getContractValue(contract: SchemaWorkspace["contract"], label: string) 
 
 function extractNumericValue(value: string) {
   return value.replace(/[^0-9.-]/g, "");
+}
+
+function applyLifecycleNotesToLocations({
+  artifactContractState,
+  artifactIntakeState,
+  locations,
+  schemaState,
+  uploadState,
+}: {
+  artifactContractState: Record<string, Record<string, string>>;
+  artifactIntakeState: Record<string, IntakeState>;
+  locations: LocationRecord[];
+  schemaState: SchemaWorkspace[];
+  uploadState: UploadModule[];
+}) {
+  let changed = false;
+
+  const next = locations.map((location) => {
+    let locationChanged = false;
+    const activeModules = location.modules
+      .map((module) => module.label)
+      .filter((label): label is "M01" | "M02" => label === "M01" || label === "M02");
+
+    if (activeModules.length === 0) {
+      return location;
+    }
+
+    const moduleNotes = new Map<string, { note: string; score: number }>();
+    const overallMissing: string[] = [];
+    const staleItems: string[] = [];
+
+    for (const moduleId of activeModules) {
+      const moduleTemplate = resolveModuleTemplate(uploadState, location.accountId, moduleId);
+      const moduleMissing: string[] = [];
+      let latestUpdatedAt: string | undefined;
+
+      for (const artifact of moduleTemplate?.artifacts ?? []) {
+        if (artifact.type === "Manual Entry") {
+          const manualKey = `${location.accountId}:${location.id}:${moduleId}:${artifact.key}:global`;
+          const hasManual = Boolean(artifactContractState[manualKey]);
+          if (!hasManual) {
+            moduleMissing.push(readableArtifactLabel(artifact.key));
+          }
+          continue;
+        }
+
+        const intake = resolveLocationArtifactIntake(
+          artifactIntakeState,
+          location.accountId,
+          location.id,
+          moduleId,
+          artifact.key,
+        );
+        if (!intake?.uploaded) {
+          moduleMissing.push(readableArtifactLabel(artifact.key));
+        } else if (intake.updatedAt && (!latestUpdatedAt || intake.updatedAt > latestUpdatedAt)) {
+          latestUpdatedAt = intake.updatedAt;
+        }
+      }
+
+      const governedWorkspaces = schemaState.filter(
+        (workspace) =>
+          workspace.accountId === location.accountId &&
+          workspace.locationId === location.id &&
+          workspace.module === moduleId &&
+          workspace.status === "sealed",
+      );
+
+      if (governedWorkspaces.length === 0) {
+        moduleMissing.push(`${moduleId} schema + contract seal`);
+      }
+
+      if (latestUpdatedAt && isStaleArtifactDate(latestUpdatedAt)) {
+        staleItems.push(`${moduleId} evidence is older than 31 days`);
+      }
+
+      const note =
+        moduleMissing.length === 0
+          ? latestUpdatedAt && isStaleArtifactDate(latestUpdatedAt)
+            ? `${moduleId} setup is sealed, but the evidence set is stale and needs a current rerun package.`
+            : `${moduleId} setup is sealed and the current period evidence package is ready for rerun.`
+          : `${moduleId} rerun blocked by missing ${moduleMissing.join(", ")}.`;
+
+      moduleNotes.set(moduleId, {
+        note,
+        score: moduleMissing.length === 0 ? (latestUpdatedAt && isStaleArtifactDate(latestUpdatedAt) ? 74 : 92) : Math.max(35, 100 - moduleMissing.length * 18),
+      });
+      overallMissing.push(...moduleMissing.map((item) => `${moduleId}: ${item}`));
+    }
+
+    const evidenceNote =
+      overallMissing.length === 0
+        ? staleItems.length === 0
+          ? "Static setup is sealed. Only current-period source files are needed for the next certification rerun."
+          : `Static setup is sealed. ${staleItems.join("; ")}. Upload only the new period files before rerun.`
+        : `Static setup is retained. Missing rerun prerequisites: ${overallMissing.join("; ")}.`;
+    const evidenceScore =
+      overallMissing.length === 0
+        ? staleItems.length === 0
+          ? 96
+          : 78
+        : Math.max(30, 95 - overallMissing.length * 10);
+
+    const nextModules = location.modules.map((module) => {
+      if (module.label === "Evidence") {
+        if (module.note !== evidenceNote || module.score !== evidenceScore) {
+          changed = true;
+          locationChanged = true;
+          return {
+            ...module,
+            note: evidenceNote,
+            score: evidenceScore,
+          };
+        }
+        return module;
+      }
+
+      const nextState = moduleNotes.get(module.label);
+      if (!nextState) return module;
+      if (module.note !== nextState.note || module.score !== nextState.score) {
+        changed = true;
+        locationChanged = true;
+        return {
+          ...module,
+          note: nextState.note,
+          score: nextState.score,
+        };
+      }
+      return module;
+    });
+
+    return locationChanged ? { ...location, modules: nextModules } : location;
+  });
+
+  return changed ? next : locations;
+}
+
+function resolveModuleTemplate(
+  modules: UploadModule[],
+  accountId: string,
+  moduleId: "M01" | "M02",
+) {
+  return (
+    modules.find((module) => module.accountId === accountId && module.id === moduleId) ??
+    modules.find((module) => module.accountId === "C001" && module.id === moduleId)
+  );
+}
+
+function resolveLocationArtifactIntake(
+  state: Record<string, IntakeState>,
+  accountId: string,
+  locationId: string,
+  moduleId: "M01" | "M02",
+  artifactKey: string,
+) {
+  const prefix = `${accountId}:${locationId}:${moduleId}:${artifactKey}:`;
+  const matches = Object.entries(state)
+    .filter(([key, value]) => key.startsWith(prefix) && value.uploaded)
+    .map(([, value]) => value)
+    .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")));
+  return matches[0] ?? null;
+}
+
+function readableArtifactLabel(key: string) {
+  return key
+    .replace(/^m0[12]-/, "")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function isStaleArtifactDate(value: string) {
+  const ageMs = Date.now() - new Date(value).getTime();
+  return ageMs > 31 * 24 * 60 * 60 * 1000;
 }

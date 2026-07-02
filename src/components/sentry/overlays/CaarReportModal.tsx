@@ -28,12 +28,14 @@ type Mq6Row = {
 export function CaarReportModal({
   artifactIntakeState,
   onClose,
+  onDownloadPdf,
   onGenerateClaimPack,
   record,
   uploadModules,
 }: {
   artifactIntakeState: Record<string, IntakeState>;
   onClose: () => void;
+  onDownloadPdf: (record: CaarRecord) => void;
   onGenerateClaimPack: (record: CaarRecord) => void;
   record: CaarRecord;
   uploadModules: UploadModule[];
@@ -184,7 +186,7 @@ export function CaarReportModal({
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
-            onClick={() => window.print()}
+            onClick={() => onDownloadPdf(record)}
             className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
           >
             Download PDF

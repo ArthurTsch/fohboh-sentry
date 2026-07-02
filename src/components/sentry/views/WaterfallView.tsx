@@ -349,6 +349,20 @@ export function WaterfallView({
                     <span> / Locked. Requires M01 + M02 active {"\u003e"}= 90 days and Trust Score {"\u003e"}= 85 on both modules.</span>
                   </div>
 
+                  <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                    {location.modules.map((module) => (
+                      <div key={`${location.id}:${module.label}`} className="rounded-2xl border border-[var(--border)] bg-white p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="font-medium text-[var(--text)]">{module.label}</div>
+                          <span className="rounded-full bg-[var(--panel-soft)] px-2 py-1 text-[11px] font-semibold text-[var(--muted)]">
+                            {module.score}
+                          </span>
+                        </div>
+                        <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{module.note}</div>
+                      </div>
+                    ))}
+                  </div>
+
                   <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--border)] pt-4">
                     <button
                       type="button"

@@ -7,13 +7,14 @@ import type {
   UploadModule,
 } from "./types";
 
-type CertificationStep = {
+export type CertificationStep = {
   detail: string;
   done: boolean;
   label: string;
 };
 
-type CertificationResult = {
+export type CertificationResult = {
+  assessments: ModuleAssessment[];
   amountValue: number;
   ready: boolean;
   record: CaarRecord;
@@ -24,7 +25,7 @@ type CertificationResult = {
   updatedRecovery: string;
 };
 
-type ModuleAssessment = {
+export type ModuleAssessment = {
   artifactCoverage: number;
   dimensions: Record<"Auditability" | "Cross-System Reconciliation" | "Data Completeness" | "Data Freshness" | "Rule Integrity" | "Source Authenticity", number>;
   findings: string[];
@@ -69,18 +70,26 @@ export function buildCertificationResult({
   artifactContractState,
   artifactIntakeState,
   location,
+  period,
+  recordId,
+  runAt,
   uploadModules,
 }: {
   artifactContractState: ContractState;
   artifactIntakeState: Record<string, IntakeState>;
   location: LocationRecord;
+  period?: string;
+  recordId?: string;
+  runAt?: Date;
   uploadModules: UploadModule[];
 }): CertificationResult {
+  const evaluationDate = runAt ?? new Date();
   const modules = (["M01", "M02"] as const)
     .map((moduleId) => assessModule({
       accountId: location.accountId,
       artifactContractState,
       artifactIntakeState,
+      evaluationDate,
       locationId: location.id,
       moduleId,
       uploadModules,
@@ -108,25 +117,25 @@ export function buildCertificationResult({
   );
   const ready = activeModules.every((module) => module.ready) && trustScore >= 85;
   const amountValue = Math.max(0, round(activeModules.reduce((sum, module) => sum + module.recoveryValue, 0)));
-  const stamp = new Date()
+  const stamp = evaluationDate
     .toISOString()
     .replace(/[-:TZ.]/g, "")
     .slice(2, 14);
-  const period = new Intl.DateTimeFormat("en-US", {
+  const resolvedPeriod = period ?? new Intl.DateTimeFormat("en-US", {
     month: "long",
     year: "numeric",
-  }).format(new Date());
+  }).format(evaluationDate);
   const record: CaarRecord = {
     accountId: location.accountId,
     amount: formatCurrency(amountValue),
     dimensions: overallDimensions,
     exhibits: activeModules.reduce((sum, assessment) => sum + Math.round((assessment.artifactCoverage / 100) * 5), 0),
     findings: buildOverallFindings(location.name, activeModules, ready, amountValue),
-    id: `CAAR-${stamp}-${location.id.replace(/[^0-9A-Za-z]/g, "")}`,
+    id: recordId ?? `CAAR-${stamp}-${location.id.replace(/[^0-9A-Za-z]/g, "")}`,
     locationId: location.id,
     locationName: location.name,
     narrative: buildNarrative(location.name, activeModules, trustScore, ready),
-    period,
+    period: resolvedPeriod,
     status: ready ? "Court Admissible" : "Needs Remediation",
     trustScore,
   };
@@ -159,6 +168,7 @@ export function buildCertificationResult({
   }
 
   return {
+    assessments: activeModules,
     amountValue,
     ready,
     record,
@@ -266,6 +276,7 @@ function assessModule({
   accountId,
   artifactContractState,
   artifactIntakeState,
+  evaluationDate,
   locationId,
   moduleId,
   uploadModules,
@@ -273,6 +284,7 @@ function assessModule({
   accountId: string;
   artifactContractState: ContractState;
   artifactIntakeState: Record<string, IntakeState>;
+  evaluationDate: Date;
   locationId: string;
   moduleId: "M01" | "M02";
   uploadModules: UploadModule[];
@@ -339,7 +351,7 @@ function assessModule({
         if (!updatedAt) return sum;
         const ageDays = Math.max(
           0,
-          Math.floor((Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24)),
+          Math.floor((evaluationDate.getTime() - new Date(updatedAt).getTime()) / (1000 * 60 * 60 * 24)),
         );
         return sum + (ageDays <= 7 ? 96 : ageDays <= 31 ? 88 : ageDays <= 62 ? 74 : 58);
       }, uploadedCount > 0 ? 0 : 48) / Math.max(uploadedCount, 1),

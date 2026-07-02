@@ -15,25 +15,62 @@ import {
   MANAGER_SESSION_COOKIE_NAME,
   requireSuperAdminSession,
 } from "@/lib/auth/session";
+import { writeAuditLog } from "@/lib/ops/audit";
+import { getRequestContextFromHeaders } from "@/lib/ops/request";
+import { checkRateLimit } from "@/lib/ops/rate-limit";
 
 async function requireAdminSession() {
   try {
-    await requireSuperAdminSession();
+    return await requireSuperAdminSession();
   } catch {
     redirect("/admin");
   }
 }
 
 export async function loginAdminAction(formData: FormData) {
+  const requestContext = await getRequestContextFromHeaders();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const limiter = checkRateLimit({
+    key: `superadmin-login:${requestContext.ipAddress ?? "unknown"}:${email.toLowerCase()}`,
+    limit: 8,
+    windowMs: 15 * 60 * 1000,
+  });
+  if (!limiter.allowed) {
+    redirect("/admin?error=rate-limit");
+  }
   const result = await authenticateManager(email, password);
 
   if (!result.ok) {
+    await writeAuditLog({
+      action: "superadmin_login_failed",
+      entityId: email.toLowerCase() || "unknown",
+      entityType: "auth_session",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        reason: result.error,
+        requestId: requestContext.requestId,
+      },
+      summary: `Superadmin login failed for ${email || "unknown email"}.`,
+      userAgent: requestContext.userAgent,
+    }).catch(() => null);
     redirect("/admin?error=invalid-credentials");
   }
 
   if (result.session.role !== "SuperAdmin") {
+    await writeAuditLog({
+      action: "superadmin_login_denied",
+      actorUserId: result.session.managerId ?? null,
+      entityId: result.session.email,
+      entityType: "auth_session",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        reason: "not-superadmin",
+        requestId: requestContext.requestId,
+      },
+      summary: `Denied superadmin login for ${result.session.email}.`,
+      userAgent: requestContext.userAgent,
+    }).catch(() => null);
     redirect("/admin?error=not-admin");
   }
 
@@ -47,18 +84,45 @@ export async function loginAdminAction(formData: FormData) {
     createSessionCookieValue(result.session),
     getSessionCookieOptions(),
   );
+  await writeAuditLog({
+    action: "superadmin_login_succeeded",
+    actorUserId: result.session.managerId ?? null,
+    entityId: result.session.email,
+    entityType: "auth_session",
+    ipAddress: requestContext.ipAddress,
+    metadata: {
+      requestId: requestContext.requestId,
+    },
+    summary: `Superadmin login succeeded for ${result.session.email}.`,
+    userAgent: requestContext.userAgent,
+  }).catch(() => null);
 
   redirect("/admin");
 }
 
 export async function logoutAdminAction() {
+  const requestContext = await getRequestContextFromHeaders();
+  const session = await requireAdminSession();
   const cookieStore = await cookies();
   cookieStore.delete(MANAGER_SESSION_COOKIE_NAME);
+  await writeAuditLog({
+    action: "superadmin_logout",
+    actorUserId: session.managerId ?? null,
+    entityId: session.email,
+    entityType: "auth_session",
+    ipAddress: requestContext.ipAddress,
+    metadata: {
+      requestId: requestContext.requestId,
+    },
+    summary: `Superadmin logout for ${session.email}.`,
+    userAgent: requestContext.userAgent,
+  }).catch(() => null);
   redirect("/admin");
 }
 
 export async function createManagerAction(formData: FormData) {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
 
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
@@ -76,7 +140,7 @@ export async function createManagerAction(formData: FormData) {
   const passwordHash = await hash(password, 12);
 
   try {
-    await prisma.managers.create({
+    const manager = await prisma.managers.create({
       data: {
         active,
         address: address || null,
@@ -87,6 +151,20 @@ export async function createManagerAction(formData: FormData) {
         phone_number: phoneNumber || null,
         role,
       },
+    });
+    await writeAuditLog({
+      action: "manager_created",
+      actorUserId: session.managerId ?? null,
+      entityId: String(manager.id),
+      entityType: "managers",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        email,
+        requestId: requestContext.requestId,
+        role,
+      },
+      summary: `Created manager ${email}.`,
+      userAgent: requestContext.userAgent,
     });
   } catch (error) {
     if (
@@ -107,7 +185,8 @@ export async function createManagerAction(formData: FormData) {
 }
 
 export async function updateManagerAction(formData: FormData) {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
 
   const id = Number(formData.get("id"));
   const email = String(formData.get("email") ?? "").trim();
@@ -137,6 +216,20 @@ export async function updateManagerAction(formData: FormData) {
         role,
       },
     });
+    await writeAuditLog({
+      action: "manager_updated",
+      actorUserId: session.managerId ?? null,
+      entityId: String(id),
+      entityType: "managers",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        email,
+        requestId: requestContext.requestId,
+        role,
+      },
+      summary: `Updated manager ${email}.`,
+      userAgent: requestContext.userAgent,
+    });
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -156,7 +249,8 @@ export async function updateManagerAction(formData: FormData) {
 }
 
 export async function deleteManagerAction(formData: FormData) {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
 
   const id = Number(formData.get("id"));
   if (!Number.isFinite(id)) {
@@ -164,8 +258,25 @@ export async function deleteManagerAction(formData: FormData) {
   }
 
   try {
+    const existing = await prisma.managers.findUnique({
+      where: { id },
+      select: { email: true, id: true },
+    });
     await prisma.managers.delete({
       where: { id },
+    });
+    await writeAuditLog({
+      action: "manager_deleted",
+      actorUserId: session.managerId ?? null,
+      entityId: String(id),
+      entityType: "managers",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        email: existing?.email ?? null,
+        requestId: requestContext.requestId,
+      },
+      summary: `Deleted manager ${existing?.email ?? `#${id}`}.`,
+      userAgent: requestContext.userAgent,
     });
   } catch {
     redirect("/admin/managers?delete=server-error");
@@ -177,7 +288,8 @@ export async function deleteManagerAction(formData: FormData) {
 }
 
 export async function createRestaurantAction(formData: FormData) {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
 
   const name = String(formData.get("name") ?? "").trim();
   const location = String(formData.get("location") ?? "").trim();
@@ -196,7 +308,7 @@ export async function createRestaurantAction(formData: FormData) {
   }
 
   try {
-    await prisma.restaurants.create({
+    const restaurant = await prisma.restaurants.create({
       data: {
         active,
         city: city || null,
@@ -210,6 +322,20 @@ export async function createRestaurantAction(formData: FormData) {
         unit_id: unitId || null,
         zip_code: zipCode || null,
       },
+    });
+    await writeAuditLog({
+      action: "restaurant_created_superadmin",
+      actorUserId: session.managerId ?? null,
+      entityId: String(restaurant.id),
+      entityType: "restaurants",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        name,
+        requestId: requestContext.requestId,
+        unitId: unitId || null,
+      },
+      summary: `Created restaurant ${name} from superadmin.`,
+      userAgent: requestContext.userAgent,
     });
   } catch (error) {
     if (
@@ -230,7 +356,8 @@ export async function createRestaurantAction(formData: FormData) {
 }
 
 export async function updateRestaurantAction(formData: FormData) {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
 
   const id = Number(formData.get("id"));
   const name = String(formData.get("name") ?? "").trim();
@@ -266,6 +393,20 @@ export async function updateRestaurantAction(formData: FormData) {
         zip_code: zipCode || null,
       },
     });
+    await writeAuditLog({
+      action: "restaurant_updated_superadmin",
+      actorUserId: session.managerId ?? null,
+      entityId: String(id),
+      entityType: "restaurants",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        name,
+        requestId: requestContext.requestId,
+        unitId: unitId || null,
+      },
+      summary: `Updated restaurant ${name} from superadmin.`,
+      userAgent: requestContext.userAgent,
+    });
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -285,7 +426,8 @@ export async function updateRestaurantAction(formData: FormData) {
 }
 
 export async function deleteRestaurantAction(formData: FormData) {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
 
   const id = Number(formData.get("id"));
   if (!Number.isFinite(id)) {
@@ -293,8 +435,25 @@ export async function deleteRestaurantAction(formData: FormData) {
   }
 
   try {
+    const existing = await prisma.restaurants.findUnique({
+      where: { id },
+      select: { id: true, name: true },
+    });
     await prisma.restaurants.delete({
       where: { id },
+    });
+    await writeAuditLog({
+      action: "restaurant_deleted_superadmin",
+      actorUserId: session.managerId ?? null,
+      entityId: String(id),
+      entityType: "restaurants",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        name: existing?.name ?? null,
+        requestId: requestContext.requestId,
+      },
+      summary: `Deleted restaurant ${existing?.name ?? `#${id}`} from superadmin.`,
+      userAgent: requestContext.userAgent,
     });
   } catch {
     redirect("/admin/restaurants?restaurant=server-error");
@@ -306,7 +465,8 @@ export async function deleteRestaurantAction(formData: FormData) {
 }
 
 export async function deleteCaarReportAction(formData: FormData) {
-  await requireAdminSession();
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
 
   const id = Number(formData.get("id"));
   if (!Number.isFinite(id)) {
@@ -314,8 +474,59 @@ export async function deleteCaarReportAction(formData: FormData) {
   }
 
   try {
-    await prisma.caar_reports.delete({
-      where: { id },
+    await prisma.$transaction(async (tx) => {
+      const report = await tx.caar_reports.findUnique({
+        where: { id },
+        select: {
+          caar_id: true,
+          id: true,
+        },
+      });
+
+      if (!report) {
+        throw new Error("not-found");
+      }
+
+      const persistedCaar = await tx.caars_v2.findFirst({
+        where: {
+          caar_external_id: report.caar_id,
+        },
+        select: {
+          id: true,
+        },
+      }).catch(() => null);
+
+      if (persistedCaar) {
+        await tx.caar_artifacts_v2.deleteMany({
+          where: {
+            caar_id: persistedCaar.id,
+          },
+        });
+        await tx.caars_v2.delete({
+          where: {
+            id: persistedCaar.id,
+          },
+        });
+      }
+
+      await tx.caar_reports.delete({
+        where: { id: report.id },
+      });
+      await writeAuditLog(
+        {
+          action: "caar_deleted_superadmin",
+          actorUserId: session.managerId ?? null,
+          entityId: report.caar_id,
+          entityType: "caars_v2",
+          ipAddress: requestContext.ipAddress,
+          metadata: {
+            requestId: requestContext.requestId,
+          },
+          summary: `Deleted CAAR ${report.caar_id} from superadmin.`,
+          userAgent: requestContext.userAgent,
+        },
+        tx,
+      );
     });
   } catch {
     redirect("/admin/management?caar=server-error");

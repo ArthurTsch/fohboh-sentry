@@ -16,10 +16,10 @@ export function WgsAdminView({
   accounts: WgsAccount[];
   approvals: WgsApproval[];
   onAddUser: () => void;
-  onApprove: (approvalId: string) => void;
+  onApprove: (approvalId: string) => void | Promise<void>;
   onEnterSupportMode: (accountId: string) => void;
   onOpenUser: (user: WgsUser) => void;
-  onResolveQueue: (ticketId: string) => void;
+  onResolveQueue: (ticketId: string) => void | Promise<void>;
   queue: WgsQueueItem[];
   users: WgsUser[];
 }) {

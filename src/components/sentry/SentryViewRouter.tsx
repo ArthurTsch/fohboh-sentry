@@ -56,6 +56,7 @@ export function SentryViewRouter({
   onExpandAll,
   onFilterChange,
   onOpenCaar,
+  onDownloadPdf,
   onOpenOnboarding,
   onOpenSchemaEditor,
   onOpenUploads,
@@ -97,7 +98,7 @@ export function SentryViewRouter({
   logFilter: "all" | "immutable" | "editable";
   onAddLocation: () => void;
   onAddUser: () => void;
-  onApprove: (approvalId: string) => void;
+  onApprove: (approvalId: string) => void | Promise<void>;
   onArtifactAction: (
     moduleId: "M01" | "M02",
     artifactKey: string,
@@ -114,12 +115,13 @@ export function SentryViewRouter({
   onExpandAll: () => void;
   onFilterChange: (filter: "all" | "immutable" | "editable") => void;
   onOpenCaar: Dispatch<SetStateAction<CaarRecord | null>>;
+  onDownloadPdf: (record: CaarRecord) => void;
   onOpenOnboarding: (locationId: string) => void;
   onOpenSchemaEditor: Dispatch<SetStateAction<SchemaWorkspace | null>>;
   onOpenUploads: (locationId: string) => void;
   onOpenUser: Dispatch<SetStateAction<WgsUser | null>>;
   onQueryChange: Dispatch<SetStateAction<string>>;
-  onResolveQueue: (ticketId: string) => void;
+  onResolveQueue: (ticketId: string) => void | Promise<void>;
   onRunCertification: (locationId: string) => void;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   onToggleChecklist: (stepId: string, itemIndex: number) => void;
@@ -170,7 +172,7 @@ export function SentryViewRouter({
   }
 
   if (activeView === "caars") {
-    return <CaarListView onOpenCaar={onOpenCaar} records={caars} />;
+    return <CaarListView onDownloadPdf={onDownloadPdf} onOpenCaar={onOpenCaar} records={caars} />;
   }
 
   if (activeView === "log") {

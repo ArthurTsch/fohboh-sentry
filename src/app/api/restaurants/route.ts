@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/app/generated/prisma/client";
 import { requireManagerSession } from "@/lib/auth/session";
+import { logServerError, writeAuditLog } from "@/lib/ops/audit";
+import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
+import { checkRateLimit } from "@/lib/ops/rate-limit";
 import prisma from "@/lib/prisma";
 
 function isMissingSentryStateTable(error: unknown) {
@@ -142,10 +145,27 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const requestContext = getRequestContextFromRequest(request);
   try {
     const session = await requireManagerSession();
     if (session.role === "Viewer") {
-      return NextResponse.json({ error: "This account cannot create locations." }, { status: 403 });
+      return withRequestHeaders(
+        NextResponse.json({ error: "This account cannot create locations." }, { status: 403 }),
+        requestContext,
+      );
+    }
+    const limiter = checkRateLimit({
+      key: `restaurant-create:${session.managerId ?? session.email}:${requestContext.ipAddress ?? "unknown"}`,
+      limit: 20,
+      windowMs: 60 * 60 * 1000,
+    });
+    if (!limiter.allowed) {
+      const response = NextResponse.json(
+        { error: "Too many location creation attempts. Try again later." },
+        { status: 429 },
+      );
+      response.headers.set("retry-after", String(Math.ceil((limiter.resetAt - Date.now()) / 1000)));
+      return withRequestHeaders(response, requestContext);
     }
 
     const body = (await request.json()) as {
@@ -231,7 +251,23 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({
+    await writeAuditLog({
+      action: "restaurant_created",
+      actorUserId: createdBy,
+      entityId: String(restaurant.id),
+      entityType: "restaurants",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        accountId: resolvedAccountId,
+        locationId,
+        locationName: restaurant.name,
+        requestId: requestContext.requestId,
+      },
+      summary: `Created restaurant ${restaurant.name}.`,
+      userAgent: requestContext.userAgent,
+    });
+
+    return withRequestHeaders(NextResponse.json({
       restaurant: {
         accountId: resolvedAccountId,
         address: restaurant.location,
@@ -240,11 +276,11 @@ export async function POST(request: Request) {
         name: restaurant.name,
         unitId: restaurant.unit_id,
       },
-    });
+    }), requestContext);
   } catch (error) {
     const authResponse = getAuthErrorResponse(error);
     if (authResponse) {
-      return authResponse;
+      return withRequestHeaders(authResponse, requestContext);
     }
 
     if (
@@ -253,16 +289,18 @@ export async function POST(request: Request) {
       "code" in error &&
       error.code === "P2002"
     ) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "A restaurant with that internal location ID already exists." },
         { status: 409 },
-      );
+      ), requestContext);
     }
 
-    console.error("Create restaurant failed:", error);
-    return NextResponse.json(
+    logServerError("restaurant_create_failed", error, {
+      requestId: requestContext.requestId,
+    });
+    return withRequestHeaders(NextResponse.json(
       { error: "Unable to create restaurant right now." },
       { status: 500 },
-    );
+    ), requestContext);
   }
 }

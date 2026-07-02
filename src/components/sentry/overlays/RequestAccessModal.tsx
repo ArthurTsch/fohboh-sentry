@@ -26,7 +26,7 @@ export function RequestAccessModal({
   onSubmit,
 }: {
   onClose: () => void;
-  onSubmit: (draft: RequestAccessDraft) => void;
+  onSubmit: (draft: RequestAccessDraft) => void | Promise<void>;
 }) {
   const [draft, setDraft] = useState<RequestAccessDraft>(emptyRequestAccessDraft);
   const [step, setStep] = useState(0);

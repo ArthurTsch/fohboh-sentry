@@ -2,9 +2,11 @@ import type { CaarRecord } from "../types";
 import { HelpTip, SectionCard } from "../ui/primitives";
 
 export function CaarListView({
+  onDownloadPdf,
   onOpenCaar,
   records,
 }: {
+  onDownloadPdf: (record: CaarRecord) => void;
   onOpenCaar: (record: CaarRecord) => void;
   records: CaarRecord[];
 }) {
@@ -155,7 +157,7 @@ export function CaarListView({
                   </button>
                   <button
                     type="button"
-                    onClick={() => window.print()}
+                    onClick={() => onDownloadPdf(record)}
                     className="rounded-lg border border-[rgba(214,48,49,0.3)] px-3 py-2 text-sm text-[var(--accent)] transition hover:bg-[rgba(214,48,49,0.08)]"
                   >
                     PDF
