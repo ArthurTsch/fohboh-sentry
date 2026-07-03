@@ -5,6 +5,7 @@ import { logServerError, writeAuditLog } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
 import { checkRateLimit } from "@/lib/ops/rate-limit";
 import prisma from "@/lib/prisma";
+import { buildGeneratedUnitId } from "@/lib/restaurants/ids";
 
 function isMissingSentryStateTable(error: unknown) {
   return (
@@ -202,7 +203,7 @@ export async function POST(request: Request) {
         ? body.accountId ?? null
         : session.accountId ?? body.accountId ?? null;
 
-    const restaurant = await prisma.restaurants.create({
+    const createdRestaurant = await prisma.restaurants.create({
       data: {
         active: true,
         created_by: createdBy,
@@ -220,11 +221,30 @@ export async function POST(request: Request) {
       },
     });
 
+    const generatedUnitId = unitId || buildGeneratedUnitId(createdRestaurant.id);
+    const restaurant =
+      createdRestaurant.unit_id?.trim() && createdRestaurant.store_id?.trim()
+        ? createdRestaurant
+        : await prisma.restaurants.update({
+            where: { id: createdRestaurant.id },
+            data: {
+              store_id: createdRestaurant.store_id?.trim() || generatedUnitId,
+              unit_id: createdRestaurant.unit_id?.trim() || generatedUnitId,
+            },
+            select: {
+              id: true,
+              location: true,
+              name: true,
+              store_id: true,
+              unit_id: true,
+            },
+          });
+
     const locationId =
       body.sentryState?.locationId?.trim() ||
       restaurant.unit_id?.trim() ||
       restaurant.store_id?.trim() ||
-      `LOC-DB-${restaurant.id}`;
+      buildGeneratedUnitId(restaurant.id);
 
     try {
       await prisma.restaurant_sentry_state.create({

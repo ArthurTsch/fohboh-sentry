@@ -3,6 +3,7 @@ import type {
   CaarRecord,
   IntakeState,
   LocationRecord,
+  LocationWorkflowState,
   LogRecord,
   Role,
   SchemaWorkspace,
@@ -57,10 +58,12 @@ export function SentryViewRouter({
   onFilterChange,
   onOpenCaar,
   onDownloadPdf,
+  onOpenDiy,
   onOpenOnboarding,
   onOpenSchemaEditor,
   onOpenUploads,
   onOpenUser,
+  onInitializeWorkspace,
   onQueryChange,
   onResolveQueue,
   onRunCertification,
@@ -78,6 +81,7 @@ export function SentryViewRouter({
   uploadFeedback,
   uploadModules,
   users,
+  workflowByLocation,
 }: {
   accounts: WgsAccount[];
   activeView: ViewId;
@@ -120,6 +124,8 @@ export function SentryViewRouter({
   onOpenSchemaEditor: Dispatch<SetStateAction<SchemaWorkspace | null>>;
   onOpenUploads: (locationId: string) => void;
   onOpenUser: Dispatch<SetStateAction<WgsUser | null>>;
+  onInitializeWorkspace: (locationId: string, module: "M01" | "M02", vendor?: string) => void;
+  onOpenDiy: () => void;
   onQueryChange: Dispatch<SetStateAction<string>>;
   onResolveQueue: (ticketId: string) => void | Promise<void>;
   onRunCertification: (locationId: string) => void;
@@ -137,6 +143,7 @@ export function SentryViewRouter({
   uploadFeedback: UploadReceipt | null;
   uploadModules: UploadModule[];
   users: WgsUser[];
+  workflowByLocation: Record<string, LocationWorkflowState>;
 }) {
   if (activeView === "dashboard") {
     return (
@@ -161,12 +168,14 @@ export function SentryViewRouter({
         onAddLocation={onAddLocation}
         onExpandAll={onExpandAll}
         onOpenCaar={onOpenCaar}
+        onOpenDiy={onOpenDiy}
         onOpenOnboarding={onOpenOnboarding}
         onOpenSchema={() => onViewChange("schema")}
         onRunCertification={onRunCertification}
         onToggleLocation={onToggleLocation}
         onOpenUploads={onOpenUploads}
         role={role}
+        workflowByLocation={workflowByLocation}
       />
     );
   }
@@ -189,10 +198,12 @@ export function SentryViewRouter({
 
   if (activeView === "diy") {
     return (
-      <DiyAccessView
-        onEditWorkspace={onOpenSchemaEditor}
-        onSealWorkspace={onSealWorkspace}
-        role={role}
+        <DiyAccessView
+        locations={locations}
+          onEditWorkspace={onOpenSchemaEditor}
+          onInitializeWorkspace={onInitializeWorkspace}
+          onSealWorkspace={onSealWorkspace}
+          role={role}
         workspaces={schemaWorkspaces}
       />
     );

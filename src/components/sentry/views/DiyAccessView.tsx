@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Role, SchemaWorkspace } from "../types";
+import { wgsM01Vendors, wgsM02Vendors } from "../data";
+import type { LocationRecord, Role, SchemaWorkspace } from "../types";
 import { Badge, HelpTip, MetaBlock, SectionCard } from "../ui/primitives";
 import { UserGuideView } from "./UserGuideView";
 
@@ -9,12 +10,16 @@ type DiyTab = "m01" | "m02" | "guide";
 type RegistryTab = "mappings" | "missing" | "contract" | "vault";
 
 export function DiyAccessView({
+  locations,
   onEditWorkspace,
+  onInitializeWorkspace,
   onSealWorkspace,
   role,
   workspaces,
 }: {
+  locations: LocationRecord[];
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
+  onInitializeWorkspace: (locationId: string, module: "M01" | "M02", vendor?: string) => void;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   role: Role;
   workspaces: SchemaWorkspace[];
@@ -23,21 +28,50 @@ export function DiyAccessView({
   const [m01Panel, setM01Panel] = useState<RegistryTab>("mappings");
   const [m02Panel, setM02Panel] = useState<RegistryTab>("mappings");
   const unlocked = role === "Admin" || role === "SuperAdmin" || role === "WGS Manager";
+  const dbWorkspaces = useMemo(
+    () => workspaces.filter((workspace) => Boolean(workspace.locationId)),
+    [workspaces],
+  );
+  const hiddenTemplateCount = workspaces.length - dbWorkspaces.length;
 
   const m01Workspaces = useMemo(
-    () => workspaces.filter((workspace) => workspace.module === "M01"),
-    [workspaces],
+    () => dbWorkspaces.filter((workspace) => workspace.module === "M01"),
+    [dbWorkspaces],
   );
   const m02Workspaces = useMemo(
-    () => workspaces.filter((workspace) => workspace.module === "M02"),
-    [workspaces],
+    () => dbWorkspaces.filter((workspace) => workspace.module === "M02"),
+    [dbWorkspaces],
   );
 
-  const [m01Vendor, setM01Vendor] = useState(m01Workspaces[0]?.vendor ?? "");
-  const [m02Vendor, setM02Vendor] = useState(m02Workspaces[0]?.vendor ?? "");
+  const [m01LocationId, setM01LocationId] = useState("");
+  const [m02LocationId, setM02LocationId] = useState("");
+  const [m01Vendor, setM01Vendor] = useState("");
+  const [m02Vendor, setM02Vendor] = useState("");
 
-  const activeM01 = m01Workspaces.find((workspace) => workspace.vendor === m01Vendor) ?? m01Workspaces[0] ?? null;
-  const activeM02 = m02Workspaces.find((workspace) => workspace.vendor === m02Vendor) ?? m02Workspaces[0] ?? null;
+  const selectedM01LocationId =
+    (m01LocationId && locations.some((location) => location.id === m01LocationId) ? m01LocationId : "") ||
+    m01Workspaces[0]?.locationId ||
+    locations[0]?.id ||
+    "";
+  const selectedM02LocationId =
+    (m02LocationId && locations.some((location) => location.id === m02LocationId) ? m02LocationId : "") ||
+    m02Workspaces[0]?.locationId ||
+    locations[0]?.id ||
+    "";
+
+  const m01LocationWorkspaces = useMemo(
+    () => m01Workspaces.filter((workspace) => workspace.locationId === selectedM01LocationId),
+    [m01Workspaces, selectedM01LocationId],
+  );
+  const m02LocationWorkspaces = useMemo(
+    () => m02Workspaces.filter((workspace) => workspace.locationId === selectedM02LocationId),
+    [m02Workspaces, selectedM02LocationId],
+  );
+
+  const activeM01 =
+    m01LocationWorkspaces.find((workspace) => workspace.vendor === m01Vendor) ?? m01LocationWorkspaces[0] ?? null;
+  const activeM02 =
+    m02LocationWorkspaces.find((workspace) => workspace.vendor === m02Vendor) ?? m02LocationWorkspaces[0] ?? null;
 
   if (!unlocked) {
     return (
@@ -132,13 +166,26 @@ export function DiyAccessView({
         <DiyTabButton active={tab === "guide"} label="User Guide" onClick={() => setTab("guide")} />
       </div>
 
+      {hiddenTemplateCount > 0 ? (
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
+          DIY Access now shows location-bound governance workspaces only. {hiddenTemplateCount} legacy template
+          {hiddenTemplateCount === 1 ? "" : "s"} are hidden to avoid mixing demo data with persisted client records.
+        </div>
+      ) : null}
+
       {tab === "guide" ? <UserGuideView /> : null}
       {tab === "m01" && activeM01 ? (
         <RegistryWorkspacePanel
+          locations={locations}
+          selectedLocationId={selectedM01LocationId}
           workspace={activeM01}
-          workspaces={m01Workspaces}
+          workspaces={m01LocationWorkspaces}
           activePanel={m01Panel}
           onChangePanel={setM01Panel}
+          onChangeLocation={(locationId) => {
+            setM01LocationId(locationId);
+            setM01Panel("mappings");
+          }}
           onChangeVendor={(vendor) => {
             setM01Vendor(vendor);
             setM01Panel("mappings");
@@ -147,12 +194,28 @@ export function DiyAccessView({
           onSealWorkspace={onSealWorkspace}
         />
       ) : null}
+      {tab === "m01" && !activeM01 ? (
+        <EmptyWorkspaceState
+          locations={locations}
+          module="M01"
+          onEditWorkspace={onEditWorkspace}
+          onInitializeWorkspace={onInitializeWorkspace}
+          onSealWorkspace={onSealWorkspace}
+          workspaces={m01Workspaces}
+        />
+      ) : null}
       {tab === "m02" && activeM02 ? (
         <RegistryWorkspacePanel
+          locations={locations}
+          selectedLocationId={selectedM02LocationId}
           workspace={activeM02}
-          workspaces={m02Workspaces}
+          workspaces={m02LocationWorkspaces}
           activePanel={m02Panel}
           onChangePanel={setM02Panel}
+          onChangeLocation={(locationId) => {
+            setM02LocationId(locationId);
+            setM02Panel("mappings");
+          }}
           onChangeVendor={(vendor) => {
             setM02Vendor(vendor);
             setM02Panel("mappings");
@@ -161,24 +224,164 @@ export function DiyAccessView({
           onSealWorkspace={onSealWorkspace}
         />
       ) : null}
+      {tab === "m02" && !activeM02 ? (
+        <EmptyWorkspaceState
+          locations={locations}
+          module="M02"
+          onEditWorkspace={onEditWorkspace}
+          onInitializeWorkspace={onInitializeWorkspace}
+          onSealWorkspace={onSealWorkspace}
+          workspaces={m02Workspaces}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function EmptyWorkspaceState({
+  locations,
+  module,
+  onEditWorkspace,
+  onInitializeWorkspace,
+  onSealWorkspace,
+  workspaces,
+}: {
+  locations: LocationRecord[];
+  module: "M01" | "M02";
+  onEditWorkspace: (workspace: SchemaWorkspace) => void;
+  onInitializeWorkspace: (locationId: string, module: "M01" | "M02", vendor?: string) => void;
+  onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
+  workspaces: SchemaWorkspace[];
+}) {
+  const vendorOptions = module === "M01" ? wgsM01Vendors : wgsM02Vendors;
+
+  return (
+    <SectionCard className="space-y-5">
+      <div>
+        <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
+          Initialize or continue {module} workspaces
+        </div>
+        <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted)]">
+          Every location must have a real Schema Registry workspace before certification can run.
+          Initialize missing vendors, continue draft workspaces, or open sealed vault-backed records below.
+        </p>
+      </div>
+
+      {locations.length > 0 ? (
+        <div className="grid gap-4">
+          {locations.map((location) => {
+            const locationWorkspaces = workspaces.filter((workspace) => workspace.locationId === location.id);
+            const sealedCount = locationWorkspaces.filter((workspace) => getWorkspaceStatus(workspace) === "sealed").length;
+            const draftCount = locationWorkspaces.filter((workspace) => getWorkspaceStatus(workspace) === "draft").length;
+            const stateTone = sealedCount > 0 ? "success" : draftCount > 0 ? "warning" : "danger";
+            const stateLabel =
+              sealedCount > 0
+                ? `${sealedCount} sealed${draftCount > 0 ? ` · ${draftCount} draft` : ""}`
+                : draftCount > 0
+                  ? `${draftCount} draft`
+                  : "Uninitialized";
+
+            return (
+              <div
+                key={`${module}:${location.id}`}
+                className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="font-medium text-[var(--text)]">{location.name}</div>
+                    <div className="mt-1 text-sm text-[var(--muted)]">
+                      {location.id} | {location.market}
+                    </div>
+                  </div>
+                  <Badge tone={stateTone}>{stateLabel}</Badge>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {vendorOptions.map((vendor) => {
+                    const workspace = locationWorkspaces.find((item) => item.vendor === vendor.name) ?? null;
+                    const status = workspace ? getWorkspaceStatus(workspace) : null;
+
+                    return (
+                      <div
+                        key={`${location.id}:${module}:${vendor.name}`}
+                        className="rounded-xl border border-[var(--border)] bg-white p-3"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-medium text-[var(--text)]">{vendor.name}</div>
+                          {status ? (
+                            <Badge tone={status === "sealed" ? "success" : "warning"}>
+                              {status === "sealed" ? "Sealed" : "Draft"}
+                            </Badge>
+                          ) : (
+                            <Badge tone="danger">Missing</Badge>
+                          )}
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {workspace ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => onEditWorkspace(workspace)}
+                                className="rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+                              >
+                                {status === "sealed" ? "Open Workspace" : "Continue Draft"}
+                              </button>
+                              {status !== "sealed" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onSealWorkspace(workspace)}
+                                  className="rounded-full bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+                                >
+                                  Seal Vault
+                                </button>
+                              ) : null}
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onInitializeWorkspace(location.id, module, vendor.name)}
+                              className="rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+                            >
+                              Initialize {vendor.name}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-10 text-center text-sm text-[var(--muted)]">
+          Add a location first, then initialize the {module} Schema Registry from this screen.
+        </div>
+      )}
+    </SectionCard>
   );
 }
 
 function RegistryWorkspacePanel({
   activePanel,
+  locations,
   onChangePanel,
+  onChangeLocation,
   onChangeVendor,
   onEditWorkspace,
   onSealWorkspace,
+  selectedLocationId,
   workspace,
   workspaces,
 }: {
   activePanel: RegistryTab;
+  locations: LocationRecord[];
   onChangePanel: (panel: RegistryTab) => void;
+  onChangeLocation: (locationId: string) => void;
   onChangeVendor: (vendor: string) => void;
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
+  selectedLocationId: string;
   workspace: SchemaWorkspace;
   workspaces: SchemaWorkspace[];
 }) {
@@ -199,12 +402,31 @@ function RegistryWorkspacePanel({
               ? "Card processor column mapping | Contract Config | Sealed by WGS Manager"
               : "DSP column mapping | Contract Config | Sealed by WGS Manager"}
           </div>
+          <div className="mt-2 text-sm text-[var(--muted)]">
+            {workspace.locationName ?? workspace.locationId ?? "Location workspace"}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex flex-wrap gap-2">
+            {locations.map((location) => (
+              <button
+                key={`${workspace.module}:location:${location.id}`}
+                type="button"
+                onClick={() => onChangeLocation(location.id)}
+                className={`rounded-full border px-3 py-1.5 text-[12px] transition ${
+                  location.id === selectedLocationId
+                    ? "border-[var(--accent)] bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"
+                    : "border-[var(--border)] bg-white text-[var(--muted)] hover:border-[var(--text)] hover:text-[var(--text)]"
+                }`}
+              >
+                {location.name}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
             {workspaces.map((item) => (
               <button
-                key={`${item.module}:${item.vendor}`}
+                key={`${item.module}:${item.locationId ?? "global"}:${item.vendor}`}
                 type="button"
                 onClick={() => onChangeVendor(item.vendor)}
                 className={`rounded-full border px-3 py-1.5 text-[12px] transition ${
@@ -444,4 +666,12 @@ function downloadWorkspaceTemplate(workspace: SchemaWorkspace) {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+function getWorkspaceStatus(workspace: SchemaWorkspace): "draft" | "sealed" {
+  if (workspace.status === "sealed" || workspace.vault.state === "sealed") {
+    return "sealed";
+  }
+
+  return "draft";
 }

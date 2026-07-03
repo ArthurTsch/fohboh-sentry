@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
+import { buildGeneratedUnitId } from "@/lib/restaurants/ids";
 import {
   authenticateManager,
 } from "@/lib/auth/manager-auth";
@@ -324,7 +325,7 @@ export async function createRestaurantAction(formData: FormData) {
   }
 
   try {
-    const restaurant = await prisma.restaurants.create({
+    const createdRestaurant = await prisma.restaurants.create({
       data: {
         active,
         city: city || null,
@@ -339,6 +340,17 @@ export async function createRestaurantAction(formData: FormData) {
         zip_code: zipCode || null,
       },
     });
+    const generatedUnitId = unitId || storeId || buildGeneratedUnitId(createdRestaurant.id);
+    const restaurant =
+      createdRestaurant.unit_id && createdRestaurant.store_id
+        ? createdRestaurant
+        : await prisma.restaurants.update({
+            where: { id: createdRestaurant.id },
+            data: {
+              store_id: createdRestaurant.store_id || generatedUnitId,
+              unit_id: createdRestaurant.unit_id || generatedUnitId,
+            },
+          });
     await writeAuditLog({
       action: "restaurant_created_superadmin",
       actorUserId: session.managerId ?? null,
@@ -348,7 +360,7 @@ export async function createRestaurantAction(formData: FormData) {
       metadata: {
         name,
         requestId: requestContext.requestId,
-        unitId: unitId || null,
+        unitId: generatedUnitId,
       },
       summary: `Created restaurant ${name} from superadmin.`,
       userAgent: requestContext.userAgent,

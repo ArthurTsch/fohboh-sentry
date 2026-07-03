@@ -62,23 +62,29 @@ export function LogView({
         <span>User</span>
         <span>Status</span>
       </div>
-      {entries.map((entry) => (
-        <div
-          key={entry.hash}
-          className="grid gap-3 border-t border-[var(--border)] px-5 py-4 text-sm first:border-t-0 lg:grid-cols-[130px_160px_1fr_140px_140px_120px]"
-        >
-          <div>{entry.ts}</div>
-          <div>{entry.location}</div>
-          <div>{entry.action}</div>
-          <div className="font-[family-name:var(--font-mono)] text-[var(--info)]">{entry.hash}</div>
-          <div>{entry.user}</div>
-          <div>
-            <Badge tone={entry.immutable ? "success" : "neutral"}>
-              {entry.immutable ? "Immutable" : "Editable"}
-            </Badge>
+      {entries.length > 0 ? (
+        entries.map((entry) => (
+          <div
+            key={entry.hash}
+            className="grid gap-3 border-t border-[var(--border)] px-5 py-4 text-sm first:border-t-0 lg:grid-cols-[130px_160px_1fr_140px_140px_120px]"
+          >
+            <div>{entry.ts}</div>
+            <div>{entry.location}</div>
+            <div>{entry.action}</div>
+            <div className="font-[family-name:var(--font-mono)] text-[var(--info)]">{entry.hash}</div>
+            <div>{entry.user}</div>
+            <div>
+              <Badge tone={entry.immutable ? "success" : "neutral"}>
+                {entry.immutable ? "Immutable" : "Editable"}
+              </Badge>
+            </div>
           </div>
+        ))
+      ) : (
+        <div className="px-5 py-10 text-center text-sm text-[var(--muted)]">
+          No activity has been recorded for the current scope yet.
         </div>
-      ))}
+      )}
     </SectionCard>
   );
 }

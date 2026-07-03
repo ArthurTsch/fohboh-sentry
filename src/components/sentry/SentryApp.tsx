@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useMemo,
   startTransition,
   useDeferredValue,
   useEffect,
@@ -10,18 +11,13 @@ import {
 } from "react";
 import { navigation, viewMeta } from "./config";
 import {
-  caarRecords,
   emptyAddLocationDraft,
   faqItems,
   initialMessages,
-  locations,
-  logRecords,
   schemaWorkspaces,
   uploadModules,
-  wgsAccounts,
-  wgsApprovals,
-  wgsQueue,
-  wgsUsers,
+  wgsM01Vendors,
+  wgsM02Vendors,
 } from "./data";
 import {
   extractManualMetrics,
@@ -38,6 +34,7 @@ import { SchemaEditorModal } from "./overlays/SchemaEditorModal";
 import { SupportChat } from "./overlays/SupportChat";
 import { Toast } from "./overlays/Toast";
 import { UploadChecklistModal } from "./overlays/UploadChecklistModal";
+import { WorkflowBlockerModal } from "./overlays/WorkflowBlockerModal";
 import { WgsOnboardingWizard } from "./overlays/WgsOnboardingWizard";
 import { WgsUserModal } from "./overlays/WgsUserModal";
 import { SentryShell } from "./SentryShell";
@@ -48,6 +45,7 @@ import type {
   ChatMessage,
   IntakeState,
   LocationRecord,
+  LocationWorkflowState,
   LogRecord,
   RequestAccessDraft,
   SchemaWorkspace,
@@ -57,6 +55,7 @@ import type {
   UploadModule,
   UploadReceipt,
   ViewId,
+  WgsAccount,
   WgsApproval,
   WgsOnboardingProgress,
   WgsQueueItem,
@@ -88,6 +87,14 @@ type ActiveCertificationState = {
 type PendingCertificationRequest = {
   locationId: string;
   locationName: string;
+};
+
+type CertificationBlockerState = {
+  blockers: string[];
+  locationId: string;
+  locationName: string;
+  primaryAction: LocationWorkflowState["primaryAction"];
+  primaryLabel: string;
 };
 
 const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
@@ -177,6 +184,7 @@ type PersistedCertificationResponse = {
 type PersistedWorkspaceRecord = SchemaWorkspace;
 type PersistedSupportTicket = WgsQueueItem;
 type PersistedAccessRequest = WgsApproval;
+type PersistedActivityLog = LogRecord;
 
 export function SentryApp({ initialSession = null }: { initialSession?: SessionState | null }) {
   const locationStatePersistenceStatusRef = useRef<"unknown" | "available" | "missing-table">(
@@ -194,20 +202,22 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [toast, setToast] = useState<string | null>(null);
 
-  const [caarState, setCaarState] = useState(caarRecords);
-  const [locationState, setLocationState] = useState(locations);
-  const [assignedLocationState, setAssignedLocationState] = useState<typeof locations>([]);
-  const [logState, setLogState] = useState(logRecords);
-  const [uploadState, setUploadState] = useState(uploadModules);
-  const [schemaState, setSchemaState] = useState(schemaWorkspaces);
-  const [wgsAccountState] = useState(wgsAccounts);
-  const [wgsQueueState, setWgsQueueState] = useState(wgsQueue);
-  const [wgsApprovalState, setWgsApprovalState] = useState(wgsApprovals);
-  const [wgsUserState, setWgsUserState] = useState(wgsUsers);
+  const [caarState, setCaarState] = useState<CaarRecord[]>([]);
+  const [locationState, setLocationState] = useState<LocationRecord[]>([]);
+  const [assignedLocationState, setAssignedLocationState] = useState<LocationRecord[]>([]);
+  const [logState, setLogState] = useState<LogRecord[]>([]);
+  const [uploadState, setUploadState] = useState<UploadModule[]>(
+    uploadModules.filter((module) => module.accountId === BASE_UPLOAD_TEMPLATE_ACCOUNT_ID),
+  );
+  const [schemaState, setSchemaState] = useState<SchemaWorkspace[]>([]);
+  const [wgsAccountState] = useState<WgsAccount[]>([]);
+  const [wgsQueueState, setWgsQueueState] = useState<WgsQueueItem[]>([]);
+  const [wgsApprovalState, setWgsApprovalState] = useState<WgsApproval[]>([]);
+  const [wgsUserState, setWgsUserState] = useState<WgsUser[]>([]);
   const [wgsOnboardingState, setWgsOnboardingState] = useState<Record<string, WgsOnboardingProgress>>({});
   const [onboardingState, setOnboardingState] = useState<Record<string, boolean[]>>({
-    account: [true, true, false],
-    vendors: [true, false, false],
+    account: [false, false, false],
+    vendors: [false, false, false],
     evidence: [false, false, false],
     schema: [false, false, false],
     seal: [false, false, false],
@@ -226,6 +236,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   const [artifactContractState, setArtifactContractState] = useState<Record<string, Record<string, string>>>({});
   const [activeCertification, setActiveCertification] = useState<ActiveCertificationState | null>(null);
   const [pendingCertificationRequest, setPendingCertificationRequest] = useState<PendingCertificationRequest | null>(null);
+  const [certificationBlocker, setCertificationBlocker] = useState<CertificationBlockerState | null>(null);
   const [activeUploadLocation, setActiveUploadLocation] = useState<{
     accountId: string;
     id: string;
@@ -251,6 +262,21 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     : locationState;
 
   const deferredFaqQuery = useDeferredValue(faqQuery);
+  const workflowByLocation = useMemo(
+    () =>
+      Object.fromEntries(
+        runtimeLocationState.map((location) => [
+          location.id,
+          deriveLocationWorkflowState({
+            artifactIntakeState,
+            location,
+            schemaState,
+            uploadState,
+          }),
+        ]),
+      ) as Record<string, LocationWorkflowState>,
+    [artifactIntakeState, runtimeLocationState, schemaState, uploadState],
+  );
 
   const persistenceHydrated = useSentryPersistence(
     {
@@ -345,6 +371,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       const index = next.findIndex(
         (item) =>
           item.accountId === workspace.accountId &&
+          item.locationId === workspace.locationId &&
           item.module === workspace.module &&
           item.vendor === workspace.vendor,
       );
@@ -582,6 +609,28 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     setWgsApprovalState(payload.requests ?? []);
   }, [effectiveSession, persistenceHydrated]);
 
+  const syncAuditLogs = useCallback(async function syncLogs(
+    sessionState: SessionState | null = effectiveSession,
+  ) {
+    if (!sessionState || !persistenceHydrated) {
+      return;
+    }
+
+    const response = await fetch("/api/v1/activity-log", {
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as {
+      logs?: PersistedActivityLog[];
+    };
+
+    setLogState(payload.logs ?? []);
+  }, [effectiveSession, persistenceHydrated]);
+
   useEffect(() => {
     if (!effectiveSession || !persistenceHydrated) return;
 
@@ -599,6 +648,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         syncGovernanceWorkspaces(sessionState),
         syncSupportTickets(sessionState),
         syncAccessRequests(sessionState),
+        syncAuditLogs(sessionState),
       ]);
 
       if (cancelled) return;
@@ -614,6 +664,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     persistenceHydrated,
     syncAssignedCaars,
     syncAssignedRestaurants,
+    syncAuditLogs,
     syncAccessRequests,
     syncGovernanceWorkspaces,
     syncPersistedUploads,
@@ -642,7 +693,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     uploadState,
   });
 
-  function upsertRuntimeLocation(nextLocation: (typeof locations)[number]) {
+  function upsertRuntimeLocation(nextLocation: LocationRecord) {
     setAssignedLocationState((current) => {
       const index = current.findIndex((item) => item.id === nextLocation.id);
       if (index === -1) {
@@ -655,7 +706,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
 
   function updateRuntimeLocation(
     locationId: string,
-    updater: (location: (typeof locations)[number]) => (typeof locations)[number],
+    updater: (location: LocationRecord) => LocationRecord,
   ) {
     setAssignedLocationState((current) =>
       current.map((item) => (item.id === locationId ? updater(item) : item)),
@@ -740,6 +791,44 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     ]);
   }
 
+  async function recordClientActivity(args: {
+    accountId?: string;
+    action: string;
+    entityId?: string;
+    entityType?: string;
+    immutable?: boolean;
+    locationId?: string;
+    locationName?: string;
+    summary: string;
+  }) {
+    appendLog({
+      accountId: args.accountId ?? getScopedAccountId(),
+      action: args.summary,
+      immutable: Boolean(args.immutable),
+      location: args.locationName ?? "Portfolio",
+      user: effectiveSession?.name?.trim() || effectiveSession?.email || "system",
+    });
+
+    await fetch("/api/v1/activity-log", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        accountId: args.accountId ?? getScopedAccountId(),
+        action: args.action,
+        entityId: args.entityId,
+        entityType: args.entityType ?? "ui_event",
+        immutable: Boolean(args.immutable),
+        locationId: args.locationId,
+        locationName: args.locationName,
+        summary: args.summary,
+      }),
+    }).catch(() => null);
+
+    void syncAuditLogs();
+  }
+
   function handleLogin(nextSession: SessionState) {
     startTransition(() => {
       setSession(nextSession);
@@ -770,6 +859,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       setActiveArtifact(null);
       setActiveChecklist(null);
       setActiveCertification(null);
+      setCertificationBlocker(null);
       setActiveUploadLocation(null);
       setUploadFeedback(null);
       setAssignedLocationState([]);
@@ -793,6 +883,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       name: location.name,
     });
     startTransition(() => setActiveViewOverride("uploads"));
+  }
+
+  function handleOpenDiy() {
+    startTransition(() => setActiveViewOverride("diy"));
   }
 
   function toggleLocation(id: string) {
@@ -921,12 +1015,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       onboardingChecklist: onboardingState,
       onboardingProgress: createWgsOnboardingProgress(),
     });
-    appendLog({
-      accountId: location.accountId,
-      action: `Location added for onboarding: ${location.name}`,
-      immutable: false,
-      location: location.name,
-    });
+    void syncAuditLogs();
     showToast(`${draft.name} added. WGS onboarding plan created.`);
   }
 
@@ -963,19 +1052,14 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     }
 
     const { receipt } = applyPersistedUpload(payload.upload, target.accountId);
-    appendLog({
-      accountId: target.accountId,
-      action: `${target.artifact.label} uploaded into ${target.moduleId}`,
-      immutable: true,
-      location: target.locationName,
-    });
+    void syncAuditLogs();
     setUploadFeedback(receipt);
     showToast(`${receipt.fileName} uploaded and stored.`);
     return receipt;
   }
 
   async function persistLocationState(
-    location: (typeof locations)[number],
+    location: LocationRecord,
     options?: {
       onboardingChecklist?: Record<string, boolean[]>;
       onboardingProgress?: WgsOnboardingProgress;
@@ -1114,6 +1198,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     if (!savedWorkspace) {
       return;
     }
+    void syncAuditLogs();
     showToast("Schema draft saved.");
   }
 
@@ -1122,13 +1207,62 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     if (!sealedWorkspace) {
       return;
     }
-    appendLog({
-      accountId: sealedWorkspace.accountId,
-      action: `${sealedWorkspace.module} ${sealedWorkspace.vendor} contract config sealed to vault`,
-      immutable: true,
-      location: sealedWorkspace.account,
-    });
+    void syncAuditLogs();
     showToast("Workspace sealed to vault.");
+  }
+
+  function handleInitializeWorkspace(
+    locationId: string,
+    module: "M01" | "M02",
+    vendor?: string,
+  ) {
+    const location = runtimeLocationState.find((item) => item.id === locationId);
+    if (!location) {
+      showToast("Select a valid location before creating a schema workspace.");
+      return;
+    }
+
+    const vendorName =
+      vendor ??
+      (module === "M01" ? wgsM01Vendors[0]?.name : wgsM02Vendors[0]?.name) ??
+      (module === "M01" ? "Heartland" : "DoorDash");
+    const template =
+      schemaWorkspaces.find((workspace) => workspace.module === module && workspace.vendor === vendorName) ??
+      schemaWorkspaces.find((workspace) => workspace.module === module);
+
+    if (!template) {
+      showToast(`No ${module} template is available to initialize the workspace.`);
+      return;
+    }
+
+    setEditingWorkspace({
+      account: location.name,
+      accountId: location.accountId,
+      contract: template.contract.map((field) => ({
+        ...field,
+        source:
+          field.source.includes("agreement") || field.source.includes("Signed")
+            ? field.source
+            : "Pending signed source document",
+        value: field.value,
+      })),
+      fields: template.fields.map((field) => ({
+        ...field,
+        confidence: field.required ? "Needs Review" : field.confidence,
+      })),
+      locationId: location.id,
+      locationName: location.name,
+      module,
+      status: "draft",
+      vault: {
+        hash: "pending",
+        sealedAt: "Pending",
+        sealedBy: effectiveSession?.email ?? "system",
+        state: "draft",
+        version: `${module.toLowerCase()}-draft`,
+      },
+      vendor: vendorName,
+    });
   }
 
   function handleToggleChecklist(stepId: string, itemIndex: number) {
@@ -1152,7 +1286,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   }
 
   async function handleResolveQueue(ticketId: string) {
-    const ticket = wgsQueueState.find((item) => item.id === ticketId);
     const response = await fetch(`/api/v1/support/tickets/${encodeURIComponent(ticketId)}`, {
       method: "PATCH",
     });
@@ -1163,19 +1296,11 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     }
 
     setWgsQueueState((current) => current.filter((item) => item.id !== ticketId));
-    if (ticket) {
-      appendLog({
-        accountId: wgsAccountState.find((account) => account.name === ticket.account)?.id ?? "C001",
-        action: `Support ticket resolved: ${ticket.issue}`,
-        immutable: false,
-        location: ticket.account,
-      });
-    }
+    void syncAuditLogs();
     showToast(`Ticket ${ticketId} marked resolved.`);
   }
 
   async function handleApprove(approvalId: string) {
-    const approval = wgsApprovalState.find((item) => item.id === approvalId);
     const response = await fetch(`/api/v1/access-requests/${encodeURIComponent(approvalId)}`, {
       method: "PATCH",
     });
@@ -1186,14 +1311,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     }
 
     setWgsApprovalState((current) => current.filter((item) => item.id !== approvalId));
-    if (approval) {
-      appendLog({
-        accountId: wgsAccountState.find((account) => account.name === approval.account)?.id ?? "C001",
-        action: `Approval completed: ${approval.type}`,
-        immutable: false,
-        location: approval.account,
-      });
-    }
+    void syncAuditLogs();
     showToast(`Approval ${approvalId} completed.`);
   }
 
@@ -1213,13 +1331,15 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     );
     setEditingWgsUser(null);
     setCreatingWgsUser(false);
-    appendLog({
-      accountId: getScopedAccountId(),
-      action: isNew
+    void recordClientActivity({
+      action: isNew ? "wgs_user_created" : "wgs_user_updated",
+      entityId: resolvedUser.id,
+      entityType: "wgs_user",
+      immutable: false,
+      locationName: "WGS Admin",
+      summary: isNew
         ? `WGS user created: ${resolvedUser.firstName} ${resolvedUser.lastName}`
         : `WGS user updated: ${resolvedUser.firstName} ${resolvedUser.lastName}`,
-      immutable: false,
-      location: "WGS Admin",
     });
     showToast(isNew ? `Setup email sent to ${resolvedUser.email}.` : "WGS user updated.");
   }
@@ -1314,11 +1434,15 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
           : module,
       ),
     );
-    appendLog({
+    void recordClientActivity({
       accountId: activeArtifact.accountId,
-      action: `${activeArtifact.artifact.label} intake advanced in ${activeArtifact.moduleId}`,
+      action: "artifact_intake_advanced",
+      entityId: `${activeArtifact.moduleId}:${activeArtifact.artifact.key}:${activeArtifact.locationId}`,
+      entityType: "artifact_intake",
       immutable: isReady,
-      location: activeArtifact.locationName,
+      locationId: activeArtifact.locationId,
+      locationName: activeArtifact.locationName,
+      summary: `${activeArtifact.artifact.label} intake advanced in ${activeArtifact.moduleId}.`,
     });
   }
 
@@ -1348,6 +1472,15 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       accountName: account?.name ?? accountId,
     });
     setActiveViewOverride("dashboard");
+    void recordClientActivity({
+      accountId,
+      action: "support_mode_enabled",
+      entityId: accountId,
+      entityType: "support_mode",
+      immutable: false,
+      locationName: "Portfolio",
+      summary: `Support Mode enabled for ${account?.name ?? accountId}.`,
+    });
     showToast(`Support Mode enabled for ${account?.name ?? accountId}.`);
   }
 
@@ -1425,21 +1558,27 @@ function handleCompleteOnboarding(locationId: string) {
       onboardingChecklist: onboardingState,
       onboardingProgress: completedProgress,
     });
-    appendLog({
+    void recordClientActivity({
       accountId: location.accountId,
-      action: `${location.name} onboarding completed and marked live`,
+      action: "location_onboarding_completed",
+      entityId: location.id,
+      entityType: "location_onboarding",
       immutable: false,
-      location: location.name,
+      locationId: location.id,
+      locationName: location.name,
+      summary: `${location.name} onboarding completed and marked live.`,
     });
     showToast(`${location.name} onboarding complete.`);
   }
 
   function handleSendPasswordReset(userId: string, email: string) {
-    appendLog({
-      accountId: getScopedAccountId(),
-      action: `Password reset link sent to ${email}`,
+    void recordClientActivity({
+      action: "wgs_user_password_reset_requested",
+      entityId: userId,
+      entityType: "wgs_user",
       immutable: false,
-      location: "WGS Admin",
+      locationName: "WGS Admin",
+      summary: `Password reset link sent to ${email}.`,
     });
     showToast(`Reset link sent to ${email}.`);
   }
@@ -1451,11 +1590,13 @@ function handleCompleteOnboarding(locationId: string) {
       current.map((item) => (item.id === userId ? { ...item, status: "Inactive" } : item)),
     );
     setEditingWgsUser(null);
-    appendLog({
-      accountId: getScopedAccountId(),
-      action: `WGS account deactivated: ${user.firstName} ${user.lastName}`,
+    void recordClientActivity({
+      action: "wgs_user_deactivated",
+      entityId: userId,
+      entityType: "wgs_user",
       immutable: false,
-      location: "WGS Admin",
+      locationName: "WGS Admin",
+      summary: `WGS account deactivated: ${user.firstName} ${user.lastName}.`,
     });
     showToast(`${user.firstName} ${user.lastName} deactivated.`);
   }
@@ -1496,11 +1637,15 @@ function handleCompleteOnboarding(locationId: string) {
       return;
     }
 
-    appendLog({
+    void recordClientActivity({
       accountId: record.accountId,
-      action: `ExportPack generated for ${record.id}`,
+      action: "caar_exportpack_generated",
+      entityId: record.id,
+      entityType: "caars_v2",
       immutable: true,
-      location: record.locationName,
+      locationId: record.locationId,
+      locationName: record.locationName,
+      summary: `ExportPack generated for ${record.id}.`,
     });
     showToast(`ExportPack generated for ${record.id}.`);
     if (payload?.downloadUrl) {
@@ -1543,13 +1688,7 @@ function handleCompleteOnboarding(locationId: string) {
     if (payload?.request && effectiveSession?.role === "WGS Manager") {
       setWgsApprovalState((current) => [payload.request!, ...current]);
     }
-    appendLog({
-      accountId: getScopedAccountId(),
-      action: `Request access submitted for ${draft.company}`,
-      immutable: false,
-      location: "Landing",
-      user: draft.email,
-    });
+    void syncAuditLogs();
     setShowRequestAccess(false);
     showToast("Access request submitted for WGS review.");
   }
@@ -1585,18 +1724,24 @@ function handleCompleteOnboarding(locationId: string) {
     if (payload?.ticket && (effectiveSession?.role === "WGS Manager" || effectiveSession?.role === "SuperAdmin" || effectiveSession?.role === "Admin")) {
       setWgsQueueState((current) => [payload.ticket!, ...current]);
     }
-    appendLog({
-      accountId: getScopedAccountId(),
-      action: `Support ticket created: ${message}`,
-      immutable: false,
-      location: accountName,
-    });
+    void syncAuditLogs();
     showToast("Support ticket added to the WGS queue.");
   }
 
   function handleRunCertification(locationId: string) {
     const location = runtimeLocationState.find((item) => item.id === locationId);
     if (!location) return;
+    const workflow = workflowByLocation[locationId];
+    if (workflow && !workflow.readyForCertification) {
+      setCertificationBlocker({
+        blockers: workflow.blockers,
+        locationId,
+        locationName: location.name,
+        primaryAction: workflow.primaryAction,
+        primaryLabel: workflow.primaryLabel,
+      });
+      return;
+    }
     setPendingCertificationRequest({
       locationId,
       locationName: location.name,
@@ -1626,6 +1771,17 @@ function handleCompleteOnboarding(locationId: string) {
       | null;
 
     if (!response.ok || !payload?.certification || !payload.location) {
+      const workflow = workflowByLocation[request.locationId];
+      if (response.status === 409) {
+        setCertificationBlocker({
+          blockers: parseCertificationBlockers(payload?.error, workflow),
+          locationId: request.locationId,
+          locationName: location.name,
+          primaryAction: workflow?.primaryAction ?? "uploads",
+          primaryLabel: workflow?.primaryLabel ?? "Open Upload Data",
+        });
+        return;
+      }
       showToast(payload?.error ?? "Unable to run certification right now.");
       return;
     }
@@ -1645,12 +1801,6 @@ function handleCompleteOnboarding(locationId: string) {
         certification.record,
         ...current.filter((item) => item.locationId !== request.locationId),
       ]);
-    appendLog({
-      accountId: location.accountId,
-      action: `Certification completed for ${location.name}`,
-      immutable: true,
-      location: location.name,
-    });
       setActiveCertification({
         cadence: certification.cadence ?? cadence,
         locationId: request.locationId,
@@ -1659,7 +1809,7 @@ function handleCompleteOnboarding(locationId: string) {
         steps: certification.steps,
         trustScore: certification.trustScore,
       });
-      await Promise.all([syncAssignedRestaurants(), syncAssignedCaars()]);
+      await Promise.all([syncAssignedRestaurants(), syncAssignedCaars(), syncAuditLogs()]);
       showToast(
         cadence === "weekly_preliminary"
           ? `${certification.record.id} preliminary certification saved.`
@@ -1761,10 +1911,12 @@ function handleCompleteOnboarding(locationId: string) {
           onFilterChange={setLogFilter}
           onDownloadPdf={handleDownloadCaarPdf}
           onOpenCaar={setSelectedCaar}
+          onOpenDiy={handleOpenDiy}
           onOpenOnboarding={handleOpenOnboarding}
           onOpenSchemaEditor={setEditingWorkspace}
           onOpenUploads={handleOpenLocationUploads}
           onOpenUser={setEditingWgsUser}
+          onInitializeWorkspace={handleInitializeWorkspace}
           onQueryChange={setFaqQuery}
           onResolveQueue={handleResolveQueue}
           onRunCertification={handleRunCertification}
@@ -1782,6 +1934,7 @@ function handleCompleteOnboarding(locationId: string) {
           uploadFeedback={uploadFeedback}
           uploadModules={scopedUploadModules}
           users={wgsUserState}
+          workflowByLocation={workflowByLocation}
         />
       </SentryShell>
 
@@ -1898,6 +2051,19 @@ function handleCompleteOnboarding(locationId: string) {
           ready={activeCertification.ready}
           steps={activeCertification.steps}
           trustScore={activeCertification.trustScore}
+        />
+      ) : null}
+
+      {certificationBlocker ? (
+        <WorkflowBlockerModal
+          blockers={certificationBlocker.blockers}
+          locationName={certificationBlocker.locationName}
+          onClose={() => setCertificationBlocker(null)}
+          onOpenDiy={handleOpenDiy}
+          onOpenOnboarding={() => handleOpenOnboarding(certificationBlocker.locationId)}
+          onOpenUploads={() => handleOpenLocationUploads(certificationBlocker.locationId)}
+          primaryAction={certificationBlocker.primaryAction}
+          primaryLabel={certificationBlocker.primaryLabel}
         />
       ) : null}
 
@@ -2082,6 +2248,125 @@ function getContractValue(contract: SchemaWorkspace["contract"], label: string) 
 
 function extractNumericValue(value: string) {
   return value.replace(/[^0-9.-]/g, "");
+}
+
+function deriveLocationWorkflowState({
+  artifactIntakeState,
+  location,
+  schemaState,
+  uploadState,
+}: {
+  artifactIntakeState: Record<string, IntakeState>;
+  location: LocationRecord;
+  schemaState: SchemaWorkspace[];
+  uploadState: UploadModule[];
+}) {
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  const activeModules = location.modules
+    .map((module) => module.label)
+    .filter((label): label is "M01" | "M02" => label === "M01" || label === "M02");
+
+  if (location.status === "Onboarding") {
+    blockers.push("Complete onboarding and activation for this location before certification can run.");
+  }
+
+  let schemaBlocked = false;
+  let uploadBlocked = false;
+
+  for (const moduleId of activeModules) {
+    const sealedWorkspace = schemaState.some(
+      (workspace) =>
+        workspace.accountId === location.accountId &&
+        workspace.locationId === location.id &&
+        workspace.module === moduleId &&
+        (workspace.status === "sealed" || workspace.vault.state === "sealed"),
+    );
+
+    if (!sealedWorkspace) {
+      schemaBlocked = true;
+      blockers.push(`${moduleId} schema registry and contract config must be sealed in DIY Access.`);
+    }
+
+    const template = resolveModuleTemplate(uploadState, location.accountId, moduleId);
+    const missingArtifacts = (template?.artifacts ?? [])
+      .filter((artifact) => artifact.type !== "Manual Entry")
+      .filter((artifact) =>
+        !resolveLocationArtifactIntake(
+          artifactIntakeState,
+          location.accountId,
+          location.id,
+          moduleId,
+          artifact.key,
+        )?.uploaded,
+      )
+      .map((artifact) => artifact.label);
+
+    if (missingArtifacts.length > 0) {
+      uploadBlocked = true;
+      blockers.push(`${moduleId} evidence still missing: ${missingArtifacts.join(", ")}.`);
+    }
+
+    const latestArtifact = (template?.artifacts ?? [])
+      .filter((artifact) => artifact.type !== "Manual Entry")
+      .map((artifact) =>
+        resolveLocationArtifactIntake(
+          artifactIntakeState,
+          location.accountId,
+          location.id,
+          moduleId,
+          artifact.key,
+        ),
+      )
+      .filter((artifact): artifact is IntakeState => Boolean(artifact))
+      .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))[0];
+
+    if (latestArtifact?.updatedAt && isStaleArtifactDate(latestArtifact.updatedAt)) {
+      warnings.push(`${moduleId} uploads are older than 31 days. Upload the current period evidence before rerun.`);
+    }
+  }
+
+  const readyForCertification = blockers.length === 0;
+  const primaryAction = location.status === "Onboarding"
+    ? "onboarding"
+    : schemaBlocked
+      ? "diy"
+      : uploadBlocked
+        ? "uploads"
+        : "certification";
+
+  const primaryLabel =
+    primaryAction === "onboarding"
+      ? "Continue Onboarding"
+      : primaryAction === "diy"
+        ? "Seal Schema Workspace"
+        : primaryAction === "uploads"
+          ? "Upload Missing Evidence"
+          : "Run Certification";
+
+  return {
+    blockers,
+    primaryAction,
+    primaryLabel,
+    readyForCertification,
+    warnings,
+  } satisfies LocationWorkflowState;
+}
+
+function parseCertificationBlockers(
+  message: string | undefined,
+  workflow: LocationWorkflowState | undefined,
+) {
+  if (message?.startsWith("Certification cannot run yet:")) {
+    return message
+      .replace("Certification cannot run yet:", "")
+      .replace(/\.$/, "")
+      .split(";")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return workflow?.blockers.length ? workflow.blockers : ["Complete the remaining certification prerequisites first."];
 }
 
 function applyLifecycleNotesToLocations({

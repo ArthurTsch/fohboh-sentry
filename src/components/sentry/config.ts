@@ -71,22 +71,22 @@ export const viewMeta: Record<ViewId, { eyebrow: string; title: string; sub: str
 export const navigation = [
   {
     section: "Overview",
-    items: [{ id: "dashboard" as ViewId, label: "Dashboard", icon: "⬢" }],
+    items: [{ id: "dashboard" as ViewId, label: "Dashboard", icon: "dashboard" }],
   },
   {
     section: "Recovery",
     items: [
-      { id: "waterfall" as ViewId, label: "Location Waterfall", icon: "📍" },
-      { id: "caars" as ViewId, label: "CAARs", icon: "📋" },
-      { id: "log" as ViewId, label: "Activity Log", icon: "🕐" },
+      { id: "waterfall" as ViewId, label: "Location Waterfall", icon: "waterfall" },
+      { id: "caars" as ViewId, label: "CAARs", icon: "caars" },
+      { id: "log" as ViewId, label: "Activity Log", icon: "log" },
     ],
   },
   {
     section: "Settings & Help",
     items: [
-      { id: "permissions" as ViewId, label: "Permissions", icon: "🔐" },
-      { id: "userguide" as ViewId, label: "User Guide", icon: "📖" },
-      { id: "faq" as ViewId, label: "FAQ", icon: "💡" },
+      { id: "permissions" as ViewId, label: "Permissions", icon: "permissions" },
+      { id: "userguide" as ViewId, label: "User Guide", icon: "userguide" },
+      { id: "faq" as ViewId, label: "FAQ", icon: "faq" },
     ],
   },
 ];

@@ -1,5 +1,5 @@
-import type { CaarRecord, LocationRecord, Role } from "../types";
-import { HelpTip, SectionCard } from "../ui/primitives";
+import type { CaarRecord, LocationRecord, LocationWorkflowState, Role } from "../types";
+import { Badge, HelpTip, SectionCard } from "../ui/primitives";
 
 export function WaterfallView({
   caars,
@@ -8,12 +8,14 @@ export function WaterfallView({
   onAddLocation,
   onExpandAll,
   onOpenCaar,
+  onOpenDiy,
   onOpenOnboarding,
   onOpenSchema,
   onRunCertification,
   onToggleLocation,
   onOpenUploads,
   role,
+  workflowByLocation,
 }: {
   caars: CaarRecord[];
   expandedLocations: string[];
@@ -21,12 +23,14 @@ export function WaterfallView({
   onAddLocation: () => void;
   onExpandAll: () => void;
   onOpenCaar: (record: CaarRecord) => void;
+  onOpenDiy: () => void;
   onOpenOnboarding: (locationId: string) => void;
   onOpenSchema: () => void;
   onRunCertification: (locationId: string) => void;
   onToggleLocation: (id: string) => void;
   onOpenUploads: (locationId: string) => void;
   role: Role;
+  workflowByLocation: Record<string, LocationWorkflowState>;
 }) {
   const canUpload =
     role === "Admin" || role === "SuperAdmin" || role === "Manager" || role === "WGS Manager";
@@ -228,6 +232,10 @@ export function WaterfallView({
           const open = expandedLocations.includes(location.id);
           const caar = caars.find((record) => record.locationId === location.id);
           const onboarding = location.status === "Onboarding";
+          const workflow = workflowByLocation[location.id];
+          const primaryActionLabel = onboarding
+            ? "Start Onboarding"
+            : workflow?.primaryLabel ?? "Upload Data";
 
           return (
             <div
@@ -271,13 +279,18 @@ export function WaterfallView({
                 </button>
 
                 <div className="flex flex-wrap justify-end gap-2">
-                  {onboarding ? (
+                  {onboarding || (workflow && !workflow.readyForCertification) ? (
                     <button
                       type="button"
-                      onClick={() => onOpenOnboarding(location.id)}
+                      onClick={() => handleWorkflowAction(workflow?.primaryAction ?? "onboarding", {
+                        locationId: location.id,
+                        onOpenDiy,
+                        onOpenOnboarding,
+                        onOpenUploads,
+                      })}
                       className="rounded-lg border border-[var(--accent)] bg-[rgba(214,48,49,0.08)] px-3 py-2 text-sm font-semibold text-[var(--accent)] transition hover:bg-[rgba(214,48,49,0.14)]"
                     >
-                      Start Onboarding
+                      {primaryActionLabel}
                     </button>
                   ) : canUpload ? (
                     <button
@@ -313,9 +326,13 @@ export function WaterfallView({
                     <button
                       type="button"
                       onClick={() => onRunCertification(location.id)}
-                      className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                      className={`rounded-lg border px-3 py-2 text-sm transition ${
+                        workflow?.readyForCertification
+                          ? "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                          : "border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.05)] text-[var(--accent)] hover:bg-[rgba(214,48,49,0.1)]"
+                      }`}
                     >
-                      Run Cert
+                      {workflow?.readyForCertification ? "Run Cert" : "Review Blockers"}
                     </button>
                   ) : null}
                 </div>
@@ -323,6 +340,15 @@ export function WaterfallView({
 
               {!onboarding && open ? (
                 <div className="bg-[var(--surface)] px-5 py-5">
+                  {workflow ? (
+                    <WorkflowStatusCard
+                      onOpenDiy={() => onOpenDiy()}
+                      onOpenUploads={() => onOpenUploads(location.id)}
+                      onRunCertification={() => onRunCertification(location.id)}
+                      workflow={workflow}
+                    />
+                  ) : null}
+
                   <div className="grid gap-4 lg:grid-cols-3">
                     <DetailCard
                       label="M01 Recovery This Month"
@@ -373,10 +399,10 @@ export function WaterfallView({
                     </button>
                     <button
                       type="button"
-                      onClick={onOpenSchema}
+                      onClick={workflow?.primaryAction === "diy" ? onOpenDiy : onOpenSchema}
                       className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
                     >
-                      Schema Registry
+                      {workflow?.primaryAction === "diy" ? "DIY Access" : "Schema Registry"}
                     </button>
                     <button
                       type="button"
@@ -396,6 +422,122 @@ export function WaterfallView({
       </div>
     </SectionCard>
   );
+}
+
+function WorkflowStatusCard({
+  onOpenDiy,
+  onOpenUploads,
+  onRunCertification,
+  workflow,
+}: {
+  onOpenDiy: () => void;
+  onOpenUploads: () => void;
+  onRunCertification: () => void;
+  workflow: LocationWorkflowState;
+}) {
+  return (
+    <div className="mb-4 rounded-2xl border border-[var(--border)] bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.03em] text-[var(--text)]">
+            Certification Workflow
+          </div>
+          <div className="mt-1 text-sm text-[var(--muted)]">
+            {workflow.readyForCertification
+              ? "All governed prerequisites are complete for the next certification cycle."
+              : "Action is still required before certification can run."}
+          </div>
+        </div>
+        <Badge tone={workflow.readyForCertification ? "success" : "warning"}>
+          {workflow.readyForCertification ? "Ready" : "Action Required"}
+        </Badge>
+      </div>
+
+      {workflow.blockers.length > 0 ? (
+        <div className="mt-4 space-y-2">
+          {workflow.blockers.map((blocker, index) => (
+            <div
+              key={`workflow-blocker:${index}:${blocker}`}
+              className="rounded-xl border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)] px-4 py-3 text-sm text-[var(--text)]"
+            >
+              {blocker}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {workflow.warnings.length > 0 ? (
+        <div className="mt-4 space-y-2">
+          {workflow.warnings.map((warning, index) => (
+            <div
+              key={`workflow-warning:${index}:${warning}`}
+              className="rounded-xl border border-[rgba(255,152,0,0.18)] bg-[rgba(255,152,0,0.08)] px-4 py-3 text-sm text-[var(--text)]"
+            >
+              {warning}
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => {
+            if (workflow.readyForCertification) {
+              onRunCertification();
+              return;
+            }
+
+            if (workflow.primaryAction === "diy") {
+              onOpenDiy();
+              return;
+            }
+
+            onOpenUploads();
+          }}
+          className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+        >
+          {workflow.readyForCertification ? "Run Certification" : workflow.primaryLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onOpenUploads}
+          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+        >
+          Open Upload Data
+        </button>
+        <button
+          type="button"
+          onClick={onOpenDiy}
+          className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+        >
+          Open DIY Access
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function handleWorkflowAction(
+  action: LocationWorkflowState["primaryAction"],
+  handlers: {
+    locationId: string;
+    onOpenDiy: () => void;
+    onOpenOnboarding: (locationId: string) => void;
+    onOpenUploads: (locationId: string) => void;
+  },
+) {
+  if (action === "onboarding") {
+    handlers.onOpenOnboarding(handlers.locationId);
+    return;
+  }
+
+  if (action === "diy") {
+    handlers.onOpenDiy();
+    return;
+  }
+
+  handlers.onOpenUploads(handlers.locationId);
 }
 
 function HeaderWithTip({

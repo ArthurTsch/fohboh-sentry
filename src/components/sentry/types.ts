@@ -370,6 +370,16 @@ export type SessionState = {
   role: Role;
 };
 
+export type LocationWorkflowAction = "onboarding" | "uploads" | "diy" | "certification";
+
+export type LocationWorkflowState = {
+  blockers: string[];
+  primaryAction: LocationWorkflowAction;
+  primaryLabel: string;
+  readyForCertification: boolean;
+  warnings: string[];
+};
+
 export type SupportModeState = {
   active: boolean;
   accountId: string | null;

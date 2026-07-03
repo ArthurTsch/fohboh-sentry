@@ -8,6 +8,8 @@ import {
   workspaceToSchemaPayload,
 } from "@/lib/governance/workspaces";
 import { requireManagerSession } from "@/lib/auth/session";
+import { writeAuditLog, logServerError } from "@/lib/ops/audit";
+import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
 import prisma from "@/lib/prisma";
 import { ensureLocationV2ForRestaurant } from "@/lib/production/legacy-sync";
 
@@ -115,13 +117,14 @@ function pickLatestByKey<T extends { version: number }>(rows: T[], keyBuilder: (
   return result;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const requestContext = getRequestContextFromRequest(request);
   try {
     const session = await requireManagerSession();
     const restaurants = await getScopedRestaurants(session);
 
     if (restaurants.length === 0) {
-      return NextResponse.json({ workspaces: [] });
+      return withRequestHeaders(NextResponse.json({ workspaces: [] }), requestContext);
     }
 
     const externalIds = restaurants.map((restaurant) => restaurant.locationId);
@@ -141,7 +144,7 @@ export async function GET() {
     });
 
     if (locations.length === 0) {
-      return NextResponse.json({ workspaces: [] });
+      return withRequestHeaders(NextResponse.json({ workspaces: [] }), requestContext);
     }
 
     const locationById = new Map(locations.map((location) => [location.id, location]));
@@ -224,36 +227,39 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json({ workspaces });
+    return withRequestHeaders(NextResponse.json({ workspaces }), requestContext);
   } catch (error) {
     const authResponse = getAuthErrorResponse(error);
     if (authResponse) {
-      return authResponse;
+      return withRequestHeaders(authResponse, requestContext);
     }
 
     if (isMissingGovernanceSchema(error)) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         {
           error:
             "The Phase 4 governance migration has not been applied yet. Update the database before using persisted schema and contract config.",
         },
         { status: 503 },
-      );
+      ), requestContext);
     }
 
-    console.error("Fetch governance workspaces failed:", error);
-    return NextResponse.json(
+    logServerError("governance_workspaces_fetch_failed", error, {
+      requestId: requestContext.requestId,
+    });
+    return withRequestHeaders(NextResponse.json(
       { error: "Unable to load governance workspaces right now." },
       { status: 500 },
-    );
+    ), requestContext);
   }
 }
 
 export async function POST(request: Request) {
+  const requestContext = getRequestContextFromRequest(request);
   try {
     const session = await requireManagerSession();
     if (session.role === "Viewer") {
-      return NextResponse.json({ error: "This account cannot modify governance workspaces." }, { status: 403 });
+      return withRequestHeaders(NextResponse.json({ error: "This account cannot modify governance workspaces." }, { status: 403 }), requestContext);
     }
     const body = (await request.json()) as {
       action?: "draft" | "seal";
@@ -262,28 +268,28 @@ export async function POST(request: Request) {
     const action = body.action;
 
     if (action === "seal" && session.role !== "WGS Manager" && session.role !== "SuperAdmin") {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "Only WGS can seal Schema Registry and Contract Config records." },
         { status: 403 },
-      );
+      ), requestContext);
     }
     if (action === "draft" && session.role !== "Admin" && session.role !== "WGS Manager" && session.role !== "SuperAdmin") {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "Only Admin or WGS can edit governance workspaces." },
         { status: 403 },
-      );
+      ), requestContext);
     }
     if (typeof session.managerId !== "number") {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "This account is missing a database-backed manager identity." },
         { status: 403 },
-      );
+      ), requestContext);
     }
     const managerId = session.managerId;
     const workspace = body.workspace;
 
     if (!workspace || (action !== "draft" && action !== "seal")) {
-      return NextResponse.json({ error: "Valid action and workspace are required." }, { status: 400 });
+      return withRequestHeaders(NextResponse.json({ error: "Valid action and workspace are required." }, { status: 400 }), requestContext);
     }
 
     const restaurants = await getScopedRestaurants(session);
@@ -294,10 +300,10 @@ export async function POST(request: Request) {
       restaurants.find((item) => item.accountId === workspace.accountId);
 
     if (!restaurant?.accountId) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "Unable to resolve a governed location for this workspace." },
         { status: 404 },
-      );
+      ), requestContext);
     }
     const accountId = restaurant.accountId;
 
@@ -436,6 +442,31 @@ export async function POST(request: Request) {
         }),
       ]);
 
+      await writeAuditLog(
+        {
+          action: action === "seal" ? "governance_workspace_sealed" : "governance_workspace_saved",
+          actorUserId: managerId,
+          customerId: location.customer_id,
+          entityId: `${normalizedWorkspace.module}:${normalizedWorkspace.vendor}:${restaurant.locationId}:${schemaVersion}`,
+          entityType: action === "seal" ? "contract_configs_v2" : "schema_registry_v2",
+          ipAddress: requestContext.ipAddress,
+          locationId: location.id,
+          metadata: {
+            immutable: action === "seal",
+            locationName: restaurant.name,
+            module: normalizedWorkspace.module,
+            status: action,
+            vendor: normalizedWorkspace.vendor,
+          },
+          summary:
+            action === "seal"
+              ? `${normalizedWorkspace.module} ${normalizedWorkspace.vendor} workspace sealed for ${restaurant.name}.`
+              : `${normalizedWorkspace.module} ${normalizedWorkspace.vendor} workspace draft saved for ${restaurant.name}.`,
+          userAgent: requestContext.userAgent,
+        },
+        tx,
+      );
+
       return normalizeWorkspaceFromRecords({
         account: restaurant.name,
         accountId,
@@ -449,33 +480,35 @@ export async function POST(request: Request) {
     });
 
     if (!persisted) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         { error: "Unable to normalize the saved workspace." },
         { status: 500 },
-      );
+      ), requestContext);
     }
 
-    return NextResponse.json({ workspace: persisted });
+    return withRequestHeaders(NextResponse.json({ workspace: persisted }), requestContext);
   } catch (error) {
     const authResponse = getAuthErrorResponse(error);
     if (authResponse) {
-      return authResponse;
+      return withRequestHeaders(authResponse, requestContext);
     }
 
     if (isMissingGovernanceSchema(error)) {
-      return NextResponse.json(
+      return withRequestHeaders(NextResponse.json(
         {
           error:
             "The Phase 4 governance migration has not been applied yet. Update the database before using persisted schema and contract config.",
         },
         { status: 503 },
-      );
+      ), requestContext);
     }
 
-    console.error("Persist governance workspace failed:", error);
-    return NextResponse.json(
+    logServerError("governance_workspace_persist_failed", error, {
+      requestId: requestContext.requestId,
+    });
+    return withRequestHeaders(NextResponse.json(
       { error: "Unable to save the governance workspace right now." },
       { status: 500 },
-    );
+    ), requestContext);
   }
 }

@@ -5,7 +5,7 @@ import { getInitials } from "./utils";
 import { HelpTip } from "./ui/primitives";
 
 const navHelp: Record<
-  ViewId | "role" | "support" | "diy",
+  ViewId | "role" | "support" | "diy" | "profile",
   {
     footerLabel?: string;
     footerValue?: string;
@@ -210,28 +210,23 @@ export function SentryShell({
                 {group.section}
               </div>
               <div className="space-y-1">
-                {group.items.map((item) => {
-                  const active = item.id === activeView;
-                  const help = navHelp[item.id];
-
-                  return (
-                    <SidebarItem
-                      key={item.id}
-                      active={active}
-                      icon={item.icon}
-                      label={item.label}
-                      help={help}
-                      onClick={() => onViewChange(item.id)}
-                    />
-                  );
-                })}
+                {group.items.map((item) => (
+                  <SidebarItem
+                    key={item.id}
+                    active={item.id === activeView}
+                    help={navHelp[item.id]}
+                    icon={item.icon}
+                    label={item.label}
+                    onClick={() => onViewChange(item.id)}
+                  />
+                ))}
 
                 {group.section === "Settings & Help" ? (
                   <SidebarItem
                     active={false}
-                    icon="💬"
-                    label="Contact Support"
                     help={navHelp.support}
+                    icon="support"
+                    label="Contact Support"
                     onClick={onOpenSupport}
                   />
                 ) : null}
@@ -245,39 +240,45 @@ export function SentryShell({
             </div>
             <div className="space-y-1">
               <div
-                className={`flex items-center gap-2 rounded-xl ${
+                className={`rounded-xl ${
                   activeView === "diy" ? "bg-[rgba(214,48,49,0.08)]" : "opacity-80 hover:bg-[var(--surface)]"
                 }`}
               >
-                <button
-                  type="button"
-                  onClick={() => onViewChange("diy")}
-                  className={`flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-sm ${
-                    activeView === "diy" ? "font-semibold text-[var(--accent)]" : "text-[var(--muted)]"
-                  }`}
-                >
-                  <span>🔒</span>
-                  <span className="truncate">DIY Access</span>
-                  <span className="ml-auto rounded-full bg-[rgba(214,48,49,0.08)] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.08em] text-[var(--accent)]">
-                    WGS Only
+                <div className="flex items-start gap-2 px-2 py-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onViewChange("diy")}
+                    className={`flex min-w-0 flex-1 items-start gap-3 rounded-xl px-2 py-2 text-left text-sm ${
+                      activeView === "diy" ? "font-semibold text-[var(--accent)]" : "text-[var(--muted)]"
+                    }`}
+                  >
+                    <span className="mt-0.5 shrink-0" aria-hidden="true">
+                      <SidebarGlyph name="diy" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block leading-5">DIY Access</span>
+                      <span className="mt-1 inline-flex rounded-full bg-[rgba(214,48,49,0.08)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--accent)]">
+                        WGS Only
+                      </span>
+                    </span>
+                  </button>
+                  <span className="mt-2 mr-2 shrink-0">
+                    <HelpTip
+                      title={navHelp.diy.title}
+                      sections={navHelp.diy.sections}
+                      footerLabel={navHelp.diy.footerLabel}
+                      footerValue={navHelp.diy.footerValue}
+                    />
                   </span>
-                </button>
-                <span className="mr-3 shrink-0">
-                  <HelpTip
-                    title={navHelp.diy.title}
-                    sections={navHelp.diy.sections}
-                    footerLabel={navHelp.diy.footerLabel}
-                    footerValue={navHelp.diy.footerValue}
-                  />
-                </span>
+                </div>
               </div>
 
               {session.role === "WGS Manager" ? (
                 <SidebarItem
                   active={activeView === "wgs"}
-                  icon="🛠"
-                  label="WGS Admin Panel"
                   help={navHelp.wgs}
+                  icon="wgs"
+                  label="WGS Admin Panel"
                   onClick={() => onViewChange("wgs")}
                 />
               ) : null}
@@ -285,19 +286,19 @@ export function SentryShell({
           </div>
         </nav>
 
-        <div className="border-t border-[var(--border)] p-4">
-          <div className="mb-3 flex items-center gap-2 rounded-xl hover:bg-[var(--surface)]">
+        <div className="mt-auto border-t border-[var(--border)] p-4">
+          <div className="mb-3 rounded-xl hover:bg-[var(--surface)]">
             <button
               type="button"
               onClick={() => onViewChange("profile")}
-              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2 text-left"
+              className="flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-2 text-left"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--text)] text-sm font-bold text-white">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--text)] text-sm font-bold text-white">
                 {getInitials(session.email)}
               </div>
-              <div className="min-w-0">
-                <div className="truncate text-sm text-[var(--text)]">{session.email}</div>
-                <div className="mt-1">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm leading-5 text-[var(--text)]">{session.email}</div>
+                <div className="mt-1 flex flex-wrap gap-1">
                   <span
                     className={`inline-flex rounded-full px-2 py-1 font-[family-name:var(--font-mono)] text-[9px] font-bold uppercase tracking-[0.16em] ${roleClass[session.role]}`}
                   >
@@ -306,19 +307,19 @@ export function SentryShell({
                 </div>
               </div>
             </button>
-            <span className="mr-1 shrink-0">
+            <div className="flex justify-end px-2 pb-2">
               <HelpTip
                 title={navHelp.profile.title}
                 sections={navHelp.profile.sections}
                 footerLabel={navHelp.profile.footerLabel}
                 footerValue={navHelp.profile.footerValue}
               />
-            </span>
+            </div>
           </div>
           <button
             type="button"
             onClick={onSignOut}
-            className="w-full rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+            className="flex w-full items-center justify-center rounded-xl border border-[var(--border)] px-3 py-3 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
           >
             Sign out
           </button>
@@ -424,7 +425,9 @@ function SidebarItem({
           active ? "font-semibold text-[var(--accent)]" : "text-[var(--muted)] hover:text-[var(--text)]"
         }`}
       >
-        <span>{icon}</span>
+        <span className="shrink-0" aria-hidden="true">
+          <SidebarGlyph name={icon} />
+        </span>
         <span className="truncate">{label}</span>
       </button>
       <span className="mr-3 shrink-0">
@@ -436,5 +439,106 @@ function SidebarItem({
         />
       </span>
     </div>
+  );
+}
+
+function SidebarGlyph({ name }: { name: string }) {
+  const shared = "h-4 w-4 text-current";
+
+  if (name === "dashboard") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <rect x="2" y="2" width="5" height="5" rx="1.2" stroke="currentColor" strokeWidth="1.4" />
+        <rect x="9" y="2" width="5" height="8" rx="1.2" stroke="currentColor" strokeWidth="1.4" />
+        <rect x="2" y="9" width="5" height="5" rx="1.2" stroke="currentColor" strokeWidth="1.4" />
+        <rect x="9" y="12" width="5" height="2" rx="1" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
+    );
+  }
+
+  if (name === "waterfall") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <path d="M2.5 4.5h3v3h-3zM6.5 8.5h3v3h-3zM10.5 4.5h3v7h-3z" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
+    );
+  }
+
+  if (name === "caars") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <path d="M4 2.5h5l3 3V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-9a1.5 1.5 0 0 1 1-1.5Z" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M9 2.5V6h3" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
+    );
+  }
+
+  if (name === "log") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M8 4.8V8l2.1 1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === "permissions") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <rect x="3" y="7" width="10" height="6" rx="1.4" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M5.2 7V5.8A2.8 2.8 0 0 1 8 3a2.8 2.8 0 0 1 2.8 2.8V7" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
+    );
+  }
+
+  if (name === "userguide") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <path d="M3 3.5A1.5 1.5 0 0 1 4.5 2H13v11.5H4.5A1.5 1.5 0 0 0 3 15V3.5Z" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M5.5 5.5H10.5M5.5 8H10.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === "faq") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M6.8 6.3A1.4 1.4 0 1 1 9 7.5c-.7.4-1 .8-1 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <circle cx="8" cy="11.6" r=".8" fill="currentColor" />
+      </svg>
+    );
+  }
+
+  if (name === "support") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v4A1.5 1.5 0 0 1 11.5 10H8l-2.5 2V10h-1A1.5 1.5 0 0 1 3 8.5v-4Z" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
+    );
+  }
+
+  if (name === "diy") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <path d="M5.5 7V5.8A2.5 2.5 0 0 1 8 3.3a2.5 2.5 0 0 1 2.5 2.5V7" stroke="currentColor" strokeWidth="1.4" />
+        <rect x="4" y="7" width="8" height="6" rx="1.4" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
+    );
+  }
+
+  if (name === "wgs") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <path d="M8 2.5 13 5.2v5.6L8 13.5 3 10.8V5.2L8 2.5Z" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M8 5.2v5.6M5.2 6.7 8 8.2l2.8-1.5" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 16 16" fill="none" className={shared}>
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
   );
 }
