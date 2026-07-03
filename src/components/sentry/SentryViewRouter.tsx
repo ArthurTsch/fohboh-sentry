@@ -5,6 +5,7 @@ import type {
   LocationRecord,
   LocationWorkflowState,
   LogRecord,
+  PermissionRecord,
   Role,
   SchemaWorkspace,
   SessionState,
@@ -76,6 +77,7 @@ export function SentryViewRouter({
   role,
   schemaWorkspaces,
   session,
+  permissionRecords,
   totalCaars,
   totalRecovery,
   uploadFeedback,
@@ -138,6 +140,7 @@ export function SentryViewRouter({
   role: Role;
   schemaWorkspaces: SchemaWorkspace[];
   session: SessionState;
+  permissionRecords: PermissionRecord[];
   totalCaars: number;
   totalRecovery: string;
   uploadFeedback: UploadReceipt | null;
@@ -193,7 +196,7 @@ export function SentryViewRouter({
   }
 
   if (activeView === "permissions") {
-    return <PermissionsView />;
+    return <PermissionsView records={permissionRecords} />;
   }
 
   if (activeView === "diy") {

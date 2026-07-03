@@ -1,8 +1,8 @@
-import { permissionRecords } from "../data";
 import { roleClass } from "../config";
+import type { PermissionRecord } from "../types";
 import { HelpTip, SectionCard } from "../ui/primitives";
 
-export function PermissionsView() {
+export function PermissionsView({ records }: { records: PermissionRecord[] }) {
   return (
     <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
       <SectionCard>
@@ -37,35 +37,41 @@ export function PermissionsView() {
       </SectionCard>
 
       <div className="space-y-4">
-        {permissionRecords.map((record) => (
-          <SectionCard key={record.email} className="p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-medium">{record.name}</div>
-                <div className="text-sm text-[var(--muted)]">{record.email}</div>
-              </div>
-              <span
-                className={`inline-flex rounded-full px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] ${roleClass[record.role]}`}
-              >
-                {record.role}
-              </span>
-            </div>
-            <div className="mt-4 grid gap-3 text-sm text-[var(--muted)] md:grid-cols-2">
-              <div>
-                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em]">
-                  Scope
+        {records.length > 0 ? (
+          records.map((record) => (
+            <SectionCard key={record.email} className="p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium">{record.name}</div>
+                  <div className="text-sm text-[var(--muted)]">{record.email}</div>
                 </div>
-                <div className="mt-1">{record.scope}</div>
+                <span
+                  className={`inline-flex rounded-full px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] ${roleClass[record.role]}`}
+                >
+                  {record.role}
+                </span>
               </div>
-              <div>
-                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em]">
-                  Last Seen
+              <div className="mt-4 grid gap-3 text-sm text-[var(--muted)] md:grid-cols-2">
+                <div>
+                  <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em]">
+                    Scope
+                  </div>
+                  <div className="mt-1">{record.scope}</div>
                 </div>
-                <div className="mt-1">{record.lastSeen}</div>
+                <div>
+                  <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em]">
+                    Last Seen
+                  </div>
+                  <div className="mt-1">{record.lastSeen}</div>
+                </div>
               </div>
-            </div>
+            </SectionCard>
+          ))
+        ) : (
+          <SectionCard className="p-5 text-sm text-[var(--muted)]">
+            No team access records are provisioned for this account yet.
           </SectionCard>
-        ))}
+        )}
       </div>
     </div>
   );

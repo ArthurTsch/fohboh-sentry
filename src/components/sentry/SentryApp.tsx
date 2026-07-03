@@ -51,6 +51,7 @@ import type {
   SchemaWorkspace,
   SessionState,
   SupportModeState,
+  PermissionRecord,
   UploadArtifact,
   UploadModule,
   UploadReceipt,
@@ -262,6 +263,26 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     : locationState;
 
   const deferredFaqQuery = useDeferredValue(faqQuery);
+  const permissionRecords = useMemo<PermissionRecord[]>(() => {
+    if (!effectiveSession) {
+      return [];
+    }
+
+    const visibleScope =
+      effectiveSession.role === "WGS Manager" || effectiveSession.role === "SuperAdmin"
+        ? "Governed support and portfolio-wide visibility"
+        : `${runtimeLocationState.length} visible location${runtimeLocationState.length === 1 ? "" : "s"}`;
+
+    return [
+      {
+        email: effectiveSession.email,
+        lastSeen: "Current session",
+        name: effectiveSession.name?.trim() || effectiveSession.email,
+        role: effectiveSession.role,
+        scope: visibleScope,
+      },
+    ];
+  }, [effectiveSession, runtimeLocationState.length]);
   const workflowByLocation = useMemo(
     () =>
       Object.fromEntries(
@@ -1925,6 +1946,7 @@ function handleCompleteOnboarding(locationId: string) {
           onToggleLocation={toggleLocation}
           onToggleQuestion={(question) => setFaqOpen((current) => (current === question ? null : question))}
           onViewChange={handleViewChange}
+          permissionRecords={permissionRecords}
           queue={wgsQueueState}
           role={effectiveSession.role}
           schemaWorkspaces={visibleSchemaWorkspaces}

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getManagerSession } from "@/lib/auth/session";
+import { SUPERADMIN_TABLES } from "@/app/superadmin/table-registry";
 import { loginAdminAction, logoutAdminAction } from "./actions";
 
 export const adminMetadata: Metadata = {
@@ -114,65 +115,127 @@ export function AdminLoginScreen({ error }: { error?: string }) {
 
 export function AdminShell({
   children,
+  currentPath = "/superadmin",
+  currentTable,
   description,
   eyebrow = "Hidden Route",
   title,
 }: {
   children: React.ReactNode;
+  currentPath?: string;
+  currentTable?: string;
   description: string;
   eyebrow?: string;
   title: string;
 }) {
+  const primaryNav = [
+    { href: "/superadmin", label: "Overview" },
+    { href: "/superadmin/managers", label: "Managers" },
+    { href: "/superadmin/restaurants", label: "Restaurants" },
+    { href: "/superadmin/management", label: "Management" },
+    { href: "/superadmin/tables", label: "Tables" },
+  ];
+
   return (
-    <div className="min-h-screen bg-[var(--surface)] p-6 lg:p-8">
-      <div className="mx-auto max-w-full space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4 rounded-[28px] border border-[var(--border)] bg-white p-6 shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
-          <div>
+    <div className="min-h-screen bg-[var(--surface)] p-0">
+      <div className="grid min-h-screen gap-0 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <aside className="xl:sticky xl:top-0 xl:h-screen">
+          <div className="flex h-full flex-col overflow-hidden border-r border-[var(--border)] bg-white shadow-[0_20px_60px_rgba(0,0,0,0.04)]">
+            <div className="border-b border-[var(--border)] px-6 py-6">
+              <div className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.24em] text-[var(--accent)]">
+                Hidden Console
+              </div>
+              <h1 className="mt-3 font-[family-name:var(--font-display)] text-3xl font-bold tracking-[-0.05em] text-[var(--text)]">
+                SuperAdmin
+              </h1>
+              <p className="mt-3 text-sm leading-7 text-[var(--muted)]">
+                Production control plane for app data, access, certification records, and database tables.
+              </p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-4">
+              <div className="space-y-2">
+                {primaryNav.map((item) => {
+                  const active = currentPath === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={`flex items-center rounded-2xl px-4 py-3 text-sm font-medium transition ${
+                        active
+                          ? "bg-[var(--text)] text-white shadow-[0_14px_30px_rgba(0,0,0,0.12)]"
+                          : "text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--text)]"
+                      }`}
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+
+              <div className="mt-6 space-y-2">
+                <div className="flex items-center justify-between px-3 pb-2">
+                  <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--muted)]">
+                    Used Tables
+                  </div>
+                  <Link
+                    href="/superadmin/tables"
+                    className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent)]"
+                  >
+                    Open
+                  </Link>
+                </div>
+                {SUPERADMIN_TABLES.map((table) => {
+                  const href = `/superadmin/tables?table=${table.name}`;
+                  const active = currentPath === "/superadmin/tables" && currentTable === table.name;
+                  return (
+                    <Link
+                      key={table.name}
+                      href={href}
+                      className={`block rounded-2xl px-4 py-3 transition ${
+                        active
+                          ? "border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)]"
+                          : "hover:bg-[var(--surface)]"
+                      }`}
+                    >
+                      <div className={`truncate text-sm font-medium ${active ? "text-[var(--accent)]" : "text-[var(--text)]"}`}>
+                        {table.label}
+                      </div>
+                      <div className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--muted)]">
+                        {table.description}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="border-t border-[var(--border)] px-4 py-4">
+              <form action={logoutAdminAction}>
+                <button
+                  type="submit"
+                  className="w-full rounded-2xl border border-[var(--border)] px-4 py-3 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+                >
+                  Sign Out
+                </button>
+              </form>
+            </div>
+          </div>
+        </aside>
+
+        <div className="space-y-6 p-4 lg:p-6">
+          <div className="border-b border-[var(--border)] bg-white p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)] lg:p-8">
             <div className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
               {eyebrow}
             </div>
-            <h1 className="mt-3 font-[family-name:var(--font-display)] text-4xl font-bold tracking-[-0.05em]">
+            <h2 className="mt-3 font-[family-name:var(--font-display)] text-4xl font-bold tracking-[-0.05em] text-[var(--text)]">
               {title}
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">{description}</p>
+            </h2>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--muted)]">{description}</p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Link
-              href="/admin"
-              className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
-            >
-              Overview
-            </Link>
-            <Link
-              href="/admin/managers"
-              className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
-            >
-              Managers
-            </Link>
-            <Link
-              href="/admin/restaurants"
-              className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
-            >
-              Restaurants
-            </Link>
-            <Link
-              href="/admin/management"
-              className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
-            >
-              Management
-            </Link>
-            <form action={logoutAdminAction}>
-              <button
-                type="submit"
-                className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
-              >
-                Sign Out
-              </button>
-            </form>
-          </div>
+          <div>{children}</div>
         </div>
-        {children}
       </div>
     </div>
   );

@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS "location_modules";
+DROP TABLE IF EXISTS "users";
+DROP TABLE IF EXISTS "store_analytics_results";
+DROP TABLE IF EXISTS "store_credentials";
+DROP TABLE IF EXISTS "store_embeddings";
+DROP TABLE IF EXISTS "store_employees";
+DROP TABLE IF EXISTS "store_inventory";
+DROP TABLE IF EXISTS "store_menu";
+DROP TABLE IF EXISTS "store_sales";
+DROP TABLE IF EXISTS "text_notes";

@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import prisma from "@/lib/prisma";
 import { buildGeneratedUnitId } from "@/lib/restaurants/ids";
+import { getSuperAdminTableColumns, SUPERADMIN_TABLES } from "@/app/superadmin/table-registry";
 import {
   authenticateManager,
 } from "@/lib/auth/manager-auth";
@@ -24,7 +25,7 @@ async function requireAdminSession() {
   try {
     return await requireSuperAdminSession();
   } catch {
-    redirect("/admin");
+    redirect("/superadmin");
   }
 }
 
@@ -39,7 +40,7 @@ export async function loginAdminAction(formData: FormData) {
       windowMs: 15 * 60 * 1000,
     });
     if (!limiter.allowed) {
-      redirect("/admin?error=rate-limit");
+      redirect("/superadmin?error=rate-limit");
     }
     const result = await authenticateManager(email, password);
 
@@ -56,7 +57,7 @@ export async function loginAdminAction(formData: FormData) {
         summary: `Superadmin login failed for ${email || "unknown email"}.`,
         userAgent: requestContext.userAgent,
       }).catch(() => null);
-      redirect("/admin?error=invalid-credentials");
+      redirect("/superadmin?error=invalid-credentials");
     }
 
     if (result.session.role !== "SuperAdmin") {
@@ -73,11 +74,11 @@ export async function loginAdminAction(formData: FormData) {
         summary: `Denied superadmin login for ${result.session.email}.`,
         userAgent: requestContext.userAgent,
       }).catch(() => null);
-      redirect("/admin?error=not-admin");
+      redirect("/superadmin?error=not-admin");
     }
 
     if (!hasSessionSecretConfigured()) {
-      redirect("/admin?error=session-config");
+      redirect("/superadmin?error=session-config");
     }
 
     const cookieStore = await cookies();
@@ -99,7 +100,7 @@ export async function loginAdminAction(formData: FormData) {
       userAgent: requestContext.userAgent,
     }).catch(() => null);
 
-    redirect("/admin");
+    redirect("/superadmin");
   } catch (error) {
     await writeAuditLog({
       action: "superadmin_login_error",
@@ -113,7 +114,7 @@ export async function loginAdminAction(formData: FormData) {
       summary: `Superadmin login errored for ${email || "unknown email"}.`,
       userAgent: requestContext.userAgent,
     }).catch(() => null);
-    redirect("/admin?error=server-error");
+    redirect("/superadmin?error=server-error");
   }
 }
 
@@ -134,7 +135,7 @@ export async function logoutAdminAction() {
     summary: `Superadmin logout for ${session.email}.`,
     userAgent: requestContext.userAgent,
   }).catch(() => null);
-  redirect("/admin");
+  redirect("/superadmin");
 }
 
 export async function createManagerAction(formData: FormData) {
@@ -151,7 +152,7 @@ export async function createManagerAction(formData: FormData) {
   const emailVerified = formData.get("email_verified") === "on";
 
   if (!email || !password || !role) {
-    redirect("/admin?create=missing-fields");
+    redirect("/superadmin?create=missing-fields");
   }
 
   const passwordHash = await hash(password, 12);
@@ -190,15 +191,15 @@ export async function createManagerAction(formData: FormData) {
       "code" in error &&
       error.code === "P2002"
     ) {
-      redirect("/admin/managers?create=duplicate-email");
+      redirect("/superadmin/managers?create=duplicate-email");
     }
 
-    redirect("/admin/managers?create=server-error");
+    redirect("/superadmin/managers?create=server-error");
   }
 
-  revalidatePath("/admin");
-  revalidatePath("/admin/managers");
-  redirect("/admin/managers?create=success");
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/managers");
+  redirect("/superadmin/managers?create=success");
 }
 
 export async function updateManagerAction(formData: FormData) {
@@ -216,7 +217,7 @@ export async function updateManagerAction(formData: FormData) {
   const emailVerified = formData.get("email_verified") === "on";
 
   if (!Number.isFinite(id) || !email || !role) {
-    redirect("/admin/managers?update=missing-fields");
+    redirect("/superadmin/managers?update=missing-fields");
   }
 
   try {
@@ -254,15 +255,15 @@ export async function updateManagerAction(formData: FormData) {
       "code" in error &&
       error.code === "P2002"
     ) {
-      redirect("/admin/managers?update=duplicate-email");
+      redirect("/superadmin/managers?update=duplicate-email");
     }
 
-    redirect("/admin/managers?update=server-error");
+    redirect("/superadmin/managers?update=server-error");
   }
 
-  revalidatePath("/admin");
-  revalidatePath("/admin/managers");
-  redirect("/admin/managers?update=success");
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/managers");
+  redirect("/superadmin/managers?update=success");
 }
 
 export async function deleteManagerAction(formData: FormData) {
@@ -271,7 +272,7 @@ export async function deleteManagerAction(formData: FormData) {
 
   const id = Number(formData.get("id"));
   if (!Number.isFinite(id)) {
-    redirect("/admin/managers?delete=invalid-id");
+    redirect("/superadmin/managers?delete=invalid-id");
   }
 
   try {
@@ -296,12 +297,12 @@ export async function deleteManagerAction(formData: FormData) {
       userAgent: requestContext.userAgent,
     });
   } catch {
-    redirect("/admin/managers?delete=server-error");
+    redirect("/superadmin/managers?delete=server-error");
   }
 
-  revalidatePath("/admin");
-  revalidatePath("/admin/managers");
-  redirect("/admin/managers?delete=success");
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/managers");
+  redirect("/superadmin/managers?delete=success");
 }
 
 export async function createRestaurantAction(formData: FormData) {
@@ -321,7 +322,7 @@ export async function createRestaurantAction(formData: FormData) {
   const active = formData.get("active") === "on";
 
   if (!name) {
-    redirect("/admin/restaurants?restaurant=missing-name");
+    redirect("/superadmin/restaurants?restaurant=missing-name");
   }
 
   try {
@@ -372,15 +373,16 @@ export async function createRestaurantAction(formData: FormData) {
       "code" in error &&
       error.code === "P2002"
     ) {
-      redirect("/admin/restaurants?restaurant=duplicate-unit");
+      redirect("/superadmin/restaurants?restaurant=duplicate-unit");
     }
 
-    redirect("/admin/restaurants?restaurant=server-error");
+    redirect("/superadmin/restaurants?restaurant=server-error");
   }
 
-  revalidatePath("/admin");
-  revalidatePath("/admin/restaurants");
-  redirect("/admin/restaurants?restaurant=success");
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/restaurants");
+  revalidatePath("/superadmin/tables");
+  redirect("/superadmin/restaurants?restaurant=success");
 }
 
 export async function updateRestaurantAction(formData: FormData) {
@@ -401,7 +403,7 @@ export async function updateRestaurantAction(formData: FormData) {
   const active = formData.get("active") === "on";
 
   if (!Number.isFinite(id) || !name) {
-    redirect("/admin/restaurants?restaurant=missing-name");
+    redirect("/superadmin/restaurants?restaurant=missing-name");
   }
 
   try {
@@ -442,15 +444,16 @@ export async function updateRestaurantAction(formData: FormData) {
       "code" in error &&
       error.code === "P2002"
     ) {
-      redirect("/admin/restaurants?restaurant=duplicate-unit");
+      redirect("/superadmin/restaurants?restaurant=duplicate-unit");
     }
 
-    redirect("/admin/restaurants?restaurant=server-error");
+    redirect("/superadmin/restaurants?restaurant=server-error");
   }
 
-  revalidatePath("/admin");
-  revalidatePath("/admin/restaurants");
-  redirect("/admin/restaurants?restaurant=updated");
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/restaurants");
+  revalidatePath("/superadmin/tables");
+  redirect("/superadmin/restaurants?restaurant=updated");
 }
 
 export async function deleteRestaurantAction(formData: FormData) {
@@ -459,7 +462,7 @@ export async function deleteRestaurantAction(formData: FormData) {
 
   const id = Number(formData.get("id"));
   if (!Number.isFinite(id)) {
-    redirect("/admin/restaurants?restaurant=invalid-id");
+    redirect("/superadmin/restaurants?restaurant=invalid-id");
   }
 
   try {
@@ -484,12 +487,13 @@ export async function deleteRestaurantAction(formData: FormData) {
       userAgent: requestContext.userAgent,
     });
   } catch {
-    redirect("/admin/restaurants?restaurant=server-error");
+    redirect("/superadmin/restaurants?restaurant=server-error");
   }
 
-  revalidatePath("/admin");
-  revalidatePath("/admin/restaurants");
-  redirect("/admin/restaurants?restaurant=deleted");
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/restaurants");
+  revalidatePath("/superadmin/tables");
+  redirect("/superadmin/restaurants?restaurant=deleted");
 }
 
 export async function deleteCaarReportAction(formData: FormData) {
@@ -498,7 +502,7 @@ export async function deleteCaarReportAction(formData: FormData) {
 
   const id = Number(formData.get("id"));
   if (!Number.isFinite(id)) {
-    redirect("/admin/management?caar=invalid-id");
+    redirect("/superadmin/management?caar=invalid-id");
   }
 
   try {
@@ -557,10 +561,67 @@ export async function deleteCaarReportAction(formData: FormData) {
       );
     });
   } catch {
-    redirect("/admin/management?caar=server-error");
+    redirect("/superadmin/management?caar=server-error");
   }
 
-  revalidatePath("/admin");
-  revalidatePath("/admin/management");
-  redirect("/admin/management?caar=deleted");
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/management");
+  revalidatePath("/superadmin/tables");
+  redirect("/superadmin/management?caar=deleted");
+}
+
+export async function deleteSuperAdminTableRowAction(formData: FormData) {
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
+
+  const table = String(formData.get("table") ?? "").trim();
+  const id = Number(formData.get("id"));
+
+  if (!SUPERADMIN_TABLES.some((entry) => entry.name === table) || !Number.isFinite(id)) {
+    redirect(`/superadmin/tables?table=${encodeURIComponent(table || "managers")}&tableState=invalid-row`);
+  }
+
+  const columns = await getSuperAdminTableColumns(table);
+  const hasNumericId = columns.some(
+    (column) =>
+      column.column_name === "id" &&
+      ["integer", "bigint", "smallint"].includes(column.data_type),
+  );
+
+  if (!hasNumericId) {
+    redirect(`/superadmin/tables?table=${encodeURIComponent(table)}&tableState=invalid-row`);
+  }
+
+  try {
+    await prisma.$executeRawUnsafe(`DELETE FROM public.${table} WHERE id = $1`, id);
+    await writeAuditLog({
+      action: "superadmin_table_row_deleted",
+      actorUserId: session.managerId ?? null,
+      entityId: String(id),
+      entityType: table,
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        requestId: requestContext.requestId,
+        table,
+      },
+      summary: `Deleted row ${id} from ${table}.`,
+      userAgent: requestContext.userAgent,
+    });
+  } catch {
+    redirect(`/superadmin/tables?table=${encodeURIComponent(table)}&tableState=server-error`);
+  }
+
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/tables");
+  if (table === "managers") {
+    revalidatePath("/superadmin/managers");
+  }
+  if (table === "restaurants" || table === "restaurant_sentry_state") {
+    revalidatePath("/superadmin/restaurants");
+  }
+  if (table === "caar_reports" || table === "caars_v2") {
+    revalidatePath("/superadmin/management");
+  }
+
+  redirect(`/superadmin/tables?table=${encodeURIComponent(table)}&tableState=deleted`);
 }
