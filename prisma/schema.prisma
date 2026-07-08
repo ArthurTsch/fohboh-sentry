@@ -77,6 +77,9 @@ model restaurant_sentry_state {
   account_id          String?   @db.VarChar(255)
   created_by          Int?
   status              String    @default("Onboarding") @db.VarChar(50)
+  governance_status   String    @default("uninitialized") @db.VarChar(30)
+  governance_initialized_at DateTime? @db.Timestamp(6)
+  governance_sealed_at DateTime? @db.Timestamp(6)
   m01_score           Int       @default(0)
   m02_score           Int       @default(0)
   ium                 String?   @default("--") @db.VarChar(50)

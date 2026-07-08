@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { moduleSummaries } from "../data";
 import type { SessionState } from "../types";
+import { PasswordField } from "../ui/PasswordField";
 import { KpiCard } from "../ui/primitives";
 
 export function LandingPage({
@@ -167,8 +168,7 @@ export function LandingPage({
               <span className="mb-2 block font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
                 Password
               </span>
-              <input
-                type="password"
+              <PasswordField
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm outline-none"

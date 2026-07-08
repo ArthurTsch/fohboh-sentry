@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { SchemaWorkspace } from "../types";
+import type { Role, SchemaWorkspace } from "../types";
 import { Badge, HelpTip, MetaBlock } from "../ui/primitives";
 
 type TabId = "mappings" | "contract" | "missing" | "upload" | "vault";
@@ -9,14 +9,17 @@ export function SchemaEditorModal({
   onClose,
   onSave,
   onSeal,
+  role,
 }: {
   workspace: SchemaWorkspace;
   onClose: () => void;
   onSave: (workspace: SchemaWorkspace) => void | Promise<void>;
   onSeal: (workspace: SchemaWorkspace) => void | Promise<void>;
+  role: Role;
 }) {
   const [draft, setDraft] = useState<SchemaWorkspace>(workspace);
   const [tab, setTab] = useState<TabId>("mappings");
+  const canSeal = role === "WGS Manager" || role === "SuperAdmin";
 
   const requiredRemaining = useMemo(
     () => draft.fields.filter((field) => field.required && field.confidence !== "Verified").length,
@@ -361,6 +364,11 @@ export function SchemaEditorModal({
                 ? "All required mappings are verified. Contract config can be sealed into the vault record."
                 : "Resolve the remaining required mappings before this workspace can become governed evidence."}
             </div>
+            {!canSeal ? (
+              <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-sm leading-6 text-[var(--muted)]">
+                WGS-only action. Admin may prepare and save the draft, but the final seal must be completed by WGS.
+              </div>
+            ) : null}
 
             <div className="mt-6 rounded-2xl border border-[var(--border)] bg-white p-4">
               <div className="font-medium">Readiness summary</div>
@@ -392,14 +400,20 @@ export function SchemaEditorModal({
           >
             Save Draft
           </button>
-          <button
-            type="button"
-            onClick={() => onSeal(draft)}
-            className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:opacity-50"
-            disabled={requiredRemaining > 0}
-          >
-            Seal Contract Config
-          </button>
+          {canSeal ? (
+            <button
+              type="button"
+              onClick={() => onSeal(draft)}
+              className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:opacity-50"
+              disabled={requiredRemaining > 0}
+            >
+              Seal Contract Config
+            </button>
+          ) : (
+            <span className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--muted)]">
+              Waiting for WGS seal
+            </span>
+          )}
         </div>
       </div>
     </div>

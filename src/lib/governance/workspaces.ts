@@ -114,7 +114,7 @@ export function normalizeWorkspaceFromRecords({
   const latestVersion = Math.max(schemaRecord?.version ?? 0, contractRecord?.version ?? 0);
   const hash = contractRecord?.sha256 ?? schemaRecord?.sha256 ?? "pending";
   const sealedAt = contractRecord?.sealed_at ?? schemaRecord?.sealed_at;
-  const status = (contractRecord?.status ?? schemaRecord?.status ?? "draft") as "draft" | "sealed";
+  const status = normalizeWorkspaceStatus(contractRecord?.status ?? schemaRecord?.status ?? "draft");
 
   return {
     account,
@@ -159,4 +159,8 @@ function extractObject(value: unknown) {
 
 function formatVaultDate(value: Date) {
   return value.toISOString().slice(0, 16).replace("T", " ");
+}
+
+function normalizeWorkspaceStatus(value: string | null | undefined): "draft" | "sealed" {
+  return value === "sealed" || value === "seal" ? "sealed" : "draft";
 }

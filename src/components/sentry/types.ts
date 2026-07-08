@@ -42,6 +42,9 @@ export type LocationRecord = {
   id: string;
   name: string;
   market: string;
+  governanceInitializedAt?: string | null;
+  governanceSealedAt?: string | null;
+  governanceStatus?: "uninitialized" | "draft" | "sealed";
   ownerEmail?: string;
   ownerManagerId?: number | null;
   m01: number;
@@ -372,12 +375,30 @@ export type SessionState = {
 
 export type LocationWorkflowAction = "onboarding" | "uploads" | "diy" | "certification";
 
+export type WorkflowRequirementKey = "onboarding" | "governance" | "evidence";
+
+export type WorkflowRequirementStatus = {
+  action: LocationWorkflowAction;
+  detail: string;
+  key: WorkflowRequirementKey;
+  label: string;
+  status: "complete" | "action_required" | "not_applicable";
+};
+
 export type LocationWorkflowState = {
   blockers: string[];
   primaryAction: LocationWorkflowAction;
   primaryLabel: string;
   readyForCertification: boolean;
+  requirements: WorkflowRequirementStatus[];
   warnings: string[];
+};
+
+export type LocationSourceConfig = {
+  m01Enabled: boolean;
+  m01Vendors: { key: string; name: string }[];
+  m02Enabled: boolean;
+  m02Vendors: { key: string; name: string }[];
 };
 
 export type SupportModeState = {

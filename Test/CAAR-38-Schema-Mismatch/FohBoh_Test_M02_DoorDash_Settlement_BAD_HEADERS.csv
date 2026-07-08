@@ -1,0 +1,6 @@
+business_date,unit_code,delivery_id,subtotal_amount,commission_pct,commission_total,marketing_total,adjustment_total,guest_fee,net_payout,status
+2026-06-01,TEST-001,DDX-50001,62.14,0.2500,15.54,2.10,0.00,5.99,38.51,PAID
+2026-06-01,TEST-001,DDX-50002,48.90,0.2500,12.23,1.80,0.00,4.99,29.88,PAID
+2026-06-02,TEST-001,DDX-50003,77.44,0.2500,19.36,2.25,0.00,6.49,49.34,PAID
+2026-06-02,TEST-001,DDX-50004,39.18,0.2500,9.80,1.50,0.00,4.49,23.39,PAID
+2026-06-03,TEST-001,DDX-50005,84.02,0.2500,21.01,2.65,0.00,6.99,53.37,PAID

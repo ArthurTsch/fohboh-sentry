@@ -453,6 +453,35 @@ function WorkflowStatusCard({
         </Badge>
       </div>
 
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        {workflow.requirements.map((requirement) => (
+          <div
+            key={`workflow-requirement:${requirement.key}`}
+            className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-medium text-[var(--text)]">{requirement.label}</div>
+              <Badge
+                tone={
+                  requirement.status === "complete"
+                    ? "success"
+                    : requirement.status === "action_required"
+                      ? "warning"
+                      : "neutral"
+                }
+              >
+                {requirement.status === "complete"
+                  ? "Complete"
+                  : requirement.status === "action_required"
+                    ? "Missing"
+                    : "N/A"}
+              </Badge>
+            </div>
+            <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{requirement.detail}</div>
+          </div>
+        ))}
+      </div>
+
       {workflow.blockers.length > 0 ? (
         <div className="mt-4 space-y-2">
           {workflow.blockers.map((blocker, index) => (

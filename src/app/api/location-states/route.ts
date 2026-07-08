@@ -59,6 +59,9 @@ export async function POST(request: Request) {
       locationId?: string;
       m01Score?: number;
       m02Score?: number;
+      governanceInitializedAt?: string | null;
+      governanceSealedAt?: string | null;
+      governanceStatus?: string;
       modules?: unknown;
       onboardingChecklist?: unknown;
       onboardingProgress?: unknown;
@@ -97,11 +100,14 @@ export async function POST(request: Request) {
       },
       update: {
         account_id:
-          session.role === "WGS Manager"
+          session.role === "WGS Manager" || session.role === "SuperAdmin"
             ? body.accountId ?? null
             : session.accountId ?? body.accountId ?? null,
         completed: body.completed ?? false,
         created_by: typeof session.managerId === "number" ? session.managerId : null,
+        governance_initialized_at: body.governanceInitializedAt ? new Date(body.governanceInitializedAt) : undefined,
+        governance_sealed_at: body.governanceSealedAt ? new Date(body.governanceSealedAt) : null,
+        governance_status: body.governanceStatus ?? undefined,
         ium: body.ium ?? "--",
         last_certified: body.lastCertified ?? "Pending",
         location_id: locationId,
@@ -116,11 +122,14 @@ export async function POST(request: Request) {
       },
       create: {
         account_id:
-          session.role === "WGS Manager"
+          session.role === "WGS Manager" || session.role === "SuperAdmin"
             ? body.accountId ?? null
             : session.accountId ?? body.accountId ?? null,
         completed: body.completed ?? false,
         created_by: typeof session.managerId === "number" ? session.managerId : null,
+        governance_initialized_at: body.governanceInitializedAt ? new Date(body.governanceInitializedAt) : null,
+        governance_sealed_at: body.governanceSealedAt ? new Date(body.governanceSealedAt) : null,
+        governance_status: body.governanceStatus ?? "uninitialized",
         ium: body.ium ?? "--",
         last_certified: body.lastCertified ?? "Pending",
         location_id: locationId,

@@ -1,16 +1,32 @@
 import { useRef, useState } from "react";
-import type { SchemaWorkspace } from "../types";
+import type { Role, SchemaWorkspace } from "../types";
 import { Badge, HelpTip, MetaBlock, SectionCard } from "../ui/primitives";
 
 export function SchemaRegistryView({
   onEditWorkspace,
   onSealWorkspace,
+  role,
   workspaces,
 }: {
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
+  role: Role;
   workspaces: SchemaWorkspace[];
 }) {
+  if (workspaces.length === 0) {
+    return (
+      <SectionCard>
+        <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+          No governed workspaces yet
+        </div>
+        <div className="mt-3 max-w-3xl text-sm leading-7 text-[var(--muted)]">
+          No persisted Schema Registry or Contract Config records exist for the current scope yet.
+          Start from Location Waterfall or DIY Access to initialize the location-specific governance workflow.
+        </div>
+      </SectionCard>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {workspaces.map((workspace) => (
@@ -19,6 +35,7 @@ export function SchemaRegistryView({
           workspace={workspace}
           onEditWorkspace={onEditWorkspace}
           onSealWorkspace={onSealWorkspace}
+          role={role}
         />
       ))}
     </div>
@@ -28,10 +45,12 @@ export function SchemaRegistryView({
 function SchemaWorkspaceCard({
   onEditWorkspace,
   onSealWorkspace,
+  role,
   workspace,
 }: {
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
+  role: Role;
   workspace: SchemaWorkspace;
 }) {
   const verified = workspace.fields.filter((field) => field.confidence === "Verified");
@@ -40,6 +59,7 @@ function SchemaWorkspaceCard({
   const requiredFields = workspace.fields.filter((field) => field.required);
   const requiredMissing = requiredFields.filter((field) => field.confidence !== "Verified");
   const uploadReady = requiredMissing.length === 0 && review.length === 0;
+  const canSeal = role === "WGS Manager" || role === "SuperAdmin";
 
   return (
     <SectionCard>
@@ -60,13 +80,19 @@ function SchemaWorkspaceCard({
           >
             Edit Schema
           </button>
-          <button
-            type="button"
-            onClick={() => onSealWorkspace(workspace)}
-            className="rounded-lg bg-[var(--text)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
-          >
-            Seal Contract Config
-          </button>
+          {canSeal ? (
+            <button
+              type="button"
+              onClick={() => onSealWorkspace(workspace)}
+              className="rounded-lg bg-[var(--text)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+            >
+              Seal Contract Config
+            </button>
+          ) : (
+            <span className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--muted)]">
+              WGS seal required
+            </span>
+          )}
         </div>
       </div>
 

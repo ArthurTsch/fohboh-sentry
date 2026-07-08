@@ -1,9 +1,15 @@
 export function CertificationCadenceModal({
+  locationId,
+  locations,
   locationName,
+  onChangeLocation,
   onClose,
   onSubmit,
 }: {
+  locationId: string;
+  locations?: { id: string; name: string }[];
   locationName: string;
+  onChangeLocation?: (locationId: string) => void;
   onClose: () => void;
   onSubmit: (cadence: "monthly_final" | "weekly_preliminary") => void | Promise<void>;
 }) {
@@ -21,6 +27,25 @@ export function CertificationCadenceModal({
             Choose the evidence path you want to certify before the engine runs.
           </div>
         </div>
+
+        {locations && locations.length > 1 ? (
+          <div className="border-b border-[var(--border)] px-6 py-5">
+            <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+              Restaurant
+            </div>
+            <select
+              value={locationId}
+              onChange={(event) => onChangeLocation?.(event.target.value)}
+              className="mt-3 w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm outline-none"
+            >
+              {locations.map((location) => (
+                <option key={location.id} value={location.id}>
+                  {location.name} ({location.id})
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         <div className="grid gap-4 px-6 py-6 md:grid-cols-2">
           <button

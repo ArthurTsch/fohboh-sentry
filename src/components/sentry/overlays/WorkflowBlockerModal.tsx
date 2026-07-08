@@ -1,4 +1,4 @@
-import type { LocationWorkflowAction } from "../types";
+import type { LocationWorkflowAction, WorkflowRequirementStatus } from "../types";
 
 export function WorkflowBlockerModal({
   blockers,
@@ -9,6 +9,7 @@ export function WorkflowBlockerModal({
   onOpenUploads,
   primaryAction,
   primaryLabel,
+  requirements,
 }: {
   blockers: string[];
   locationName: string;
@@ -18,6 +19,7 @@ export function WorkflowBlockerModal({
   onOpenUploads: () => void;
   primaryAction: LocationWorkflowAction;
   primaryLabel: string;
+  requirements: WorkflowRequirementStatus[];
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
@@ -34,7 +36,36 @@ export function WorkflowBlockerModal({
           </div>
         </div>
 
-        <div className="space-y-3 px-6 py-6">
+        <div className="space-y-4 px-6 py-6">
+          <div className="grid gap-3 md:grid-cols-3">
+            {requirements.map((requirement) => (
+              <div
+                key={`${locationName}:requirement:${requirement.key}`}
+                className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium text-[var(--text)]">{requirement.label}</div>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
+                      requirement.status === "complete"
+                        ? "border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] text-[var(--success)]"
+                        : requirement.status === "action_required"
+                          ? "border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"
+                          : "border border-[var(--border)] bg-white text-[var(--muted)]"
+                    }`}
+                  >
+                    {requirement.status === "complete"
+                      ? "Complete"
+                      : requirement.status === "action_required"
+                        ? "Missing"
+                        : "N/A"}
+                  </span>
+                </div>
+                <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{requirement.detail}</div>
+              </div>
+            ))}
+          </div>
+
           {blockers.map((blocker, index) => (
             <div
               key={`${locationName}:blocker:${index}:${blocker}`}

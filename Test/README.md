@@ -50,3 +50,19 @@ Included files:
 - `TEST_BankStatement_PizzaPalace_Apr2026.pdf`
 - `TEST_POS_DailySales_PizzaPalace_Mar2026.pdf`
 - `TEST_POS_DailySales_PizzaPalace_Apr2026.pdf`
+
+## Score-Oriented Packs
+
+Use these folders when you want predictable certification test scenarios by score band:
+
+- [CAAR-92-Court-Admissible](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/CAAR-92-Court-Admissible)
+  - full evidence pack
+  - intended for a passing, court-admissible CAAR flow
+
+- [CAAR-74-Missing-Bank](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/CAAR-74-Missing-Bank)
+  - same base evidence, but intentionally omit the bank statement
+  - intended to stay below the CAAR gate because reconciliation is incomplete
+
+- [CAAR-38-Schema-Mismatch](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/CAAR-38-Schema-Mismatch)
+  - intentionally broken CSV headers
+  - intended to trigger schema mismatch / review states and a low trust outcome

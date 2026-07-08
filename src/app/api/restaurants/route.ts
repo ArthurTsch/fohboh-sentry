@@ -6,6 +6,7 @@ import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/requ
 import { checkRateLimit } from "@/lib/ops/rate-limit";
 import prisma from "@/lib/prisma";
 import { buildGeneratedUnitId } from "@/lib/restaurants/ids";
+import { resolveVendorKey } from "@/components/sentry/vendor-catalog";
 
 function isMissingSentryStateTable(error: unknown) {
   return (
@@ -44,6 +45,16 @@ function toNullableJsonInput(value: unknown) {
   return value as Prisma.InputJsonValue;
 }
 
+function normalizeStringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+}
+
 export async function GET() {
   try {
     const session = await requireManagerSession();
@@ -51,7 +62,7 @@ export async function GET() {
     const restaurants = await prisma.restaurants.findMany({
       where: {
         active: true,
-        ...(session.role === "WGS Manager"
+        ...(session.role === "WGS Manager" || session.role === "SuperAdmin"
           ? {}
           : typeof session.managerId === "number"
             ? { created_by: session.managerId }
@@ -76,6 +87,9 @@ export async function GET() {
           account_id: string | null;
           completed: boolean | null;
           created_by: number | null;
+          governance_initialized_at: Date | null;
+          governance_sealed_at: Date | null;
+          governance_status: string;
           ium: string | null;
           last_certified: string | null;
           location_id: string;
@@ -102,6 +116,9 @@ export async function GET() {
             account_id: true,
             completed: true,
             created_by: true,
+            governance_initialized_at: true,
+            governance_sealed_at: true,
+            governance_status: true,
             ium: true,
             last_certified: true,
             location_id: true,
@@ -199,9 +216,63 @@ export async function POST(request: Request) {
     const unitId = body.unitId?.trim() || null;
     const createdBy = typeof session.managerId === "number" ? session.managerId : null;
     const resolvedAccountId =
-      session.role === "WGS Manager"
+      session.role === "WGS Manager" || session.role === "SuperAdmin"
         ? body.accountId ?? null
         : session.accountId ?? body.accountId ?? null;
+    const existingLocationCount = await prisma.restaurants.count({
+      where: {
+        active: true,
+        ...(typeof createdBy === "number"
+          ? { created_by: createdBy }
+          : body.creatorEmail?.trim()
+            ? { created_by: null }
+            : { id: -1 }),
+      },
+    });
+
+    let onboardingProgress = body.sentryState?.onboardingProgress ?? undefined;
+    const onboardingProgressRecord =
+      onboardingProgress && typeof onboardingProgress === "object"
+        ? (onboardingProgress as Record<string, unknown>)
+        : null;
+    const selectedVendors =
+      onboardingProgressRecord?.selectedVendors &&
+      typeof onboardingProgressRecord.selectedVendors === "object"
+        ? (onboardingProgressRecord.selectedVendors as Record<string, unknown>)
+        : null;
+    const hasExplicitSelectedVendors =
+      Boolean(selectedVendors) &&
+      (normalizeStringArray(selectedVendors?.m01).length > 0 ||
+        normalizeStringArray(selectedVendors?.m02).length > 0);
+
+    if (!hasExplicitSelectedVendors && existingLocationCount === 0) {
+      const requesterEmail = body.creatorEmail?.trim() || session.email.trim();
+      const accessRequest = await prisma.access_requests_v2.findFirst({
+        where: {
+          requester_email: requesterEmail,
+          status: "reviewed",
+        },
+        orderBy: [{ reviewed_at: "desc" }, { updated_at: "desc" }, { id: "desc" }],
+        select: {
+          dsps: true,
+          processors: true,
+        },
+      });
+
+      if (accessRequest) {
+        onboardingProgress = {
+          ...(onboardingProgressRecord ?? {}),
+          selectedVendors: {
+            m01: normalizeStringArray(accessRequest.processors).map((value) =>
+              resolveVendorKey("M01", value),
+            ),
+            m02: normalizeStringArray(accessRequest.dsps).map((value) =>
+              resolveVendorKey("M02", value),
+            ),
+          },
+        };
+      }
+    }
 
     const createdRestaurant = await prisma.restaurants.create({
       data: {
@@ -252,6 +323,9 @@ export async function POST(request: Request) {
           account_id: resolvedAccountId,
           completed: body.sentryState?.completed ?? false,
           created_by: createdBy,
+          governance_initialized_at: null,
+          governance_sealed_at: null,
+          governance_status: "uninitialized",
           ium: body.sentryState?.ium ?? "--",
           last_certified: body.sentryState?.lastCertified ?? "Pending",
           location_id: locationId,
@@ -259,7 +333,7 @@ export async function POST(request: Request) {
           m02_score: body.sentryState?.m02Score ?? 0,
           modules_json: toNullableJsonInput(body.sentryState?.modules),
           onboarding_checklist: toNullableJsonInput(body.sentryState?.onboardingChecklist),
-          onboarding_progress: toNullableJsonInput(body.sentryState?.onboardingProgress),
+          onboarding_progress: toNullableJsonInput(onboardingProgress),
           recovery_display: body.sentryState?.recoveryDisplay ?? "$0",
           restaurant_id: restaurant.id,
           status: body.sentryState?.status ?? "Onboarding",

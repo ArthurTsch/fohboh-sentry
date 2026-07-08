@@ -2,6 +2,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type {
   CaarRecord,
   IntakeState,
+  LocationSourceConfig,
   LocationRecord,
   LocationWorkflowState,
   LogRecord,
@@ -35,7 +36,10 @@ export function SentryViewRouter({
   accounts,
   activeView,
   activeUploadLocationId,
+  activeUploadModules,
   activeUploadLocationName,
+  activeUploadSourceConfig,
+  diyLocationSourceConfigs,
   approvals,
   averageTrust,
   artifactContractState,
@@ -52,6 +56,8 @@ export function SentryViewRouter({
   onAddLocation,
   onAddUser,
   onApprove,
+  onCompleteUploadSet,
+  onManageUploadSources,
   onArtifactAction,
   onDirectUpload,
   onEnterSupportMode,
@@ -88,7 +94,10 @@ export function SentryViewRouter({
   accounts: WgsAccount[];
   activeView: ViewId;
   activeUploadLocationId: string | null;
+  activeUploadModules: Array<"M01" | "M02">;
   activeUploadLocationName: string | null;
+  activeUploadSourceConfig: LocationSourceConfig | null;
+  diyLocationSourceConfigs: Record<string, LocationSourceConfig>;
   approvals: WgsApproval[];
   averageTrust: number;
   artifactContractState: Record<string, Record<string, string>>;
@@ -105,6 +114,13 @@ export function SentryViewRouter({
   onAddLocation: () => void;
   onAddUser: () => void;
   onApprove: (approvalId: string) => void | Promise<void>;
+  onCompleteUploadSet: (locationId: string) => void;
+  onManageUploadSources: (next: {
+    m01Enabled: boolean;
+    m01Vendors: string[];
+    m02Enabled: boolean;
+    m02Vendors: string[];
+  }) => void;
   onArtifactAction: (
     moduleId: "M01" | "M02",
     artifactKey: string,
@@ -201,8 +217,9 @@ export function SentryViewRouter({
 
   if (activeView === "diy") {
     return (
-        <DiyAccessView
+      <DiyAccessView
         locations={locations}
+        locationSourceConfigs={diyLocationSourceConfigs}
           onEditWorkspace={onOpenSchemaEditor}
           onInitializeWorkspace={onInitializeWorkspace}
           onSealWorkspace={onSealWorkspace}
@@ -232,10 +249,15 @@ export function SentryViewRouter({
     return (
       <UploadCenterView
         activeLocationId={activeUploadLocationId}
+        activeLocationModules={activeUploadModules}
         activeLocationName={activeUploadLocationName}
+        activeSourceConfig={activeUploadSourceConfig}
+        canManageSources={role === "Admin" || role === "SuperAdmin" || role === "WGS Manager"}
         contractState={artifactContractState}
         intakeState={artifactIntakeState}
         modules={uploadModules}
+        onCompleteUploadSet={onCompleteUploadSet}
+        onManageSources={onManageUploadSources}
         onArtifactAction={onArtifactAction}
         onDirectUpload={onDirectUpload}
         onOpenSchema={() => onViewChange("schema")}
@@ -250,6 +272,7 @@ export function SentryViewRouter({
         workspaces={schemaWorkspaces}
         onEditWorkspace={onOpenSchemaEditor}
         onSealWorkspace={onSealWorkspace}
+        role={role}
       />
     );
   }

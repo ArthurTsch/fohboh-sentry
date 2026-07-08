@@ -16,7 +16,7 @@ function matchesSessionScope(
   session: SessionState,
   scopedAccountId: string | null,
 ) {
-  if (session.role === "WGS Manager") {
+  if (session.role === "WGS Manager" || session.role === "SuperAdmin") {
     if (scopedAccountId) {
       return location.accountId === scopedAccountId;
     }
@@ -78,24 +78,40 @@ export function useSentryDerivedState({
       matchesSessionScope(location, session, scopedAccountId),
     );
   }, [locationState, scopedAccountId, session]);
+  const visibleLocationIds = useMemo(
+    () => new Set(visibleLocations.map((location) => location.id)),
+    [visibleLocations],
+  );
 
   const visibleCaars = useMemo(() => {
     if (!session) return [];
-    if (!scopedAccountId) return session.role === "WGS Manager" ? caarState : [];
+    if (!scopedAccountId) {
+      return session.role === "WGS Manager" || session.role === "SuperAdmin" ? caarState : [];
+    }
     return caarState.filter((record) => record.accountId === scopedAccountId);
   }, [caarState, scopedAccountId, session]);
 
   const visibleUploadModules = useMemo(() => {
     if (!session) return [];
-    if (!scopedAccountId) return session.role === "WGS Manager" ? uploadState : [];
+    if (!scopedAccountId) {
+      return session.role === "WGS Manager" || session.role === "SuperAdmin" ? uploadState : [];
+    }
     return uploadState.filter((module) => module.accountId === scopedAccountId);
   }, [scopedAccountId, session, uploadState]);
 
   const visibleSchemaWorkspaces = useMemo(() => {
     if (!session) return [];
-    if (!scopedAccountId) return session.role === "WGS Manager" ? schemaState : [];
-    return schemaState.filter((workspace) => workspace.accountId === scopedAccountId);
-  }, [schemaState, scopedAccountId, session]);
+    if (!scopedAccountId) {
+      return session.role === "WGS Manager" || session.role === "SuperAdmin" ? schemaState : [];
+    }
+    return schemaState.filter((workspace) => {
+      if (workspace.accountId === scopedAccountId) {
+        return true;
+      }
+
+      return Boolean(workspace.locationId && visibleLocationIds.has(workspace.locationId));
+    });
+  }, [schemaState, scopedAccountId, session, visibleLocationIds]);
 
   const averageTrust = Math.round(
     visibleLocations.reduce((sum, location) => sum + (location.m01 + location.m02) / 2, 0) /
@@ -108,17 +124,11 @@ export function useSentryDerivedState({
   const totalCaars = visibleCaars.filter((record) => record.status === "Court Admissible").length;
 
   const filteredLogs = useMemo(() => {
-    const scoped = !session
-      ? []
-      : !scopedAccountId
-        ? session.role === "WGS Manager"
-          ? logState
-          : []
-        : logState.filter((entry) => entry.accountId === scopedAccountId);
+    const scoped = session ? logState : [];
     if (logFilter === "immutable") return scoped.filter((entry) => entry.immutable);
     if (logFilter === "editable") return scoped.filter((entry) => !entry.immutable);
     return scoped;
-  }, [logFilter, logState, scopedAccountId, session]);
+  }, [logFilter, logState, session]);
 
   const filteredFaq = useMemo(() => {
     const query = deferredFaqQuery.trim().toLowerCase();

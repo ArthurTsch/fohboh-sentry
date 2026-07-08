@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { getManagerSession } from "@/lib/auth/session";
 import { SUPERADMIN_TABLES } from "@/app/superadmin/table-registry";
+import { PasswordField } from "@/components/sentry/ui/PasswordField";
 import { loginAdminAction, logoutAdminAction } from "./actions";
 
 export const adminMetadata: Metadata = {
@@ -94,8 +95,7 @@ export function AdminLoginScreen({ error }: { error?: string }) {
             />
           </AdminField>
           <AdminField label="SuperAdmin Password">
-            <input
-              type="password"
+            <PasswordField
               name="password"
               className={adminInputClassName}
               placeholder="Enter your password"

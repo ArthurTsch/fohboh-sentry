@@ -1,6 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { LocationSourceSettingsModal } from "../overlays/LocationSourceSettingsModal";
 import { Badge } from "../ui/primitives";
-import type { IntakeState, UploadModule, UploadReceipt } from "../types";
+import type { IntakeState, LocationSourceConfig, UploadModule, UploadReceipt } from "../types";
+import { getVendorCatalog } from "../vendor-catalog";
 import { getTemplateHeaders } from "@/lib/uploads/definitions";
 
 type UploadCardState = {
@@ -16,13 +18,7 @@ const moduleMeta = {
     ruleEyebrow: "Upload Rules - M01 Processor Statements",
     ruleText:
       "Download the transaction-level CSV from your card processor's merchant portal. Upload the file exactly as provided - no reformatting, no opening in Excel. Each processor uses different native column names. The Schema Registry validates column names on upload; any mismatch flags a schema warning requiring WGS review.",
-    vendors: [
-      { key: "heartland", name: "Heartland", schema: "v1.0", base: "trans_amount" },
-      { key: "toast", name: "Toast", schema: "v1.0", base: "gross_amount" },
-      { key: "square", name: "Square", schema: "v1.0", base: "amount" },
-      { key: "worldpay", name: "Worldpay", schema: "v1.0", base: "txn_amount" },
-      { key: "chase", name: "Chase Paymentech", schema: "v1.0", base: "transaction_amount" },
-    ],
+    vendors: getVendorCatalog("M01"),
     uploadArtifactKey: "m01-processor",
     manualArtifactKey: "m01-contract",
     templateModule: "M01",
@@ -33,12 +29,7 @@ const moduleMeta = {
     ruleEyebrow: "Upload Rules - M02 Settlement Statements",
     ruleText:
       "Download order-level settlement CSVs directly from each DSP portal. Upload the raw export exactly as downloaded. Do not normalize columns before upload. The active schema must match the native DSP export before certification can proceed.",
-    vendors: [
-      { key: "ubereats", name: "Uber Eats", schema: "v1.0", base: "platform_gross_sales" },
-      { key: "doordash", name: "DoorDash", schema: "v1.0", base: "order_subtotal" },
-      { key: "grubhub", name: "Grubhub", schema: "v1.0", base: "restaurant_food_sales" },
-      { key: "slice", name: "Slice", schema: "v1.0", base: "order_subtotal" },
-    ],
+    vendors: getVendorCatalog("M02"),
     uploadArtifactKey: "m02-settlement",
     manualArtifactKey: "m02-contract",
     templateModule: "M02",
@@ -47,18 +38,33 @@ const moduleMeta = {
 
 export function UploadCenterView({
   activeLocationId,
+  activeLocationModules,
   activeLocationName,
+  activeSourceConfig,
+  canManageSources,
   intakeState,
   modules,
+  onCompleteUploadSet,
+  onManageSources,
   onArtifactAction,
   onDirectUpload,
   uploadFeedback,
 }: {
   activeLocationId: string | null;
+  activeLocationModules: Array<"M01" | "M02">;
   activeLocationName: string | null;
+  activeSourceConfig: LocationSourceConfig | null;
+  canManageSources: boolean;
   contractState: Record<string, Record<string, string>>;
   intakeState: Record<string, IntakeState>;
   modules: UploadModule[];
+  onCompleteUploadSet: (locationId: string) => void;
+  onManageSources: (next: {
+    m01Enabled: boolean;
+    m01Vendors: string[];
+    m02Enabled: boolean;
+    m02Vendors: string[];
+  }) => void;
   onArtifactAction: (
     moduleId: "M01" | "M02",
     artifactKey: string,
@@ -75,6 +81,7 @@ export function UploadCenterView({
   uploadFeedback: UploadReceipt | null;
 }) {
   const [activeModule, setActiveModule] = useState<"M01" | "M02">("M01");
+  const [showManageSources, setShowManageSources] = useState(false);
   const [cardState, setCardState] = useState<Record<string, UploadCardState>>({});
   const [pendingUpload, setPendingUpload] = useState<{
     moduleId: "M01" | "M02";
@@ -82,8 +89,45 @@ export function UploadCenterView({
     vendor: { key: string; name: string };
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const availableModules = useMemo(() => {
+    if (activeLocationModules.length > 0) {
+      return activeLocationModules;
+    }
+
+    const configured = (["M01", "M02"] as const).filter((moduleId) => {
+      if (!activeSourceConfig) {
+        return modules.some((module) => module.id === moduleId);
+      }
+
+      return moduleId === "M01" ? activeSourceConfig.m01Enabled : activeSourceConfig.m02Enabled;
+    });
+
+    return configured.length > 0
+      ? configured
+      : (["M01", "M02"] as const).filter((moduleId) =>
+          modules.some((module) => module.id === moduleId),
+        );
+  }, [activeLocationModules, activeSourceConfig, modules]);
+
+  useEffect(() => {
+    if (!availableModules.includes(activeModule) && availableModules[0]) {
+      setActiveModule(availableModules[0]);
+    }
+  }, [activeModule, availableModules]);
+
   const activeUploadModule = modules.find((module) => module.id === activeModule) ?? modules[0];
   const activeMeta = moduleMeta[activeModule];
+  const visibleVendors = useMemo(() => {
+    const selected =
+      activeModule === "M01" ? activeSourceConfig?.m01Vendors : activeSourceConfig?.m02Vendors;
+
+    if (!selected || selected.length === 0) {
+      return activeMeta.vendors;
+    }
+
+    const selectedKeys = new Set(selected.map((vendor) => vendor.key));
+    return activeMeta.vendors.filter((vendor) => selectedKeys.has(vendor.key));
+  }, [activeMeta.vendors, activeModule, activeSourceConfig]);
   const uploadArtifactKeyFor = (baseKey: string) =>
     activeUploadModule?.artifacts.find((artifact) => artifact.key.startsWith(baseKey))?.key ?? baseKey;
   const recentReceipt = useMemo(() => {
@@ -92,6 +136,69 @@ export function UploadCenterView({
       .filter((value): value is UploadReceipt => Boolean(value));
     return receipts.at(-1) ?? uploadFeedback;
   }, [cardState, uploadFeedback]);
+  const uploadCompletionSummary = useMemo(() => {
+    if (!activeLocationId) {
+      return null;
+    }
+
+    const summaryRows: Array<{ key: string; label: string; uploaded: boolean }> = [];
+
+    for (const moduleId of availableModules) {
+      const uploadModule = modules.find((item) => item.id === moduleId);
+      if (!uploadModule) {
+        continue;
+      }
+
+      const selectedVendors =
+        moduleId === "M01" ? activeSourceConfig?.m01Vendors : activeSourceConfig?.m02Vendors;
+      const vendors =
+        selectedVendors && selectedVendors.length > 0
+          ? selectedVendors
+          : moduleMeta[moduleId].vendors.map((vendor) => ({ key: vendor.key, name: vendor.name }));
+
+      const requiredArtifactKeys =
+        moduleId === "M01"
+          ? [
+              resolveModuleArtifactKey(uploadModule, "m01-processor"),
+              resolveModuleArtifactKey(uploadModule, "m01-pos"),
+              resolveModuleArtifactKey(uploadModule, "m01-agreement"),
+              resolveModuleArtifactKey(uploadModule, "m01-bank"),
+            ]
+          : [
+              resolveModuleArtifactKey(uploadModule, "m02-settlement"),
+              resolveModuleArtifactKey(uploadModule, "m02-pos"),
+              resolveModuleArtifactKey(uploadModule, "m02-agreement"),
+              resolveModuleArtifactKey(uploadModule, "m02-bank"),
+            ];
+
+      const artifactLabels =
+        moduleId === "M01"
+          ? ["Processor Statement", "POS Export", "Merchant Agreement", "Bank Statement"]
+          : ["DSP Settlement", "POS Summary", "DSP Agreement", "Bank Statement"];
+
+      for (const vendor of vendors) {
+        requiredArtifactKeys.forEach((artifactKey, index) => {
+          const stateKey = `${uploadModule.accountId}:${activeLocationId}:${moduleId}:${artifactKey}:${vendor.key}`;
+          const intake = intakeState[stateKey];
+          summaryRows.push({
+            key: `${moduleId}:${vendor.key}:${artifactKey}`,
+            label: `${moduleId} | ${vendor.name} | ${artifactLabels[index]}`,
+            uploaded: Boolean(intake?.uploaded),
+          });
+        });
+      }
+    }
+
+    const uploadedCount = summaryRows.filter((row) => row.uploaded).length;
+    const missingRows = summaryRows.filter((row) => !row.uploaded);
+
+    return {
+      isComplete: summaryRows.length > 0 && missingRows.length === 0,
+      missingRows,
+      totalCount: summaryRows.length,
+      uploadedCount,
+    };
+  }, [activeLocationId, activeSourceConfig, availableModules, intakeState, modules]);
 
   function getCardKey(moduleId: "M01" | "M02", artifactKey: string, vendorKey: string) {
     return `${activeLocationId ?? "global"}:${moduleId}:${artifactKey}:${vendorKey}`;
@@ -169,38 +276,102 @@ export function UploadCenterView({
         }}
       />
       <div className="border-b border-[var(--border)] px-5 py-4">
-        <div className="font-[family-name:var(--font-display)] text-[34px] font-bold tracking-[-0.05em] text-[var(--text)]">
-          Upload Data
-        </div>
-        <div className="mt-1 text-sm text-[var(--muted)]">
-          {activeLocationName
-            ? `${activeLocationName} | Upload native CSV statements exactly as downloaded - no reformatting, no Excel re-save`
-            : "Upload native CSV statements exactly as downloaded - no reformatting, no Excel re-save"}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="font-[family-name:var(--font-display)] text-[34px] font-bold tracking-[-0.05em] text-[var(--text)]">
+              Upload Data
+            </div>
+            <div className="mt-1 text-sm text-[var(--muted)]">
+              {activeLocationName
+                ? `${activeLocationName} | Upload native CSV statements exactly as downloaded - no reformatting, no Excel re-save`
+                : "Upload native CSV statements exactly as downloaded - no reformatting, no Excel re-save"}
+            </div>
+          </div>
+          {canManageSources && activeLocationName && activeSourceConfig ? (
+            <button
+              type="button"
+              onClick={() => setShowManageSources(true)}
+              className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+            >
+              Manage Sources
+            </button>
+          ) : null}
         </div>
       </div>
 
+      <div className="border-b border-[var(--border)] bg-[var(--surface)] px-5 py-4">
+        {activeLocationName && activeLocationId ? (
+          <div className="rounded-2xl border border-[rgba(214,48,49,0.16)] bg-white px-4 py-4 shadow-[0_8px_24px_rgba(0,0,0,0.03)]">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
+                  Current Upload Target
+                </div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+                      Location Title
+                    </div>
+                    <div className="mt-1 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+                      {activeLocationName}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+                      Location ID
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-[var(--text)]">{activeLocationId}</div>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-full border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
+                Location-Scoped Uploads
+              </div>
+            </div>
+            <div className="mt-4 text-sm leading-7 text-[var(--muted)]">
+              Every file uploaded on this screen is saved to{" "}
+              <span className="font-semibold text-[var(--text)]">{activeLocationName}</span> only.
+              To upload for another location, go back to the Location Waterfall and open Upload Data from that specific location.
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-[rgba(214,48,49,0.16)] bg-white px-4 py-4 text-sm leading-7 text-[var(--muted)]">
+            No active upload location is selected. Open Upload Data from a location row first so files are stored against the correct location.
+          </div>
+        )}
+      </div>
+
       <div className="px-5 pt-4">
-        <div className="flex flex-wrap items-center gap-7 border-b border-[var(--border)]">
-          {(["M02", "M01"] as const).map((moduleId) => {
-            const meta = moduleMeta[moduleId];
-            const active = moduleId === activeModule;
-            return (
-              <button
-                key={moduleId}
-                type="button"
-                onClick={() => setActiveModule(moduleId)}
-                className={`flex items-center gap-2 border-b-2 px-1 pb-3 text-[15px] transition ${
-                  active
-                    ? "border-[var(--accent)] text-[var(--accent)]"
-                    : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"
-                }`}
-              >
-                <span>{meta.icon}</span>
-                <span>{meta.label}</span>
-              </button>
-            );
-          })}
-        </div>
+        {availableModules.length > 1 ? (
+          <div className="flex flex-wrap items-center gap-7 border-b border-[var(--border)]">
+            {availableModules.map((moduleId) => {
+              const meta = moduleMeta[moduleId];
+              const active = moduleId === activeModule;
+              return (
+                <button
+                  key={moduleId}
+                  type="button"
+                  onClick={() => setActiveModule(moduleId)}
+                  className={`flex items-center gap-2 border-b-2 px-1 pb-3 text-[15px] transition ${
+                    active
+                      ? "border-[var(--accent)] text-[var(--accent)]"
+                      : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"
+                  }`}
+                >
+                  <span>{meta.icon}</span>
+                  <span>{meta.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : availableModules[0] ? (
+          <div className="border-b border-[var(--border)] pb-3">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)] px-3 py-1.5 text-[13px] font-medium text-[var(--accent)]">
+              <span>{moduleMeta[availableModules[0]].icon}</span>
+              <span>{moduleMeta[availableModules[0]].label}</span>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="px-5 pt-5">
@@ -214,7 +385,28 @@ export function UploadCenterView({
       </div>
 
       <div className="grid gap-4 px-5 py-4 md:grid-cols-2 xl:grid-cols-2">
-        {activeMeta.vendors.map((vendor) => {
+        {visibleVendors.length === 0 ? (
+          <div className="md:col-span-2">
+            <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] px-6 py-10 text-center">
+              <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+                No active providers configured
+              </div>
+              <div className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">
+                This location does not currently have any active {activeModule === "M01" ? "card processors" : "DSPs"} configured for {activeModule}. Add one before starting uploads.
+              </div>
+              {canManageSources && activeSourceConfig ? (
+                <button
+                  type="button"
+                  onClick={() => setShowManageSources(true)}
+                  className="mt-5 rounded-xl bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+                >
+                  Configure Active Sources
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {visibleVendors.map((vendor) => {
           const settlementArtifactKey = uploadArtifactKeyFor(activeMeta.uploadArtifactKey);
           const posArtifactKey = activeModule === "M02" ? uploadArtifactKeyFor("m02-pos") : uploadArtifactKeyFor("m01-pos");
           const agreementArtifactKey =
@@ -250,10 +442,10 @@ export function UploadCenterView({
           return (
             <div key={vendor.key} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-white">
               <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
-                <div>
-                  <div className="text-[22px] font-semibold tracking-[-0.03em] text-[var(--text)]">{vendor.name}</div>
-                  <div className="mt-1 font-[family-name:var(--font-mono)] text-[10px] text-[var(--muted)]">
-                    Schema {vendor.schema} | base: {vendor.base}
+                  <div>
+                    <div className="text-[22px] font-semibold tracking-[-0.03em] text-[var(--text)]">{vendor.name}</div>
+                    <div className="mt-1 font-[family-name:var(--font-mono)] text-[10px] text-[var(--muted)]">
+                    Schema {vendor.schema ?? "v1.0"} | base: {vendor.base ?? "configured in governance"}
                   </div>
                 </div>
                 <button
@@ -544,12 +736,69 @@ export function UploadCenterView({
       </div>
 
       <div className="flex items-center justify-between gap-4 border-t border-[var(--border)] px-5 py-4">
-        <div className="text-sm text-[var(--muted)]">
-          Files are SHA-256 hashed at intake before processing. Upload the file exactly as downloaded from the DSP or processor portal.
+        <div className="flex-1">
+          <div className="text-sm text-[var(--muted)]">
+            Files are SHA-256 hashed at intake before processing. Upload the file exactly as downloaded from the DSP or processor portal.
+          </div>
+          {uploadCompletionSummary ? (
+            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
+                    Upload Set Review
+                  </div>
+                  <div className="mt-2 text-sm text-[var(--text)]">
+                    {uploadCompletionSummary.uploadedCount}/{uploadCompletionSummary.totalCount} required documents uploaded for{" "}
+                    <span className="font-semibold">{activeLocationName ?? "this location"}</span>.
+                  </div>
+                  {uploadCompletionSummary.missingRows.length > 0 ? (
+                    <div className="mt-3 text-sm text-[var(--muted)]">
+                      Missing: {uploadCompletionSummary.missingRows.slice(0, 4).map((row) => row.label).join(" | ")}
+                      {uploadCompletionSummary.missingRows.length > 4
+                        ? ` | +${uploadCompletionSummary.missingRows.length - 4} more`
+                        : ""}
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-sm text-[var(--success)]">
+                      All required documents for this location are present. Finish intake to return to the Location Waterfall.
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  disabled={!uploadCompletionSummary.isComplete || !activeLocationId}
+                  onClick={() => {
+                    if (activeLocationId) {
+                      onCompleteUploadSet(activeLocationId);
+                    }
+                  }}
+                  className="rounded-xl bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {activeLocationName ? `Finish Uploads for ${activeLocationName}` : "Finish Uploads"}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
+
+      {showManageSources && activeSourceConfig && activeLocationName ? (
+        <LocationSourceSettingsModal
+          initialConfig={activeSourceConfig}
+          locationName={activeLocationName}
+          onClose={() => setShowManageSources(false)}
+          onSave={(next) => {
+            onManageSources(next);
+            setShowManageSources(false);
+          }}
+        />
+      ) : null}
     </div>
   );
+}
+
+function resolveModuleArtifactKey(module: UploadModule, prefix: string) {
+  return module.artifacts.find((artifact) => artifact.key.startsWith(prefix))?.key ?? prefix;
 }
 
 function IntakeDot({ done, label }: { done: boolean; label: string }) {

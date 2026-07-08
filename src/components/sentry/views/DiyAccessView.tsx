@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { wgsM01Vendors, wgsM02Vendors } from "../data";
-import type { LocationRecord, Role, SchemaWorkspace } from "../types";
+import type { LocationRecord, LocationSourceConfig, Role, SchemaWorkspace } from "../types";
 import { Badge, HelpTip, MetaBlock, SectionCard } from "../ui/primitives";
 import { UserGuideView } from "./UserGuideView";
 
@@ -11,6 +11,7 @@ type RegistryTab = "mappings" | "missing" | "contract" | "vault";
 
 export function DiyAccessView({
   locations,
+  locationSourceConfigs,
   onEditWorkspace,
   onInitializeWorkspace,
   onSealWorkspace,
@@ -18,6 +19,7 @@ export function DiyAccessView({
   workspaces,
 }: {
   locations: LocationRecord[];
+  locationSourceConfigs: Record<string, LocationSourceConfig>;
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
   onInitializeWorkspace: (locationId: string, module: "M01" | "M02", vendor?: string) => void;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
@@ -28,11 +30,11 @@ export function DiyAccessView({
   const [m01Panel, setM01Panel] = useState<RegistryTab>("mappings");
   const [m02Panel, setM02Panel] = useState<RegistryTab>("mappings");
   const unlocked = role === "Admin" || role === "SuperAdmin" || role === "WGS Manager";
+  const canSeal = role === "SuperAdmin" || role === "WGS Manager";
   const dbWorkspaces = useMemo(
     () => workspaces.filter((workspace) => Boolean(workspace.locationId)),
     [workspaces],
   );
-  const hiddenTemplateCount = workspaces.length - dbWorkspaces.length;
 
   const m01Workspaces = useMemo(
     () => dbWorkspaces.filter((workspace) => workspace.module === "M01"),
@@ -42,6 +44,14 @@ export function DiyAccessView({
     () => dbWorkspaces.filter((workspace) => workspace.module === "M02"),
     [dbWorkspaces],
   );
+  const m01Locations = useMemo(
+    () => locations.filter((location) => locationSourceConfigs[location.id]?.m01Enabled),
+    [locationSourceConfigs, locations],
+  );
+  const m02Locations = useMemo(
+    () => locations.filter((location) => locationSourceConfigs[location.id]?.m02Enabled),
+    [locationSourceConfigs, locations],
+  );
 
   const [m01LocationId, setM01LocationId] = useState("");
   const [m02LocationId, setM02LocationId] = useState("");
@@ -49,14 +59,14 @@ export function DiyAccessView({
   const [m02Vendor, setM02Vendor] = useState("");
 
   const selectedM01LocationId =
-    (m01LocationId && locations.some((location) => location.id === m01LocationId) ? m01LocationId : "") ||
+    (m01LocationId && m01Locations.some((location) => location.id === m01LocationId) ? m01LocationId : "") ||
     m01Workspaces[0]?.locationId ||
-    locations[0]?.id ||
+    m01Locations[0]?.id ||
     "";
   const selectedM02LocationId =
-    (m02LocationId && locations.some((location) => location.id === m02LocationId) ? m02LocationId : "") ||
+    (m02LocationId && m02Locations.some((location) => location.id === m02LocationId) ? m02LocationId : "") ||
     m02Workspaces[0]?.locationId ||
-    locations[0]?.id ||
+    m02Locations[0]?.id ||
     "";
 
   const m01LocationWorkspaces = useMemo(
@@ -166,17 +176,11 @@ export function DiyAccessView({
         <DiyTabButton active={tab === "guide"} label="User Guide" onClick={() => setTab("guide")} />
       </div>
 
-      {hiddenTemplateCount > 0 ? (
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
-          DIY Access now shows location-bound governance workspaces only. {hiddenTemplateCount} legacy template
-          {hiddenTemplateCount === 1 ? "" : "s"} are hidden to avoid mixing demo data with persisted client records.
-        </div>
-      ) : null}
-
       {tab === "guide" ? <UserGuideView /> : null}
       {tab === "m01" && activeM01 ? (
         <RegistryWorkspacePanel
-          locations={locations}
+          canSeal={canSeal}
+          locations={m01Locations}
           selectedLocationId={selectedM01LocationId}
           workspace={activeM01}
           workspaces={m01LocationWorkspaces}
@@ -196,7 +200,9 @@ export function DiyAccessView({
       ) : null}
       {tab === "m01" && !activeM01 ? (
         <EmptyWorkspaceState
-          locations={locations}
+          canSeal={canSeal}
+          locations={m01Locations}
+          locationSourceConfigs={locationSourceConfigs}
           module="M01"
           onEditWorkspace={onEditWorkspace}
           onInitializeWorkspace={onInitializeWorkspace}
@@ -206,7 +212,8 @@ export function DiyAccessView({
       ) : null}
       {tab === "m02" && activeM02 ? (
         <RegistryWorkspacePanel
-          locations={locations}
+          canSeal={canSeal}
+          locations={m02Locations}
           selectedLocationId={selectedM02LocationId}
           workspace={activeM02}
           workspaces={m02LocationWorkspaces}
@@ -226,7 +233,9 @@ export function DiyAccessView({
       ) : null}
       {tab === "m02" && !activeM02 ? (
         <EmptyWorkspaceState
-          locations={locations}
+          canSeal={canSeal}
+          locations={m02Locations}
+          locationSourceConfigs={locationSourceConfigs}
           module="M02"
           onEditWorkspace={onEditWorkspace}
           onInitializeWorkspace={onInitializeWorkspace}
@@ -239,38 +248,49 @@ export function DiyAccessView({
 }
 
 function EmptyWorkspaceState({
+  canSeal,
   locations,
+  locationSourceConfigs,
   module,
   onEditWorkspace,
   onInitializeWorkspace,
   onSealWorkspace,
   workspaces,
 }: {
+  canSeal: boolean;
   locations: LocationRecord[];
+  locationSourceConfigs: Record<string, LocationSourceConfig>;
   module: "M01" | "M02";
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
   onInitializeWorkspace: (locationId: string, module: "M01" | "M02", vendor?: string) => void;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   workspaces: SchemaWorkspace[];
 }) {
-  const vendorOptions = module === "M01" ? wgsM01Vendors : wgsM02Vendors;
+  const vendorCatalog = module === "M01" ? wgsM01Vendors : wgsM02Vendors;
+  const moduleEnabledKey = module === "M01" ? "m01Enabled" : "m02Enabled";
+  const moduleVendorsKey = module === "M01" ? "m01Vendors" : "m02Vendors";
+  const eligibleLocations = locations.filter((location) => locationSourceConfigs[location.id]?.[moduleEnabledKey]);
 
   return (
     <SectionCard className="space-y-5">
       <div>
         <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
-          Initialize or continue {module} workspaces
+          {module} governance workspaces
         </div>
         <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--muted)]">
-          Every location must have a real Schema Registry workspace before certification can run.
-          Initialize missing vendors, continue draft workspaces, or open sealed vault-backed records below.
+          Every location must maintain persisted Schema Registry and Contract Config records before certification can run.
+          Initialize the required vendor workspaces, continue draft governance work, or open sealed vault-backed records below.
         </p>
       </div>
 
-      {locations.length > 0 ? (
+      {eligibleLocations.length > 0 ? (
         <div className="grid gap-4">
-          {locations.map((location) => {
+          {eligibleLocations.map((location) => {
             const locationWorkspaces = workspaces.filter((workspace) => workspace.locationId === location.id);
+            const selectedVendorNames = (locationSourceConfigs[location.id]?.[moduleVendorsKey] ?? []).map(
+              (vendor) => vendor.name,
+            );
+            const vendorOptions = vendorCatalog.filter((vendor) => selectedVendorNames.includes(vendor.name));
             const sealedCount = locationWorkspaces.filter((workspace) => getWorkspaceStatus(workspace) === "sealed").length;
             const draftCount = locationWorkspaces.filter((workspace) => getWorkspaceStatus(workspace) === "draft").length;
             const stateTone = sealedCount > 0 ? "success" : draftCount > 0 ? "warning" : "danger";
@@ -296,7 +316,8 @@ function EmptyWorkspaceState({
                   <Badge tone={stateTone}>{stateLabel}</Badge>
                 </div>
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {vendorOptions.map((vendor) => {
+                  {vendorOptions.length > 0 ? (
+                    vendorOptions.map((vendor) => {
                     const workspace = locationWorkspaces.find((item) => item.vendor === vendor.name) ?? null;
                     const status = workspace ? getWorkspaceStatus(workspace) : null;
 
@@ -325,7 +346,7 @@ function EmptyWorkspaceState({
                               >
                                 {status === "sealed" ? "Open Workspace" : "Continue Draft"}
                               </button>
-                              {status !== "sealed" ? (
+                              {status !== "sealed" && canSeal ? (
                                 <button
                                   type="button"
                                   onClick={() => onSealWorkspace(workspace)}
@@ -345,9 +366,27 @@ function EmptyWorkspaceState({
                             </button>
                           )}
                         </div>
+                        <div className="mt-3 text-xs leading-5 text-[var(--muted)]">
+                          {workspace
+                            ? status === "sealed"
+                              ? "Governance is sealed for this vendor and location."
+                              : "Draft governance exists. Review mappings and seal when complete."
+                            : `No persisted governance workspace exists yet for ${vendor.name} at this location.`}
+                        </div>
+                        {!canSeal && status !== "sealed" ? (
+                          <div className="mt-3 text-xs leading-5 text-[var(--muted)]">
+                            WGS must perform the final seal after review. Admin can prepare and save the draft workspace only.
+                          </div>
+                        ) : null}
                       </div>
                     );
-                  })}
+                    })
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-[var(--border)] bg-white p-4 text-sm text-[var(--muted)] md:col-span-2">
+                      No {module} vendor is selected for this location yet. Configure the location source settings first,
+                      then return to DIY Access to initialize and seal the schema workspace for the chosen vendor.
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -355,7 +394,8 @@ function EmptyWorkspaceState({
         </div>
       ) : (
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-10 text-center text-sm text-[var(--muted)]">
-          Add a location first, then initialize the {module} Schema Registry from this screen.
+          No location currently has {module} enabled. Add a location or enable the module in that location&apos;s source
+          settings first.
         </div>
       )}
     </SectionCard>
@@ -364,6 +404,7 @@ function EmptyWorkspaceState({
 
 function RegistryWorkspacePanel({
   activePanel,
+  canSeal,
   locations,
   onChangePanel,
   onChangeLocation,
@@ -375,6 +416,7 @@ function RegistryWorkspacePanel({
   workspaces,
 }: {
   activePanel: RegistryTab;
+  canSeal: boolean;
   locations: LocationRecord[];
   onChangePanel: (panel: RegistryTab) => void;
   onChangeLocation: (locationId: string) => void;
@@ -453,6 +495,11 @@ function RegistryWorkspacePanel({
           >
             Edit Schema
           </button>
+          {!canSeal ? (
+            <span className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-[11px] text-[var(--muted)]">
+              WGS seal required
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -574,13 +621,15 @@ function RegistryWorkspacePanel({
             >
               Edit Schema
             </button>
-            <button
-              type="button"
-              onClick={() => onSealWorkspace(workspace)}
-              className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
-            >
-              Seal Contract Config
-            </button>
+            {canSeal ? (
+              <button
+                type="button"
+                onClick={() => onSealWorkspace(workspace)}
+                className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+              >
+                Seal Contract Config
+              </button>
+            ) : null}
           </div>
         </div>
       ) : null}

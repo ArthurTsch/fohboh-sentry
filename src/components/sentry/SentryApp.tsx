@@ -45,6 +45,7 @@ import type {
   ChatMessage,
   IntakeState,
   LocationRecord,
+  LocationSourceConfig,
   LocationWorkflowState,
   LogRecord,
   RequestAccessDraft,
@@ -63,6 +64,7 @@ import type {
   WgsUser,
 } from "./types";
 import { getSupportReply } from "./utils";
+import { resolveVendorKey, resolveVendorSelections } from "./vendor-catalog";
 import { LandingPage } from "./views/LandingPage";
 
 type ActiveArtifactState = {
@@ -88,6 +90,7 @@ type ActiveCertificationState = {
 type PendingCertificationRequest = {
   locationId: string;
   locationName: string;
+  locations?: { id: string; name: string }[];
 };
 
 type CertificationBlockerState = {
@@ -96,6 +99,7 @@ type CertificationBlockerState = {
   locationName: string;
   primaryAction: LocationWorkflowState["primaryAction"];
   primaryLabel: string;
+  requirements: LocationWorkflowState["requirements"];
 };
 
 const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
@@ -113,6 +117,9 @@ type DatabaseRestaurant = {
     account_id: string | null;
     completed: boolean | null;
     created_by: number | null;
+    governance_initialized_at: string | null;
+    governance_sealed_at: string | null;
+    governance_status: string;
     ium: string | null;
     last_certified: string | null;
     location_id: string;
@@ -249,6 +256,8 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     accountId: null,
     accountName: null,
   });
+  const [addLocationInitialDraft, setAddLocationInitialDraft] =
+    useState<AddLocationDraft>(emptyAddLocationDraft);
 
   const effectiveSession = session;
   const activeView = activeViewOverride ?? (effectiveSession?.role === "WGS Manager" ? "wgs" : "dashboard");
@@ -387,6 +396,8 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   }, [effectiveSession, persistenceHydrated]);
 
   const applyPersistedWorkspace = useCallback((workspace: PersistedWorkspaceRecord) => {
+    let nextSchemaSnapshot: PersistedWorkspaceRecord[] = [];
+
     setSchemaState((current) => {
       const next = [...current];
       const index = next.findIndex(
@@ -401,6 +412,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       } else {
         next[index] = workspace;
       }
+      nextSchemaSnapshot = next;
       return next;
     });
 
@@ -421,6 +433,58 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         ...current,
         [contractKey]: nextContractValues,
       }));
+    }
+    if (workspace.locationId) {
+      setAssignedLocationState((current) =>
+        current.map((location) => {
+          if (location.id !== workspace.locationId) {
+            return location;
+          }
+
+          const activeGovernedModules = location.modules
+            .map((module) => module.label)
+            .filter((label): label is "M01" | "M02" => label === "M01" || label === "M02");
+          const sealedModules = new Set(
+            nextSchemaSnapshot
+              .filter(
+                (item) =>
+                  item.locationId === workspace.locationId &&
+                  (item.status === "sealed" || item.vault.state === "sealed"),
+              )
+              .map((item) => item.module),
+          );
+          if (workspace.status === "sealed" || workspace.vault.state === "sealed") {
+            sealedModules.add(workspace.module);
+          }
+
+          const governanceStatus =
+            activeGovernedModules.length > 0 && activeGovernedModules.every((module) => sealedModules.has(module))
+              ? "sealed"
+              : "draft";
+          const now = new Date().toISOString();
+
+          return {
+            ...location,
+            governanceInitializedAt: location.governanceInitializedAt ?? now,
+            governanceSealedAt:
+              governanceStatus === "sealed"
+                ? now
+                : location.governanceSealedAt,
+            governanceStatus,
+            modules: location.modules.map((module) =>
+              module.label === workspace.module
+                ? {
+                    ...module,
+                    note:
+                      workspace.status === "sealed" || workspace.vault.state === "sealed"
+                        ? `${workspace.vendor} governance sealed. Continue with required evidence uploads for certification.`
+                        : `${workspace.vendor} governance draft saved. Review mappings and seal when ready.`,
+                  }
+                : module,
+            ),
+          };
+        }),
+      );
     }
   }, []);
 
@@ -785,6 +849,29 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     };
   }
 
+  function getUploadTargetLocation() {
+    return activeUploadLocation
+      ? visibleLocations.find((item) => item.id === activeUploadLocation.id) ?? visibleLocations[0] ?? null
+      : visibleLocations[0] ?? null;
+  }
+
+  function getLocationSourceConfig(locationId: string): LocationSourceConfig | null {
+    const location = runtimeLocationState.find((item) => item.id === locationId);
+    if (!location) {
+      return null;
+    }
+
+    const progress = wgsOnboardingState[locationId];
+    const activeLabels = new Set(location.modules.map((module) => module.label));
+
+    return {
+      m01Enabled: activeLabels.has("M01"),
+      m01Vendors: resolveVendorSelections("M01", progress?.selectedVendors.m01 ?? []),
+      m02Enabled: activeLabels.has("M02"),
+      m02Vendors: resolveVendorSelections("M02", progress?.selectedVendors.m02 ?? []),
+    };
+  }
+
   function getArtifactStateKey(
     accountId: string,
     locationId: string,
@@ -892,6 +979,42 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     startTransition(() => setActiveViewOverride(view));
   }
 
+  async function handleOpenAddLocation() {
+    let nextDraft = emptyAddLocationDraft;
+
+    try {
+      const response = await fetch("/api/v1/access-requests/bootstrap", {
+        cache: "no-store",
+      });
+
+      if (response.ok) {
+        const payload = (await response.json()) as {
+          request?: {
+            dsps?: string[];
+            m01?: boolean;
+            m02?: boolean;
+            processor?: string;
+          } | null;
+        };
+
+        if (payload.request) {
+          nextDraft = {
+            ...emptyAddLocationDraft,
+            dsps: payload.request.dsps?.length ? payload.request.dsps : [],
+            m01: payload.request.m01 ?? false,
+            m02: payload.request.m02 ?? false,
+            processor: payload.request.processor?.trim() || emptyAddLocationDraft.processor,
+          };
+        }
+      }
+    } catch {
+      // Leave the standard draft in place if bootstrap prefill cannot be loaded.
+    }
+
+    setAddLocationInitialDraft(nextDraft);
+    setShowAddLocation(true);
+  }
+
   function handleOpenLocationUploads(locationId: string) {
     const location = visibleLocations.find((item) => item.id === locationId);
     if (!location) {
@@ -908,6 +1031,26 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
 
   function handleOpenDiy() {
     startTransition(() => setActiveViewOverride("diy"));
+  }
+
+  function handleCompleteUploadSet(locationId: string) {
+    const location = visibleLocations.find((item) => item.id === locationId);
+    if (!location) {
+      return;
+    }
+
+    void recordClientActivity({
+      action: "location_upload_set_completed",
+      entityId: location.id,
+      entityType: "location_upload_set",
+      immutable: false,
+      locationId: location.id,
+      locationName: location.name,
+      summary: `Completed upload intake for ${location.name}.`,
+    });
+    setActiveUploadLocation(null);
+    startTransition(() => setActiveViewOverride("waterfall"));
+    showToast(`Upload set saved for ${location.name}.`);
   }
 
   function toggleLocation(id: string) {
@@ -947,6 +1090,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         managerId: effectiveSession?.managerId ?? null,
         sentryState: {
           completed: false,
+          governanceStatus: "uninitialized",
           ium: "--",
           lastCertified: "Pending",
           locationId: draft.locId.trim() || undefined,
@@ -966,7 +1110,13 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
             },
           ],
           onboardingChecklist: onboardingState,
-          onboardingProgress: createWgsOnboardingProgress(),
+          onboardingProgress: {
+            ...createWgsOnboardingProgress(),
+            selectedVendors: {
+              m01: draft.m01 && draft.processor ? [resolveVendorKey("M01", draft.processor)] : [],
+              m02: draft.m02 ? draft.dsps.map((dsp) => resolveVendorKey("M02", dsp)) : [],
+            },
+          },
           recoveryDisplay: "$0",
           status: "Onboarding",
         },
@@ -1005,6 +1155,9 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       m01: 0,
       m02: 0,
       ium: "--",
+      governanceInitializedAt: null,
+      governanceSealedAt: null,
+      governanceStatus: "uninitialized" as const,
       recovery: "$0",
       status: "Onboarding" as const,
       lastCertified: "Pending",
@@ -1026,7 +1179,13 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     upsertRuntimeLocation(location);
     setWgsOnboardingState((current) => ({
       ...current,
-      [location.id]: createWgsOnboardingProgress(),
+      [location.id]: {
+        ...createWgsOnboardingProgress(),
+        selectedVendors: {
+          m01: draft.m01 && draft.processor ? [resolveVendorKey("M01", draft.processor)] : [],
+          m02: draft.m02 ? draft.dsps.map((dsp) => resolveVendorKey("M02", dsp)) : [],
+        },
+      },
     }));
     void syncAssignedRestaurants();
     setShowAddLocation(false);
@@ -1034,7 +1193,13 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     setActiveOnboardingLocation(location.id);
     void persistLocationState(location, {
       onboardingChecklist: onboardingState,
-      onboardingProgress: createWgsOnboardingProgress(),
+      onboardingProgress: {
+        ...createWgsOnboardingProgress(),
+        selectedVendors: {
+          m01: draft.m01 && draft.processor ? [resolveVendorKey("M01", draft.processor)] : [],
+          m02: draft.m02 ? draft.dsps.map((dsp) => resolveVendorKey("M02", dsp)) : [],
+        },
+      },
     });
     void syncAuditLogs();
     showToast(`${draft.name} added. WGS onboarding plan created.`);
@@ -1100,6 +1265,9 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
           accountId: location.accountId,
           completed: options?.onboardingProgress?.completed ?? location.status !== "Onboarding",
           createdBy: effectiveSession?.managerId ?? location.ownerManagerId ?? null,
+          governanceInitializedAt: location.governanceInitializedAt ?? null,
+          governanceSealedAt: location.governanceSealedAt ?? null,
+          governanceStatus: location.governanceStatus ?? "uninitialized",
           ium: location.ium,
           lastCertified: location.lastCertified,
           locationId: location.id,
@@ -1219,7 +1387,17 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     if (!savedWorkspace) {
       return;
     }
-    void syncAuditLogs();
+    void recordClientActivity({
+      accountId: savedWorkspace.accountId,
+      action: "governance_workspace_saved",
+      entityId: `${savedWorkspace.module}:${savedWorkspace.vendor}:${savedWorkspace.locationId ?? "global"}`,
+      entityType: "schema_registry_v2",
+      immutable: false,
+      locationId: savedWorkspace.locationId,
+      locationName: savedWorkspace.locationName ?? savedWorkspace.account,
+      summary: `${savedWorkspace.module} ${savedWorkspace.vendor} draft saved for ${savedWorkspace.locationName ?? savedWorkspace.account}.`,
+    });
+    await Promise.all([syncAssignedRestaurants(), syncGovernanceWorkspaces(), syncAuditLogs()]);
     showToast("Schema draft saved.");
   }
 
@@ -1228,7 +1406,17 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     if (!sealedWorkspace) {
       return;
     }
-    void syncAuditLogs();
+    void recordClientActivity({
+      accountId: sealedWorkspace.accountId,
+      action: "governance_workspace_sealed_client",
+      entityId: `${sealedWorkspace.module}:${sealedWorkspace.vendor}:${sealedWorkspace.locationId ?? "global"}:${sealedWorkspace.vault.version}`,
+      entityType: "contract_configs_v2",
+      immutable: true,
+      locationId: sealedWorkspace.locationId,
+      locationName: sealedWorkspace.locationName ?? sealedWorkspace.account,
+      summary: `${sealedWorkspace.module} ${sealedWorkspace.vendor} sealed for ${sealedWorkspace.locationName ?? sealedWorkspace.account}.`,
+    });
+    await Promise.all([syncAssignedRestaurants(), syncGovernanceWorkspaces(), syncAuditLogs()]);
     showToast("Workspace sealed to vault.");
   }
 
@@ -1385,7 +1573,9 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     let next: IntakeState;
     const manualValues = artifactContractState[key] ?? {};
     const usingManualMode =
-      activeArtifact.artifact.type === "Manual Entry" || manualValues.__entry_mode === "manual";
+      activeArtifact.artifact.type === "Manual Entry" ||
+      activeArtifact.entryMode === "manual" ||
+      manualValues.__entry_mode === "manual";
 
     if (usingManualMode) {
       const providedValues = Object.entries(manualValues).filter(
@@ -1525,6 +1715,75 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         onboardingProgress: next,
       });
     }
+  }
+
+  function handleManageUploadSources(next: {
+    m01Enabled: boolean;
+    m01Vendors: string[];
+    m02Enabled: boolean;
+    m02Vendors: string[];
+  }) {
+    const targetLocation = getUploadTargetLocation();
+    if (!targetLocation) {
+      return;
+    }
+
+    const currentProgress = wgsOnboardingState[targetLocation.id] ?? createWgsOnboardingProgress();
+    const nextProgress: WgsOnboardingProgress = {
+      ...currentProgress,
+      selectedVendors: {
+        m01: next.m01Enabled ? next.m01Vendors : [],
+        m02: next.m02Enabled ? next.m02Vendors : [],
+      },
+    };
+
+    const evidenceModule =
+      targetLocation.modules.find((module) => module.label === "Evidence") ?? {
+        label: "Evidence",
+        note: "Onboarding started. WGS review and first upload cycle are pending.",
+        score: 0,
+      };
+    const existingM01 = targetLocation.modules.find((module) => module.label === "M01");
+    const existingM02 = targetLocation.modules.find((module) => module.label === "M02");
+    const m01Names = resolveVendorSelections("M01", next.m01Vendors).map((vendor) => vendor.name);
+    const m02Names = resolveVendorSelections("M02", next.m02Vendors).map((vendor) => vendor.name);
+
+    const updatedLocation: LocationRecord = {
+      ...targetLocation,
+      modules: [
+        ...(next.m01Enabled
+          ? [
+              existingM01 ?? {
+                label: "M01",
+                note: `${m01Names.join(", ") || "Selected processor"} schema and contract config still pending seal.`,
+                score: 0,
+              },
+            ]
+          : []),
+        ...(next.m02Enabled
+          ? [
+              existingM02 ?? {
+                label: "M02",
+                note: `${m02Names.join(", ") || "Selected DSPs"} evidence package still being configured.`,
+                score: 0,
+              },
+            ]
+          : []),
+        evidenceModule,
+      ],
+    };
+
+    setWgsOnboardingState((current) => ({
+      ...current,
+      [targetLocation.id]: nextProgress,
+    }));
+    updateRuntimeLocation(targetLocation.id, () => updatedLocation);
+    void persistLocationState(updatedLocation, {
+      onboardingChecklist: onboardingState,
+      onboardingProgress: nextProgress,
+    });
+    void syncAssignedRestaurants();
+    showToast("Active source settings updated.");
   }
 
 function handleCompleteOnboarding(locationId: string) {
@@ -1760,6 +2019,7 @@ function handleCompleteOnboarding(locationId: string) {
         locationName: location.name,
         primaryAction: workflow.primaryAction,
         primaryLabel: workflow.primaryLabel,
+        requirements: workflow.requirements,
       });
       return;
     }
@@ -1800,6 +2060,7 @@ function handleCompleteOnboarding(locationId: string) {
           locationName: location.name,
           primaryAction: workflow?.primaryAction ?? "uploads",
           primaryLabel: workflow?.primaryLabel ?? "Open Upload Data",
+          requirements: workflow?.requirements ?? [],
         });
         return;
       }
@@ -1882,6 +2143,27 @@ function handleCompleteOnboarding(locationId: string) {
     activeUploadLocation?.accountId
       ? resolveUploadModulesForAccount(activeUploadLocation.accountId)
       : visibleUploadModules;
+  const activeUploadSourceConfig = (() => {
+    const targetLocationId = activeUploadLocation?.id ?? visibleLocations[0]?.id ?? null;
+    return targetLocationId ? getLocationSourceConfig(targetLocationId) : null;
+  })();
+  const diyLocationSourceConfigs = Object.fromEntries(
+    visibleLocations.map((location) => [location.id, getLocationSourceConfig(location.id)]),
+  ) as Record<string, LocationSourceConfig>;
+  const activeUploadModules = (() => {
+    const targetLocationId = activeUploadLocation?.id ?? visibleLocations[0]?.id ?? null;
+    const location = targetLocationId
+      ? visibleLocations.find((item) => item.id === targetLocationId) ?? null
+      : null;
+
+    if (!location) {
+      return [] as Array<"M01" | "M02">;
+    }
+
+    return location.modules
+      .map((module) => module.label)
+      .filter((label): label is "M01" | "M02" => label === "M01" || label === "M02");
+  })();
 
   return (
     <>
@@ -1892,8 +2174,20 @@ function handleCompleteOnboarding(locationId: string) {
         onExitSupportMode={() => setSupportMode({ active: false, accountId: null, accountName: null })}
         onOpenSupport={() => setChatOpen(true)}
         onRunPrimaryCertification={() => {
-          const primaryLocation = visibleLocations[0];
-          if (primaryLocation) handleRunCertification(primaryLocation.id);
+          const selectableLocations = visibleLocations.map((location) => ({
+            id: location.id,
+            name: location.name,
+          }));
+          const primaryLocation = selectableLocations[0];
+          if (!primaryLocation) {
+            showToast("No location is available for certification.");
+            return;
+          }
+          setPendingCertificationRequest({
+            locationId: primaryLocation.id,
+            locationName: primaryLocation.name,
+            locations: selectableLocations,
+          });
         }}
         onSignOut={handleSignOut}
         onViewChange={handleViewChange}
@@ -1905,7 +2199,10 @@ function handleCompleteOnboarding(locationId: string) {
           accounts={wgsAccountState}
           activeView={activeView}
           activeUploadLocationId={activeUploadLocation?.id ?? visibleLocations[0]?.id ?? null}
+          activeUploadModules={activeUploadModules}
           activeUploadLocationName={activeUploadLocation?.name ?? visibleLocations[0]?.name ?? null}
+          activeUploadSourceConfig={activeUploadSourceConfig}
+          diyLocationSourceConfigs={diyLocationSourceConfigs}
           approvals={wgsApprovalState}
           averageTrust={averageTrust}
           artifactContractState={artifactContractState}
@@ -1919,12 +2216,14 @@ function handleCompleteOnboarding(locationId: string) {
           filteredLogs={filteredLogs}
           locations={visibleLocations}
           logFilter={logFilter}
-          onAddLocation={() => setShowAddLocation(true)}
+          onAddLocation={handleOpenAddLocation}
           onAddUser={() => {
             setCreatingWgsUser(true);
             setEditingWgsUser(null);
           }}
           onApprove={handleApprove}
+          onCompleteUploadSet={handleCompleteUploadSet}
+          onManageUploadSources={handleManageUploadSources}
           onArtifactAction={handleArtifactAction}
           onDirectUpload={handleDirectArtifactUpload}
           onEnterSupportMode={handleEnterSupportMode}
@@ -1973,7 +2272,7 @@ function handleCompleteOnboarding(locationId: string) {
 
       {showAddLocation ? (
         <AddLocationModal
-          initialDraft={emptyAddLocationDraft}
+          initialDraft={addLocationInitialDraft}
           onClose={() => setShowAddLocation(false)}
           onSubmit={handleAddLocation}
         />
@@ -2024,6 +2323,7 @@ function handleCompleteOnboarding(locationId: string) {
           onClose={() => setEditingWorkspace(null)}
           onSave={handleSaveWorkspace}
           onSeal={handleSealWorkspace}
+          role={effectiveSession?.role ?? "Viewer"}
         />
       ) : null}
 
@@ -2054,7 +2354,25 @@ function handleCompleteOnboarding(locationId: string) {
 
       {pendingCertificationRequest ? (
         <CertificationCadenceModal
+          locationId={pendingCertificationRequest.locationId}
+          locations={pendingCertificationRequest.locations}
           locationName={pendingCertificationRequest.locationName}
+          onChangeLocation={(locationId) => {
+            const nextLocation =
+              pendingCertificationRequest.locations?.find((location) => location.id === locationId) ?? null;
+            if (!nextLocation) {
+              return;
+            }
+            setPendingCertificationRequest((current) =>
+              current
+                ? {
+                    ...current,
+                    locationId: nextLocation.id,
+                    locationName: nextLocation.name,
+                  }
+                : current,
+            );
+          }}
           onClose={() => setPendingCertificationRequest(null)}
           onSubmit={executeRunCertification}
         />
@@ -2086,6 +2404,7 @@ function handleCompleteOnboarding(locationId: string) {
           onOpenUploads={() => handleOpenLocationUploads(certificationBlocker.locationId)}
           primaryAction={certificationBlocker.primaryAction}
           primaryLabel={certificationBlocker.primaryLabel}
+          requirements={certificationBlocker.requirements}
         />
       ) : null}
 
@@ -2130,6 +2449,9 @@ function mapAssignedRestaurantsToLocations(
             ? `mgr:${restaurant.created_by ?? restaurant.id}`
             : session.accountId ?? `mgr:${session.email.toLowerCase()}`
         ),
+        governanceInitializedAt: restaurant.sentry_state?.governance_initialized_at ?? null,
+        governanceSealedAt: restaurant.sentry_state?.governance_sealed_at ?? null,
+        governanceStatus: toGovernanceStatus(restaurant.sentry_state?.governance_status),
         id: locationId,
         name: restaurant.name,
         market,
@@ -2148,7 +2470,9 @@ function mapAssignedRestaurantsToLocations(
                 {
                   label: "Evidence",
                   score: 0,
-                  note: "Assigned from admin. Onboarding, uploads, and first certification are still pending.",
+                  note: defaultEvidenceLifecycleNote(
+                    toGovernanceStatus(restaurant.sentry_state?.governance_status),
+                  ),
                 },
               ],
       };
@@ -2226,6 +2550,26 @@ function toLocationStatus(value: string | undefined): "Certified" | "At Risk" | 
   return "Onboarding" as const;
 }
 
+function toGovernanceStatus(value: string | undefined): "uninitialized" | "draft" | "sealed" {
+  if (value === "draft" || value === "sealed") {
+    return value;
+  }
+
+  return "uninitialized";
+}
+
+function defaultEvidenceLifecycleNote(status: "uninitialized" | "draft" | "sealed") {
+  if (status === "sealed") {
+    return "Governed setup is sealed. Upload the current certification-period evidence package to proceed.";
+  }
+
+  if (status === "draft") {
+    return "Governance work is in progress. WGS must finish and seal the active Schema Registry and Contract Config.";
+  }
+
+  return "Governance has not been initialized yet. Start the WGS onboarding and schema setup workflow first.";
+}
+
 function getRestaurantMarket(restaurant: Pick<DatabaseRestaurant, "city" | "country" | "location" | "state">) {
   return (
     [restaurant.city, restaurant.state].filter(Boolean).join(", ") ||
@@ -2285,16 +2629,34 @@ function deriveLocationWorkflowState({
 }) {
   const blockers: string[] = [];
   const warnings: string[] = [];
+  const requirements: LocationWorkflowState["requirements"] = [];
   const activeModules = location.modules
     .map((module) => module.label)
     .filter((label): label is "M01" | "M02" => label === "M01" || label === "M02");
 
   if (location.status === "Onboarding") {
     blockers.push("Complete onboarding and activation for this location before certification can run.");
+    requirements.push({
+      action: "onboarding",
+      detail: "Location setup, activation, and first-run enrollment must be completed first.",
+      key: "onboarding",
+      label: "Onboarding",
+      status: "action_required",
+    });
+  } else {
+    requirements.push({
+      action: "onboarding",
+      detail: "Location is active and past the initial onboarding gate.",
+      key: "onboarding",
+      label: "Onboarding",
+      status: "complete",
+    });
   }
 
   let schemaBlocked = false;
   let uploadBlocked = false;
+  const governanceGaps: string[] = [];
+  const evidenceGaps: string[] = [];
 
   for (const moduleId of activeModules) {
     const sealedWorkspace = schemaState.some(
@@ -2307,7 +2669,9 @@ function deriveLocationWorkflowState({
 
     if (!sealedWorkspace) {
       schemaBlocked = true;
-      blockers.push(`${moduleId} schema registry and contract config must be sealed in DIY Access.`);
+      const message = `${moduleId} schema registry and contract config must be sealed in DIY Access.`;
+      blockers.push(message);
+      governanceGaps.push(`${moduleId} schema + contract seal missing`);
     }
 
     const template = resolveModuleTemplate(uploadState, location.accountId, moduleId);
@@ -2326,7 +2690,9 @@ function deriveLocationWorkflowState({
 
     if (missingArtifacts.length > 0) {
       uploadBlocked = true;
-      blockers.push(`${moduleId} evidence still missing: ${missingArtifacts.join(", ")}.`);
+      const message = `${moduleId} evidence still missing: ${missingArtifacts.join(", ")}.`;
+      blockers.push(message);
+      evidenceGaps.push(`${moduleId}: ${missingArtifacts.join(", ")}`);
     }
 
     const latestArtifact = (template?.artifacts ?? [])
@@ -2347,6 +2713,33 @@ function deriveLocationWorkflowState({
       warnings.push(`${moduleId} uploads are older than 31 days. Upload the current period evidence before rerun.`);
     }
   }
+
+  requirements.push({
+    action: "diy",
+    detail:
+      activeModules.length === 0
+        ? "No governed M01/M02 module is active for this location yet."
+        : governanceGaps.length === 0
+          ? `All active module workspaces are sealed: ${activeModules.join(", ")}.`
+          : governanceGaps.join(" | "),
+    key: "governance",
+    label: "Governance Seal",
+    status:
+      activeModules.length === 0 ? "not_applicable" : governanceGaps.length === 0 ? "complete" : "action_required",
+  });
+  requirements.push({
+    action: "uploads",
+    detail:
+      activeModules.length === 0
+        ? "Evidence uploads are not required until a governed module is enabled."
+        : evidenceGaps.length === 0
+          ? `All required uploads are present for ${activeModules.join(", ")}.`
+          : evidenceGaps.join(" | "),
+    key: "evidence",
+    label: "Evidence Uploads",
+    status:
+      activeModules.length === 0 ? "not_applicable" : evidenceGaps.length === 0 ? "complete" : "action_required",
+  });
 
   const readyForCertification = blockers.length === 0;
   const primaryAction = location.status === "Onboarding"
@@ -2371,6 +2764,7 @@ function deriveLocationWorkflowState({
     primaryAction,
     primaryLabel,
     readyForCertification,
+    requirements,
     warnings,
   } satisfies LocationWorkflowState;
 }
