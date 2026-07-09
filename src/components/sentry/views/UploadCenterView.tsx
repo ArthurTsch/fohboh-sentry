@@ -11,16 +11,29 @@ type UploadCardState = {
   message?: string;
 };
 
+type PdfViewerState = {
+  artifactKey: string;
+  fileName: string;
+  lineCount: number;
+  loading: boolean;
+  locationId: string;
+  locationName: string;
+  moduleId: "M01" | "M02";
+  subtitle: string;
+  text: string;
+  title: string;
+  uploadId: number;
+};
+
 const moduleMeta = {
   M01: {
     icon: "[M01]",
     label: "M01 - Merchant Fee (Card Processor)",
     ruleEyebrow: "Upload Rules - M01 Processor Statements",
     ruleText:
-      "Download the transaction-level CSV from your card processor's merchant portal. Upload the file exactly as provided - no reformatting, no opening in Excel. Each processor uses different native column names. The Schema Registry validates column names on upload; any mismatch flags a schema warning requiring WGS review.",
+      "Download the transaction-level processor export from your merchant portal. CSV is preferred, but the original PDF statement is also accepted for supported processors. Upload the file exactly as provided - no reformatting, no opening in Excel. Each processor uses different native column names. The Schema Registry validates columns on upload; any mismatch flags a review warning. This intake flow is upload-only.",
     vendors: getVendorCatalog("M01"),
     uploadArtifactKey: "m01-processor",
-    manualArtifactKey: "m01-contract",
     templateModule: "M01",
   },
   M02: {
@@ -28,10 +41,9 @@ const moduleMeta = {
     label: "M02 - Delivery Fee (DSP)",
     ruleEyebrow: "Upload Rules - M02 Settlement Statements",
     ruleText:
-      "Download order-level settlement CSVs directly from each DSP portal. Upload the raw export exactly as downloaded. Do not normalize columns before upload. The active schema must match the native DSP export before certification can proceed.",
+      "Download order-level settlement CSVs directly from each DSP portal. Upload the raw export exactly as downloaded. Do not normalize columns before upload. The active schema must match the native DSP export before certification can proceed. This intake flow is upload-only.",
     vendors: getVendorCatalog("M02"),
     uploadArtifactKey: "m02-settlement",
-    manualArtifactKey: "m02-contract",
     templateModule: "M02",
   },
 } as const;
@@ -46,8 +58,9 @@ export function UploadCenterView({
   modules,
   onCompleteUploadSet,
   onManageSources,
-  onArtifactAction,
   onDirectUpload,
+  onRemoveUpload,
+  onResetLocationUploads,
   uploadFeedback,
 }: {
   activeLocationId: string | null;
@@ -65,18 +78,18 @@ export function UploadCenterView({
     m02Enabled: boolean;
     m02Vendors: string[];
   }) => void;
-  onArtifactAction: (
-    moduleId: "M01" | "M02",
-    artifactKey: string,
-    vendor?: { key: string; name: string },
-    entryMode?: "manual" | "upload",
-  ) => void;
   onDirectUpload: (
     moduleId: "M01" | "M02",
     artifactKey: string,
     file: File,
     vendor?: { key: string; name: string },
   ) => Promise<UploadReceipt | null>;
+  onRemoveUpload: (
+    moduleId: "M01" | "M02",
+    artifactKey: string,
+    vendorKey: string,
+  ) => Promise<void>;
+  onResetLocationUploads: (locationId: string) => Promise<void>;
   onOpenSchema: () => void;
   uploadFeedback: UploadReceipt | null;
 }) {
@@ -88,6 +101,7 @@ export function UploadCenterView({
     artifactKey: string;
     vendor: { key: string; name: string };
   } | null>(null);
+  const [pdfViewer, setPdfViewer] = useState<PdfViewerState | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const availableModules = useMemo(() => {
     if (activeLocationModules.length > 0) {
@@ -114,6 +128,101 @@ export function UploadCenterView({
       setActiveModule(availableModules[0]);
     }
   }, [activeModule, availableModules]);
+
+  useEffect(() => {
+    setCardState({});
+    setPendingUpload(null);
+    setPdfViewer(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, [activeLocationId]);
+
+  async function handleViewExtractedText({
+    artifactKey,
+    fileName,
+    subtitle,
+    title,
+    uploadId,
+  }: {
+    artifactKey: string;
+    fileName: string;
+    subtitle: string;
+    title: string;
+    uploadId: number;
+  }) {
+    setPdfViewer({
+      artifactKey,
+      fileName,
+      lineCount: 0,
+      loading: true,
+      locationId: activeLocationId ?? "",
+      locationName: activeLocationName ?? "Unknown location",
+      moduleId: activeModule,
+      subtitle,
+      text: "",
+      title,
+      uploadId,
+    });
+
+    try {
+      const response = await fetch(`/api/v1/uploads/${uploadId}/extracted-text`, {
+        method: "GET",
+        credentials: "same-origin",
+      });
+      const payload = (await response.json()) as
+        | {
+            artifactKey: string;
+            fileName: string;
+            lineCount: number;
+            locationId: string;
+            locationName: string;
+            moduleId: "M01" | "M02";
+            text: string;
+            uploadId: number;
+          }
+        | { error?: string };
+
+      if (!response.ok || !("uploadId" in payload)) {
+        const message =
+          "error" in payload && typeof payload.error === "string"
+            ? payload.error
+            : "Unable to load extracted PDF text.";
+        throw new Error(message);
+      }
+
+      setPdfViewer({
+        artifactKey: payload.artifactKey,
+        fileName: payload.fileName,
+        lineCount: payload.lineCount,
+        loading: false,
+        locationId: payload.locationId,
+        locationName: payload.locationName,
+        moduleId: payload.moduleId,
+        subtitle,
+        text: payload.text,
+        title,
+        uploadId: payload.uploadId,
+      });
+    } catch (error) {
+      setPdfViewer({
+        artifactKey,
+        fileName,
+        lineCount: 0,
+        loading: false,
+        locationId: activeLocationId ?? "",
+        locationName: activeLocationName ?? "Unknown location",
+        moduleId: activeModule,
+        subtitle,
+        text:
+          error instanceof Error
+            ? `Unable to load extracted PDF text.\n\n${error.message}`
+            : "Unable to load extracted PDF text.",
+        title,
+        uploadId,
+      });
+    }
+  }
 
   const activeUploadModule = modules.find((module) => module.id === activeModule) ?? modules[0];
   const activeMeta = moduleMeta[activeModule];
@@ -376,6 +485,16 @@ export function UploadCenterView({
 
       <div className="px-5 pt-5">
         {recentReceipt ? <RecentUploadBanner receipt={recentReceipt} /> : null}
+        <div className="mb-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4">
+          <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
+            Saved Evidence For This Location
+          </div>
+          <div className="mt-2 text-sm leading-7 text-[var(--muted)]">
+            Reopening Upload Data shows the current saved evidence set for{" "}
+            <span className="font-semibold text-[var(--text)]">{activeLocationName ?? "this location"}</span>.
+            Uploading again replaces the current file for that document slot. Removing clears only that saved artifact.
+          </div>
+        </div>
         <div className="rounded-xl border border-[rgba(214,48,49,0.18)] bg-[#2B1403] px-4 py-4 text-[#F3AE62]">
           <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.24em] text-[#FF5C4D]">
             {activeMeta.ruleEyebrow}
@@ -464,7 +583,6 @@ export function UploadCenterView({
                       title="1 | DSP Settlement CSV"
                       subtitle={`${vendor.name} order-level statement`}
                       primaryLabel="Upload CSV"
-                      secondaryLabel="Manual Entry"
                       onPrimary={() => {
                         setPendingUpload({
                           moduleId: activeModule,
@@ -473,20 +591,33 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
-                      onSecondary={() =>
-                        onArtifactAction(
-                          activeModule,
-                          settlementArtifactKey,
-                          {
-                            key: vendor.key,
-                            name: vendor.name,
-                          },
-                          "manual",
-                        )
-                      }
                       intake={settlementIntake}
                       hasUpload={settlementHasUpload}
                       uploadState={settlementCardState}
+                      canViewExtractedText={Boolean(
+                        settlementHasUpload &&
+                          settlementIntake?.uploadId &&
+                          settlementIntake?.fileName?.toLowerCase().endsWith(".pdf"),
+                      )}
+                      onViewExtractedText={
+                        settlementHasUpload &&
+                        settlementIntake?.uploadId &&
+                        settlementIntake?.fileName?.toLowerCase().endsWith(".pdf")
+                          ? () =>
+                              void handleViewExtractedText({
+                                artifactKey: settlementArtifactKey,
+                                fileName: settlementIntake.fileName ?? "",
+                                subtitle: `${vendor.name} order-level statement`,
+                                title: "1 | DSP Settlement CSV",
+                                uploadId: settlementIntake.uploadId!,
+                              })
+                          : undefined
+                      }
+                      onRemove={
+                        settlementHasUpload
+                          ? () => onRemoveUpload(activeModule, settlementArtifactKey, vendor.key)
+                          : undefined
+                      }
                       emptyTitle={`Drop ${vendor.name} CSV or browse`}
                       emptySub="Order-level export | exact portal download"
                     />
@@ -495,7 +626,6 @@ export function UploadCenterView({
                       title="2 | POS Summary by Channel"
                       subtitle="POS net sales breakdown for the same period"
                       primaryLabel="Upload CSV"
-                      secondaryLabel="Manual Entry"
                       onPrimary={() => {
                         if (!posArtifactKey) return;
                         setPendingUpload({
@@ -505,22 +635,29 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
-                      onSecondary={() =>
-                        posArtifactKey
-                          ? onArtifactAction(
-                              activeModule,
-                              posArtifactKey,
-                              {
-                                key: vendor.key,
-                                name: vendor.name,
-                              },
-                              "manual",
-                            )
-                          : undefined
-                      }
                       intake={posIntake ?? undefined}
                       hasUpload={posHasUpload}
                       uploadState={posCardState}
+                      canViewExtractedText={Boolean(
+                        posHasUpload && posIntake?.uploadId && posIntake?.fileName?.toLowerCase().endsWith(".pdf"),
+                      )}
+                      onViewExtractedText={
+                        posHasUpload && posIntake?.uploadId && posIntake?.fileName?.toLowerCase().endsWith(".pdf")
+                          ? () =>
+                              void handleViewExtractedText({
+                                artifactKey: posArtifactKey,
+                                fileName: posIntake.fileName ?? "",
+                                subtitle: "POS net sales breakdown for the same period",
+                                title: "2 | POS Summary by Channel",
+                                uploadId: posIntake.uploadId!,
+                              })
+                          : undefined
+                      }
+                      onRemove={
+                        posHasUpload && posArtifactKey
+                          ? () => onRemoveUpload(activeModule, posArtifactKey, vendor.key)
+                          : undefined
+                      }
                       emptyTitle="Drop POS Summary CSV or browse"
                       emptySub="channel | pos_net_sales | commission_variance"
                     />
@@ -529,7 +666,6 @@ export function UploadCenterView({
                       title="3 | DSP Agreement"
                       subtitle="Signed commercial agreement including the rate schedule"
                       primaryLabel="Upload PDF"
-                      secondaryLabel="Manual Entry"
                       onPrimary={() => {
                         if (!agreementArtifactKey) return;
                         setPendingUpload({
@@ -539,22 +675,33 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
-                      onSecondary={() =>
-                        agreementArtifactKey
-                          ? onArtifactAction(
-                              activeModule,
-                              agreementArtifactKey,
-                              {
-                                key: vendor.key,
-                                name: vendor.name,
-                              },
-                              "manual",
-                            )
-                          : undefined
-                      }
                       intake={agreementIntake ?? undefined}
                       hasUpload={agreementHasUpload}
                       uploadState={agreementCardState}
+                      canViewExtractedText={Boolean(
+                        agreementHasUpload &&
+                          agreementIntake?.uploadId &&
+                          agreementIntake?.fileName?.toLowerCase().endsWith(".pdf"),
+                      )}
+                      onViewExtractedText={
+                        agreementHasUpload &&
+                        agreementIntake?.uploadId &&
+                        agreementIntake?.fileName?.toLowerCase().endsWith(".pdf")
+                          ? () =>
+                              void handleViewExtractedText({
+                                artifactKey: agreementArtifactKey,
+                                fileName: agreementIntake.fileName ?? "",
+                                subtitle: "Signed commercial agreement including the rate schedule",
+                                title: "3 | DSP Agreement",
+                                uploadId: agreementIntake.uploadId!,
+                              })
+                          : undefined
+                      }
+                      onRemove={
+                        agreementHasUpload && agreementArtifactKey
+                          ? () => onRemoveUpload(activeModule, agreementArtifactKey, vendor.key)
+                          : undefined
+                      }
                       emptyTitle={`Drop signed ${vendor.name} agreement PDF or browse`}
                       emptySub="PDF only | signed executed copy"
                     />
@@ -563,7 +710,6 @@ export function UploadCenterView({
                       title="4 | Bank Statement"
                       subtitle="Matching-period deposit statement for payout reconciliation"
                       primaryLabel="Upload PDF"
-                      secondaryLabel="Manual Entry"
                       onPrimary={() => {
                         if (!bankArtifactKey) return;
                         setPendingUpload({
@@ -573,22 +719,29 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
-                      onSecondary={() =>
-                        bankArtifactKey
-                          ? onArtifactAction(
-                              activeModule,
-                              bankArtifactKey,
-                              {
-                                key: vendor.key,
-                                name: vendor.name,
-                              },
-                              "manual",
-                            )
-                          : undefined
-                      }
                       intake={bankIntake ?? undefined}
                       hasUpload={bankHasUpload}
                       uploadState={bankCardState}
+                      canViewExtractedText={Boolean(
+                        bankHasUpload && bankIntake?.uploadId && bankIntake?.fileName?.toLowerCase().endsWith(".pdf"),
+                      )}
+                      onViewExtractedText={
+                        bankHasUpload && bankIntake?.uploadId && bankIntake?.fileName?.toLowerCase().endsWith(".pdf")
+                          ? () =>
+                              void handleViewExtractedText({
+                                artifactKey: bankArtifactKey,
+                                fileName: bankIntake.fileName ?? "",
+                                subtitle: "Matching-period deposit statement for payout reconciliation",
+                                title: "4 | Bank Statement",
+                                uploadId: bankIntake.uploadId!,
+                              })
+                          : undefined
+                      }
+                      onRemove={
+                        bankHasUpload && bankArtifactKey
+                          ? () => onRemoveUpload(activeModule, bankArtifactKey, vendor.key)
+                          : undefined
+                      }
                       emptyTitle="Drop bank statement PDF or browse"
                       emptySub="PDF only | matching period"
                     />
@@ -596,10 +749,9 @@ export function UploadCenterView({
                 ) : (
                   <div className="space-y-5">
                     <DocumentSection
-                      title="1 | Processor Statement CSV"
-                      subtitle={`${vendor.name} transaction-level processor export`}
-                      primaryLabel="Upload CSV"
-                      secondaryLabel="Manual Entry"
+                      title="1 | Processor Statement"
+                      subtitle={`${vendor.name} raw processor export or original statement PDF`}
+                      primaryLabel="Upload File"
                       onPrimary={() => {
                         setPendingUpload({
                           moduleId: activeModule,
@@ -608,29 +760,41 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
-                      onSecondary={() =>
-                        onArtifactAction(
-                          activeModule,
-                          settlementArtifactKey,
-                          {
-                            key: vendor.key,
-                            name: vendor.name,
-                          },
-                          "manual",
-                        )
-                      }
                       intake={settlementIntake}
                       hasUpload={settlementHasUpload}
                       uploadState={settlementCardState}
-                      emptyTitle={`Drop ${vendor.name} CSV or browse`}
-                      emptySub="Transaction-level export | no reformatting"
+                      canViewExtractedText={Boolean(
+                        settlementHasUpload &&
+                          settlementIntake?.uploadId &&
+                          settlementIntake?.fileName?.toLowerCase().endsWith(".pdf"),
+                      )}
+                      onViewExtractedText={
+                        settlementHasUpload &&
+                        settlementIntake?.uploadId &&
+                        settlementIntake?.fileName?.toLowerCase().endsWith(".pdf")
+                          ? () =>
+                              void handleViewExtractedText({
+                                artifactKey: settlementArtifactKey,
+                                fileName: settlementIntake.fileName ?? "",
+                                subtitle: `${vendor.name} raw processor export or original statement PDF`,
+                                title: "1 | Processor Statement",
+                                uploadId: settlementIntake.uploadId!,
+                              })
+                          : undefined
+                      }
+                      onRemove={
+                        settlementHasUpload
+                          ? () => onRemoveUpload(activeModule, settlementArtifactKey, vendor.key)
+                          : undefined
+                      }
+                      emptyTitle={`Drop ${vendor.name} CSV/PDF or browse`}
+                      emptySub="CSV preferred | original PDF accepted | no reformatting"
                     />
 
                     <DocumentSection
                       title="2 | POS Export CSV"
                       subtitle="Matching-period POS export for cross-system reconciliation"
                       primaryLabel="Upload CSV"
-                      secondaryLabel="Manual Entry"
                       onPrimary={() => {
                         if (!posArtifactKey) return;
                         setPendingUpload({
@@ -640,22 +804,29 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
-                      onSecondary={() =>
-                        posArtifactKey
-                          ? onArtifactAction(
-                              activeModule,
-                              posArtifactKey,
-                              {
-                                key: vendor.key,
-                                name: vendor.name,
-                              },
-                              "manual",
-                            )
-                          : undefined
-                      }
                       intake={posIntake ?? undefined}
                       hasUpload={posHasUpload}
                       uploadState={posCardState}
+                      canViewExtractedText={Boolean(
+                        posHasUpload && posIntake?.uploadId && posIntake?.fileName?.toLowerCase().endsWith(".pdf"),
+                      )}
+                      onViewExtractedText={
+                        posHasUpload && posIntake?.uploadId && posIntake?.fileName?.toLowerCase().endsWith(".pdf")
+                          ? () =>
+                              void handleViewExtractedText({
+                                artifactKey: posArtifactKey,
+                                fileName: posIntake.fileName ?? "",
+                                subtitle: "Matching-period POS export for cross-system reconciliation",
+                                title: "2 | POS Export CSV",
+                                uploadId: posIntake.uploadId!,
+                              })
+                          : undefined
+                      }
+                      onRemove={
+                        posHasUpload && posArtifactKey
+                          ? () => onRemoveUpload(activeModule, posArtifactKey, vendor.key)
+                          : undefined
+                      }
                       emptyTitle="Drop POS export CSV or browse"
                       emptySub="gross_sales | tenders | transactions"
                     />
@@ -664,7 +835,6 @@ export function UploadCenterView({
                       title="3 | Merchant Agreement"
                       subtitle="Signed merchant services agreement with rate schedule"
                       primaryLabel="Upload PDF"
-                      secondaryLabel="Manual Entry"
                       onPrimary={() => {
                         if (!agreementArtifactKey) return;
                         setPendingUpload({
@@ -674,22 +844,33 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
-                      onSecondary={() =>
-                        agreementArtifactKey
-                          ? onArtifactAction(
-                              activeModule,
-                              agreementArtifactKey,
-                              {
-                                key: vendor.key,
-                                name: vendor.name,
-                              },
-                              "manual",
-                            )
-                          : undefined
-                      }
                       intake={agreementIntake ?? undefined}
                       hasUpload={agreementHasUpload}
                       uploadState={agreementCardState}
+                      canViewExtractedText={Boolean(
+                        agreementHasUpload &&
+                          agreementIntake?.uploadId &&
+                          agreementIntake?.fileName?.toLowerCase().endsWith(".pdf"),
+                      )}
+                      onViewExtractedText={
+                        agreementHasUpload &&
+                        agreementIntake?.uploadId &&
+                        agreementIntake?.fileName?.toLowerCase().endsWith(".pdf")
+                          ? () =>
+                              void handleViewExtractedText({
+                                artifactKey: agreementArtifactKey,
+                                fileName: agreementIntake.fileName ?? "",
+                                subtitle: "Signed merchant services agreement with rate schedule",
+                                title: "3 | Merchant Agreement",
+                                uploadId: agreementIntake.uploadId!,
+                              })
+                          : undefined
+                      }
+                      onRemove={
+                        agreementHasUpload && agreementArtifactKey
+                          ? () => onRemoveUpload(activeModule, agreementArtifactKey, vendor.key)
+                          : undefined
+                      }
                       emptyTitle={`Drop signed ${vendor.name} agreement PDF or browse`}
                       emptySub="PDF only | signed executed copy"
                     />
@@ -698,7 +879,6 @@ export function UploadCenterView({
                       title="4 | Bank Statement"
                       subtitle="Matching-period bank statement for processor deposit reconciliation"
                       primaryLabel="Upload PDF"
-                      secondaryLabel="Manual Entry"
                       onPrimary={() => {
                         if (!bankArtifactKey) return;
                         setPendingUpload({
@@ -708,22 +888,29 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
-                      onSecondary={() =>
-                        bankArtifactKey
-                          ? onArtifactAction(
-                              activeModule,
-                              bankArtifactKey,
-                              {
-                                key: vendor.key,
-                                name: vendor.name,
-                              },
-                              "manual",
-                            )
-                          : undefined
-                      }
                       intake={bankIntake ?? undefined}
                       hasUpload={bankHasUpload}
                       uploadState={bankCardState}
+                      canViewExtractedText={Boolean(
+                        bankHasUpload && bankIntake?.uploadId && bankIntake?.fileName?.toLowerCase().endsWith(".pdf"),
+                      )}
+                      onViewExtractedText={
+                        bankHasUpload && bankIntake?.uploadId && bankIntake?.fileName?.toLowerCase().endsWith(".pdf")
+                          ? () =>
+                              void handleViewExtractedText({
+                                artifactKey: bankArtifactKey,
+                                fileName: bankIntake.fileName ?? "",
+                                subtitle: "Matching-period bank statement for processor deposit reconciliation",
+                                title: "4 | Bank Statement",
+                                uploadId: bankIntake.uploadId!,
+                              })
+                          : undefined
+                      }
+                      onRemove={
+                        bankHasUpload && bankArtifactKey
+                          ? () => onRemoveUpload(activeModule, bankArtifactKey, vendor.key)
+                          : undefined
+                      }
                       emptyTitle="Drop bank statement PDF or browse"
                       emptySub="PDF only | matching period"
                     />
@@ -776,6 +963,18 @@ export function UploadCenterView({
                 >
                   {activeLocationName ? `Finish Uploads for ${activeLocationName}` : "Finish Uploads"}
                 </button>
+                <button
+                  type="button"
+                  disabled={!activeLocationId}
+                  onClick={() => {
+                    if (activeLocationId) {
+                      void onResetLocationUploads(activeLocationId);
+                    }
+                  }}
+                  className="rounded-xl border border-[rgba(214,48,49,0.24)] px-4 py-3 text-sm font-semibold text-[var(--accent)] transition hover:border-[var(--accent)] hover:bg-[rgba(214,48,49,0.06)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Start New Certification Period
+                </button>
               </div>
             </div>
           ) : null}
@@ -792,6 +991,67 @@ export function UploadCenterView({
             setShowManageSources(false);
           }}
         />
+      ) : null}
+
+      {pdfViewer ? (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-[rgba(15,23,42,0.42)] px-4 py-6">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
+            <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-6 py-5">
+              <div className="min-w-0">
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
+                  Extracted PDF Text
+                </div>
+                <div className="mt-2 font-[family-name:var(--font-display)] text-[30px] font-bold tracking-[-0.05em] text-[var(--text)]">
+                  {pdfViewer.title}
+                </div>
+                <div className="mt-2 text-sm leading-7 text-[var(--muted)]">
+                  {pdfViewer.locationName} | {pdfViewer.moduleId} | {pdfViewer.fileName}
+                </div>
+                <div className="text-sm leading-7 text-[var(--muted)]">{pdfViewer.subtitle}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPdfViewer(null)}
+                className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="border-b border-[var(--border)] bg-[var(--surface)] px-6 py-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge tone={pdfViewer.loading ? "info" : pdfViewer.text.trim() ? "success" : "warning"}>
+                  {pdfViewer.loading ? "Loading" : pdfViewer.text.trim() ? "Text Extracted" : "No Text Found"}
+                </Badge>
+                <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  {pdfViewer.lineCount} lines
+                </span>
+                <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Upload #{pdfViewer.uploadId}
+                </span>
+                <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  {pdfViewer.artifactKey}
+                </span>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+              {pdfViewer.loading ? (
+                <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-6 text-sm text-[var(--muted)]">
+                  Loading persisted extracted text for this PDF...
+                </div>
+              ) : pdfViewer.text.trim() ? (
+                <pre className="whitespace-pre-wrap break-words rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-5 font-[family-name:var(--font-mono)] text-[12px] leading-6 text-[var(--text)]">
+                  {pdfViewer.text}
+                </pre>
+              ) : (
+                <div className="rounded-2xl border border-[rgba(255,152,0,0.3)] bg-[rgba(255,152,0,0.08)] px-5 py-5 text-sm leading-7 text-[var(--text)]">
+                  No machine-readable text was extracted from this saved PDF. This usually means the document is scan-only or image-only rather than text-based.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -845,6 +1105,11 @@ function RecentUploadBanner({ receipt }: { receipt: UploadReceipt }) {
           </span>
         </div>
       </div>
+      {receipt.parseWarnings?.length ? (
+        <div className="mt-3 rounded-xl border border-[rgba(255,152,0,0.3)] bg-[rgba(255,152,0,0.08)] px-3 py-2 text-sm text-[var(--text)]">
+          {receipt.parseWarnings[0]}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -886,6 +1151,9 @@ function DocumentSection({
   secondaryLabel,
   onPrimary,
   onSecondary,
+  onViewExtractedText,
+  canViewExtractedText = false,
+  onRemove,
   intake,
   hasUpload,
   uploadState,
@@ -898,6 +1166,9 @@ function DocumentSection({
   secondaryLabel?: string;
   onPrimary: () => void;
   onSecondary?: () => void;
+  onViewExtractedText?: () => void;
+  canViewExtractedText?: boolean;
+  onRemove?: () => void;
   intake?: IntakeState;
   hasUpload: boolean;
   uploadState?: UploadCardState;
@@ -933,6 +1204,24 @@ function DocumentSection({
             className="rounded-lg border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
           >
             {secondaryLabel}
+          </button>
+        ) : null}
+        {canViewExtractedText && onViewExtractedText ? (
+          <button
+            type="button"
+            onClick={() => void onViewExtractedText()}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-[13px] text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+          >
+            View Extracted Text
+          </button>
+        ) : null}
+        {hasUpload && onRemove ? (
+          <button
+            type="button"
+            onClick={() => void onRemove()}
+            className="rounded-lg border border-[rgba(214,48,49,0.24)] px-3 py-2 text-[13px] text-[var(--accent)] transition hover:border-[var(--accent)] hover:bg-[rgba(214,48,49,0.06)]"
+          >
+            Remove File
           </button>
         ) : null}
       </div>
@@ -971,6 +1260,10 @@ function UploadTile({
   onClick: () => void;
   compact?: boolean;
 }) {
+  const hasParseWarning = Boolean(intake?.parseWarnings?.length);
+  const hasSchemaWarning = intake?.matchPct !== undefined && intake.matchPct < 60;
+  const reviewState = hasParseWarning || hasSchemaWarning;
+
   return (
     <>
       <button
@@ -984,16 +1277,16 @@ function UploadTile({
           <>
             <span
               className={`text-[20px] font-semibold ${
-                intake?.matchPct !== undefined && intake.matchPct < 60
+                reviewState
                   ? "text-[var(--accent)]"
                   : "text-[var(--success)]"
               }`}
             >
-              {intake?.matchPct !== undefined && intake.matchPct < 60 ? "WARNING" : "MATCHED"}
+              {reviewState ? "REVIEW" : "MATCHED"}
             </span>
             <span
               className={`mt-3 text-[14px] font-semibold ${
-                intake?.matchPct !== undefined && intake.matchPct < 60
+                reviewState
                   ? "text-[var(--accent)]"
                   : "text-[var(--success)]"
               }`}
@@ -1002,7 +1295,12 @@ function UploadTile({
             </span>
             <span className="mt-2 font-[family-name:var(--font-mono)] text-[10px] text-[var(--muted)]">
               {formatBytes(intake?.sizeBytes ?? 0)} | {intake?.rows ?? "-"} rows | Schema{" "}
-              {intake?.matchPct !== undefined ? `${intake.matchPct}%` : "sealed"} | SHA-256:{" "}
+              {intake?.matchPct !== undefined
+                ? `${intake.matchPct}%`
+                : hasParseWarning
+                  ? "review"
+                  : "sealed"}{" "}
+              | SHA-256:{" "}
               {intake?.hashValue ?? "pending"}
             </span>
           </>
@@ -1017,7 +1315,7 @@ function UploadTile({
         )}
       </button>
 
-      {hasUpload && intake?.matchPct !== undefined && intake.matchPct < 60 ? (
+      {hasUpload && hasSchemaWarning ? (
         <div className="mt-4 rounded-xl border border-[rgba(212,131,10,0.4)] bg-[rgba(214,48,49,0.07)] px-4 py-3">
           <div className="text-[12px] font-semibold text-[var(--accent)]">
             {intake.fileName} - partial schema match ({intake.matchPct}%)
@@ -1038,12 +1336,18 @@ function UploadTile({
         </div>
       ) : null}
 
+      {hasUpload && intake?.parseWarnings?.length ? (
+        <div className="mt-4 rounded-xl border border-[rgba(255,152,0,0.3)] bg-[rgba(255,152,0,0.08)] px-4 py-3 text-[11px] leading-5 text-[var(--text)]">
+          {intake.parseWarnings[0]}
+        </div>
+      ) : null}
+
       {hasUpload ? (
         <div className="mt-3 flex gap-2">
           <IntakeDot done={Boolean(intake?.uploaded)} label="Upload" />
           <IntakeDot done={Boolean(intake?.hash)} label="Hash" />
           <IntakeDot done={Boolean(intake?.schema)} label="Schema" />
-          <IntakeDot done={Boolean(intake?.fields)} label="Fields" />
+          <IntakeDot done={hasParseWarning ? false : Boolean(intake?.fields)} label="Fields" />
         </div>
       ) : null}
     </>

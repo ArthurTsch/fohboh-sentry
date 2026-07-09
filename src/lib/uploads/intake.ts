@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { getExpectedHeaders, getExpectedKind, normalizeHeader } from "./definitions";
+import { extractPdfDocument, extractPdfMetrics } from "./pdf";
 
 type UploadMetrics = {
   basisAmount?: number;
@@ -28,9 +29,10 @@ export type PersistedUploadValidation = {
   uploaded: boolean;
   vendorKey?: string;
   vendorName?: string;
+  parseWarnings?: string[];
 };
 
-export function validateUploadArtifact({
+export async function validateUploadArtifact({
   artifactKey,
   buffer,
   contentType,
@@ -44,23 +46,31 @@ export function validateUploadArtifact({
   fileName: string;
   vendorKey?: string | null;
   vendorName?: string | null;
-}): PersistedUploadValidation {
+}): Promise<PersistedUploadValidation> {
   const expectedKind = getExpectedKind(artifactKey);
   const hashValue = createHash("sha256").update(buffer).digest("hex");
   const updatedAt = new Date().toISOString();
+  const isPdfLike =
+    contentType.includes("pdf") ||
+    fileName.toLowerCase().endsWith(".pdf") ||
+    buffer.subarray(0, 4).toString("utf8") === "%PDF";
 
-  if (expectedKind === "pdf") {
-    const pageCount = estimatePdfPageCount(buffer);
-    const validPdf =
-      contentType.includes("pdf") ||
-      fileName.toLowerCase().endsWith(".pdf") ||
-      buffer.subarray(0, 4).toString("utf8") === "%PDF";
+  if (expectedKind === "pdf" || (expectedKind === "csv_or_pdf" && isPdfLike)) {
+    const validPdf = isPdfLike;
+    const extractedPdf = validPdf ? await extractPdfDocument(buffer) : null;
+    const pageCount = extractedPdf?.pageCount ?? estimatePdfPageCount(buffer);
+    const pdfText = extractedPdf?.text ?? "";
+    const pdfExtraction = validPdf ? extractPdfMetrics(artifactKey, pdfText) : { warnings: [] };
+    const metrics = pdfExtraction.metrics;
+    const fields = validPdf && resolvePdfFieldReadiness(artifactKey, metrics);
+    const parseWarnings = pdfExtraction.warnings.length > 0 ? pdfExtraction.warnings : undefined;
 
     return {
-      fields: validPdf,
+      fields,
       fileName,
       hash: true,
       hashValue,
+      metrics,
       pageCount,
       schema: validPdf,
       sizeBytes: buffer.byteLength,
@@ -68,6 +78,7 @@ export function validateUploadArtifact({
       uploaded: true,
       vendorKey: vendorKey ?? undefined,
       vendorName: vendorName ?? undefined,
+      parseWarnings,
     };
   }
 
@@ -109,6 +120,37 @@ export function validateUploadArtifact({
     vendorKey: vendorKey ?? undefined,
     vendorName: vendorName ?? undefined,
   };
+}
+
+function resolvePdfFieldReadiness(
+  artifactKey: string,
+  metrics:
+    | {
+        basisAmount?: number;
+        depositAmount?: number;
+        feeAmount?: number;
+        orderCount?: number;
+        payoutAmount?: number;
+        transactionCount?: number;
+      }
+    | undefined,
+) {
+  if (artifactKey.includes("agreement")) {
+    return true;
+  }
+
+  if (artifactKey.includes("bank")) {
+    return Boolean(metrics?.depositAmount && metrics.depositAmount > 0);
+  }
+
+  if (artifactKey.includes("processor")) {
+    return Boolean(
+      (metrics?.basisAmount && metrics.basisAmount > 0) ||
+        (metrics?.payoutAmount && metrics.payoutAmount > 0),
+    );
+  }
+
+  return true;
 }
 
 function estimatePdfPageCount(buffer: Buffer) {

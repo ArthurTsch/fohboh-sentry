@@ -10,7 +10,7 @@ import {
 
 export const metadata: Metadata = adminMetadata;
 
-type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+type SearchParams = Promise<Record<string, string | string[ ] | undefined>>;
 
 export default async function SuperAdminPage({
   searchParams,

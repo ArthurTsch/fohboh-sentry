@@ -84,7 +84,7 @@ const navHelp: Record<
   uploads: {
     title: "Sidebar / Workflows",
     sections: [
-      { label: "What It Is", text: "Intake center for CSV, PDF, and manual-entry artifacts." },
+      { label: "What It Is", text: "Intake center for CSV and PDF evidence artifacts." },
       { label: "What It Does", text: "Tracks evidence readiness before data is allowed into certification." },
       { label: "Why It Matters", text: "Weak intake hygiene quickly destroys downstream trust." },
     ],

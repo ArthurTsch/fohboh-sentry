@@ -120,9 +120,15 @@ function sanitizeFileName(fileName: string) {
   return fileName.replace(/[^A-Za-z0-9._-]+/g, "_");
 }
 
-function detectWrongDocumentKind(expectedKind: "csv" | "pdf" | "manual", file: File) {
+function detectWrongDocumentKind(expectedKind: "csv" | "pdf" | "manual" | "csv_or_pdf", file: File) {
   const name = file.name.toLowerCase();
   const type = file.type.toLowerCase();
+
+  if (expectedKind === "csv_or_pdf") {
+    const looksLikeCsv = name.endsWith(".csv") || type.includes("csv") || type.startsWith("text/");
+    const looksLikePdf = name.endsWith(".pdf") || type.includes("pdf");
+    return !looksLikeCsv && !looksLikePdf;
+  }
 
   if (expectedKind === "csv") {
     return name.endsWith(".pdf") || type.includes("pdf");
@@ -165,6 +171,7 @@ function buildUploadResponse({
     metrics: validation.metrics,
     moduleId,
     pageCount: validation.pageCount,
+    parseWarnings: validation.parseWarnings,
     rows: validation.rows,
     schema: validation.schema,
     sizeBytes: validation.sizeBytes,
@@ -331,7 +338,9 @@ export async function POST(request: Request) {
           error:
             expectedKind === "csv"
               ? "This upload expects a CSV file, not a PDF."
-              : "This upload expects a PDF file, not a CSV.",
+              : expectedKind === "pdf"
+                ? "This upload expects a PDF file, not a CSV."
+                : "This upload expects either the raw CSV export or the original PDF statement.",
         },
         { status: 400 },
       ), requestContext);
@@ -348,7 +357,7 @@ export async function POST(request: Request) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const validation = validateUploadArtifact({
+    const validation = await validateUploadArtifact({
       artifactKey,
       buffer,
       contentType: file.type,
@@ -468,5 +477,175 @@ export async function POST(request: Request) {
       { error: "Unable to persist this upload right now." },
       { status: 500 },
     ), requestContext);
+  }
+}
+
+export async function DELETE(request: Request) {
+  const requestContext = getRequestContextFromRequest(request);
+  try {
+    const session = await requireManagerSession();
+    if (session.role === "Viewer") {
+      return withRequestHeaders(
+        NextResponse.json({ error: "This account cannot manage uploads." }, { status: 403 }),
+        requestContext,
+      );
+    }
+
+    const body = (await request.json().catch(() => null)) as
+      | {
+          locationId?: string;
+          resetLocation?: boolean;
+          uploadId?: number;
+        }
+      | null;
+
+    const scopedRestaurants = await getScopedRestaurants(session);
+
+    if (typeof body?.uploadId === "number" && Number.isFinite(body.uploadId)) {
+      const upload = await prisma.uploads_v2.findFirst({
+        where: {
+          id: body.uploadId,
+          superseded_by: null,
+        },
+        select: {
+          artifact_key: true,
+          id: true,
+          location_id: true,
+          module: true,
+          vendor: true,
+        },
+      });
+
+      if (!upload) {
+        return withRequestHeaders(
+          NextResponse.json({ error: "Saved upload could not be found." }, { status: 404 }),
+          requestContext,
+        );
+      }
+
+      const restaurant = scopedRestaurants.find((item) => item.id === upload.location_id);
+      if (!restaurant) {
+        return withRequestHeaders(
+          NextResponse.json({ error: "Forbidden." }, { status: 403 }),
+          requestContext,
+        );
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.uploads_v2.update({
+          where: { id: upload.id },
+          data: { superseded_by: upload.id },
+        });
+
+        await writeAuditLog(
+          {
+            action: "upload_removed",
+            actorUserId: typeof session.managerId === "number" ? session.managerId : null,
+            entityId: String(upload.id),
+            entityType: "uploads_v2",
+            ipAddress: requestContext.ipAddress,
+            locationId: restaurant.id,
+            metadata: {
+              artifactKey: upload.artifact_key,
+              moduleId: upload.module,
+              requestId: requestContext.requestId,
+              vendorKey: upload.vendor,
+            },
+            summary: `Removed saved upload for ${restaurant.name} (${upload.module}/${upload.artifact_key}).`,
+            userAgent: requestContext.userAgent,
+          },
+          tx,
+        );
+      });
+
+      return withRequestHeaders(NextResponse.json({ ok: true, removedUploadId: upload.id }), requestContext);
+    }
+
+    const locationId = String(body?.locationId ?? "").trim();
+    if (!locationId || body?.resetLocation !== true) {
+      return withRequestHeaders(
+        NextResponse.json({ error: "uploadId or { locationId, resetLocation: true } is required." }, { status: 400 }),
+        requestContext,
+      );
+    }
+
+    const restaurant = scopedRestaurants.find((item) => item.location_id === locationId);
+    if (!restaurant) {
+      return withRequestHeaders(
+        NextResponse.json({ error: "Upload target could not be resolved for this location." }, { status: 404 }),
+        requestContext,
+      );
+    }
+
+    const activeUploads = await prisma.uploads_v2.findMany({
+      where: {
+        location_id: restaurant.id,
+        superseded_by: null,
+      },
+      select: {
+        artifact_key: true,
+        id: true,
+        module: true,
+        vendor: true,
+      },
+    });
+
+    await prisma.$transaction(async (tx) => {
+      for (const upload of activeUploads) {
+        await tx.uploads_v2.update({
+          where: { id: upload.id },
+          data: { superseded_by: upload.id },
+        });
+      }
+
+      await writeAuditLog(
+        {
+          action: "location_uploads_reset",
+          actorUserId: typeof session.managerId === "number" ? session.managerId : null,
+          entityId: locationId,
+          entityType: "location_upload_set",
+          ipAddress: requestContext.ipAddress,
+          locationId: restaurant.id,
+          metadata: {
+            removedUploadCount: activeUploads.length,
+            requestId: requestContext.requestId,
+          },
+          summary: `Cleared current upload set for ${restaurant.name}.`,
+          userAgent: requestContext.userAgent,
+        },
+        tx,
+      );
+    });
+
+    return withRequestHeaders(
+      NextResponse.json({ ok: true, removedCount: activeUploads.length }),
+      requestContext,
+    );
+  } catch (error) {
+    const authResponse = getAuthErrorResponse(error);
+    if (authResponse) {
+      return withRequestHeaders(authResponse, requestContext);
+    }
+
+    if (isMissingUploadSchema(error)) {
+      return withRequestHeaders(
+        NextResponse.json(
+          {
+            error:
+              "The uploads_v2 Phase 3 migration has not been applied yet. Update the database before using persisted uploads.",
+          },
+          { status: 503 },
+        ),
+        requestContext,
+      );
+    }
+
+    logServerError("upload_delete_failed", error, {
+      requestId: requestContext.requestId,
+    });
+    return withRequestHeaders(
+      NextResponse.json({ error: "Unable to update saved uploads right now." }, { status: 500 }),
+      requestContext,
+    );
   }
 }

@@ -58,8 +58,9 @@ export function SentryViewRouter({
   onApprove,
   onCompleteUploadSet,
   onManageUploadSources,
-  onArtifactAction,
   onDirectUpload,
+  onRemoveUpload,
+  onResetLocationUploads,
   onEnterSupportMode,
   onExpandAll,
   onFilterChange,
@@ -121,18 +122,18 @@ export function SentryViewRouter({
     m02Enabled: boolean;
     m02Vendors: string[];
   }) => void;
-  onArtifactAction: (
-    moduleId: "M01" | "M02",
-    artifactKey: string,
-    vendor?: { key: string; name: string },
-    entryMode?: "manual" | "upload",
-  ) => void;
   onDirectUpload: (
     moduleId: "M01" | "M02",
     artifactKey: string,
     file: File,
     vendor?: { key: string; name: string },
   ) => Promise<UploadReceipt | null>;
+  onRemoveUpload: (
+    moduleId: "M01" | "M02",
+    artifactKey: string,
+    vendorKey: string,
+  ) => Promise<void>;
+  onResetLocationUploads: (locationId: string) => Promise<void>;
   onEnterSupportMode: (accountId: string) => void;
   onExpandAll: () => void;
   onFilterChange: (filter: "all" | "immutable" | "editable") => void;
@@ -258,8 +259,9 @@ export function SentryViewRouter({
         modules={uploadModules}
         onCompleteUploadSet={onCompleteUploadSet}
         onManageSources={onManageUploadSources}
-        onArtifactAction={onArtifactAction}
         onDirectUpload={onDirectUpload}
+        onRemoveUpload={onRemoveUpload}
+        onResetLocationUploads={onResetLocationUploads}
         onOpenSchema={() => onViewChange("schema")}
         uploadFeedback={uploadFeedback}
       />

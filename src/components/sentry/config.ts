@@ -49,7 +49,7 @@ export const viewMeta: Record<ViewId, { eyebrow: string; title: string; sub: str
   uploads: {
     eyebrow: "Workflows",
     title: "Upload Center",
-    sub: "Source-file intake across M01 and M02 with evidence readiness and manual-entry coverage.",
+    sub: "Source-file intake across M01 and M02 with evidence readiness tracking.",
   },
   schema: {
     eyebrow: "Workflows",

@@ -60,6 +60,7 @@ import type {
   WgsAccount,
   WgsApproval,
   WgsOnboardingProgress,
+  WgsOnboardingUpload,
   WgsQueueItem,
   WgsUser,
 } from "./types";
@@ -156,6 +157,7 @@ type PersistedUploadRecord = {
   metrics?: IntakeState["metrics"];
   moduleId: "M01" | "M02";
   pageCount?: number;
+  parseWarnings?: string[];
   rows?: number;
   schema: boolean;
   sizeBytes: number;
@@ -529,6 +531,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     setArtifactIntakeState((state) => ({
       ...state,
       [locationScopedKey]: {
+        uploadId: upload.id,
         uploaded: upload.uploaded,
         hash: Boolean(upload.hashValue),
         schema: upload.schema,
@@ -543,6 +546,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         matchedColumns: upload.matchedColumns,
         expectedColumns: upload.expectedColumns,
         metrics: upload.metrics,
+        parseWarnings: upload.parseWarnings,
         unmatchedHeaders: upload.unmatchedHeaders,
         updatedAt: upload.updatedAt,
       },
@@ -559,7 +563,9 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
                       ...artifact,
                       status: upload.status === "ready" ? "Ready" : "Needs Review",
                       note:
-                        upload.matchPct !== undefined
+                        upload.parseWarnings?.length
+                          ? `${upload.fileName} uploaded. ${upload.parseWarnings[0]}`
+                          : upload.matchPct !== undefined
                           ? `${upload.fileName} uploaded. Schema match ${upload.matchPct}%. ${
                               upload.status === "ready"
                                 ? "Ready for certification intake."
@@ -587,6 +593,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         metrics: upload.metrics,
         moduleId: upload.moduleId,
         pageCount: upload.pageCount,
+        parseWarnings: upload.parseWarnings,
         rows: upload.rows,
         sizeBytes: upload.sizeBytes,
         status: upload.status,
@@ -849,6 +856,20 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     };
   }
 
+  function buildOnboardingUploadRecord(
+    receipt: UploadReceipt,
+    vendorName: string,
+  ): WgsOnboardingUpload {
+    return {
+      docKey: `${receipt.moduleId}:${receipt.artifactKey ?? receipt.fileName}:${receipt.vendorKey ?? "global"}`,
+      hash: receipt.hashValue ?? "pending",
+      module: receipt.moduleId,
+      name: receipt.fileName,
+      rows: receipt.rows ?? receipt.pageCount ?? 0,
+      vendorName,
+    };
+  }
+
   function getUploadTargetLocation() {
     return activeUploadLocation
       ? visibleLocations.find((item) => item.id === activeUploadLocation.id) ?? visibleLocations[0] ?? null
@@ -1039,6 +1060,12 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
+    const currentProgress = wgsOnboardingState[locationId] ?? createWgsOnboardingProgress();
+    void persistLocationState(location, {
+      onboardingChecklist: onboardingState,
+      onboardingProgress: currentProgress,
+    });
+
     void recordClientActivity({
       action: "location_upload_set_completed",
       entityId: location.id,
@@ -1049,6 +1076,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       summary: `Completed upload intake for ${location.name}.`,
     });
     setActiveUploadLocation(null);
+    setUploadFeedback(null);
     startTransition(() => setActiveViewOverride("waterfall"));
     showToast(`Upload set saved for ${location.name}.`);
   }
@@ -1238,10 +1266,191 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     }
 
     const { receipt } = applyPersistedUpload(payload.upload, target.accountId);
+    const targetLocation = runtimeLocationState.find((item) => item.id === target.locationId);
+    const currentProgress = wgsOnboardingState[target.locationId] ?? createWgsOnboardingProgress();
+    const uploadRecord = buildOnboardingUploadRecord(
+      receipt,
+      vendor?.name ?? target.vendorName ?? target.locationName,
+    );
+    const nextProgress: WgsOnboardingProgress = {
+      ...currentProgress,
+      uploads: {
+        ...currentProgress.uploads,
+        [uploadRecord.docKey ?? `${receipt.moduleId}:${receipt.fileName}`]: uploadRecord,
+      },
+    };
+    setWgsOnboardingState((current) => ({
+      ...current,
+      [target.locationId]: nextProgress,
+    }));
+    if (targetLocation) {
+      void persistLocationState(targetLocation, {
+        onboardingChecklist: onboardingState,
+        onboardingProgress: nextProgress,
+      });
+    }
     void syncAuditLogs();
     setUploadFeedback(receipt);
     showToast(`${receipt.fileName} uploaded and stored.`);
     return receipt;
+  }
+
+  async function handleRemoveSavedUpload(
+    moduleId: "M01" | "M02",
+    artifactKey: string,
+    vendorKey: string,
+  ) {
+    const targetLocation = getUploadTargetLocation();
+    if (!targetLocation) {
+      showToast("Open Upload Data from a valid location first.");
+      return;
+    }
+
+    const accountId = targetLocation.accountId;
+    const intakeKey = getArtifactStateKey(accountId, targetLocation.id, moduleId, artifactKey, vendorKey);
+    const intake = artifactIntakeState[intakeKey];
+    if (!intake?.uploadId) {
+      showToast("No saved upload was found for this document.");
+      return;
+    }
+
+    const response = await fetch("/api/v1/uploads", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        uploadId: intake.uploadId,
+      }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    if (!response.ok) {
+      showToast(payload?.error ?? "Unable to remove the saved upload.");
+      return;
+    }
+
+    setArtifactIntakeState((current) => {
+      const next = { ...current };
+      delete next[intakeKey];
+      return next;
+    });
+
+    setUploadState((current) =>
+      current.map((module) =>
+        module.accountId === accountId && module.id === moduleId
+          ? {
+              ...module,
+              artifacts: module.artifacts.map((artifact) =>
+                artifact.key === artifactKey
+                  ? {
+                      ...artifact,
+                      status: "Missing",
+                      note: "No upload received yet for this location.",
+                    }
+                  : artifact,
+              ),
+            }
+          : module,
+      ),
+    );
+
+    setWgsOnboardingState((current) => {
+      const progress = current[targetLocation.id] ?? createWgsOnboardingProgress();
+      const nextUploads = Object.fromEntries(
+        Object.entries(progress.uploads).filter(([, upload]) => {
+          const uploadKey = upload.docKey ?? "";
+          return !(
+            upload.module === moduleId &&
+            uploadKey.includes(artifactKey) &&
+            uploadKey.includes(vendorKey)
+          );
+        }),
+      );
+      const nextProgress = {
+        ...progress,
+        uploads: nextUploads,
+      };
+      void persistLocationState(targetLocation, {
+        onboardingChecklist: onboardingState,
+        onboardingProgress: nextProgress,
+      });
+      return {
+        ...current,
+        [targetLocation.id]: nextProgress,
+      };
+    });
+
+    setUploadFeedback(null);
+    void syncAuditLogs();
+    showToast("Saved upload removed.");
+  }
+
+  async function handleResetLocationUploads(locationId: string) {
+    const targetLocation = runtimeLocationState.find((item) => item.id === locationId);
+    if (!targetLocation) {
+      showToast("Location could not be resolved.");
+      return;
+    }
+
+    const response = await fetch("/api/v1/uploads", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        locationId,
+        resetLocation: true,
+      }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    if (!response.ok) {
+      showToast(payload?.error ?? "Unable to reset the current upload set.");
+      return;
+    }
+
+    setArtifactIntakeState((current) => {
+      const prefix = `${targetLocation.accountId}:${locationId}:`;
+      return Object.fromEntries(
+        Object.entries(current).filter(([key]) => !key.startsWith(prefix)),
+      );
+    });
+
+    setUploadState((current) =>
+      current.map((module) =>
+        module.accountId === targetLocation.accountId
+          ? {
+              ...module,
+              artifacts: module.artifacts.map((artifact) => ({
+                ...artifact,
+                status: "Missing",
+                note: "No upload received yet for this location.",
+              })),
+            }
+          : module,
+      ),
+    );
+
+    setWgsOnboardingState((current) => {
+      const progress = current[locationId] ?? createWgsOnboardingProgress();
+      const nextProgress = {
+        ...progress,
+        uploads: {},
+      };
+      void persistLocationState(targetLocation, {
+        onboardingChecklist: onboardingState,
+        onboardingProgress: nextProgress,
+      });
+      return {
+        ...current,
+        [locationId]: nextProgress,
+      };
+    });
+
+    setUploadFeedback(null);
+    void syncAuditLogs();
+    showToast(`Started a new certification period for ${targetLocation.name}.`);
   }
 
   async function persistLocationState(
@@ -1330,30 +1539,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     };
     setActiveArtifact(target);
     return processArtifactFileUpload(target, file, vendor);
-  }
-
-  function handleArtifactAction(
-    moduleId: "M01" | "M02",
-    artifactKey: string,
-    vendor?: { key: string; name: string },
-    entryMode?: "manual" | "upload",
-  ) {
-    const targetLocation = activeUploadLocation ?? visibleLocations[0];
-    const uploadModule = targetLocation
-      ? resolveUploadModulesForAccount(targetLocation.accountId).find((item) => item.id === moduleId)
-      : null;
-    const artifact = uploadModule?.artifacts.find((item) => item.key === artifactKey);
-    if (!uploadModule || !artifact || !targetLocation) return;
-    setActiveArtifact({
-      accountId: uploadModule.accountId,
-      artifact,
-      entryMode,
-      locationId: targetLocation.id,
-      locationName: targetLocation.name,
-      moduleId,
-      vendorKey: vendor?.key,
-      vendorName: vendor?.name,
-    });
   }
 
   async function persistWorkspace(workspace: SchemaWorkspace, action: "draft" | "seal") {
@@ -1570,6 +1755,12 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         fields: false,
       };
 
+    if (current.uploaded && current.hash && current.schema && current.fields) {
+      setActiveArtifact(null);
+      showToast("All intake steps are already complete for this artifact.");
+      return;
+    }
+
     let next: IntakeState;
     const manualValues = artifactContractState[key] ?? {};
     const usingManualMode =
@@ -1655,6 +1846,11 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       locationName: activeArtifact.locationName,
       summary: `${activeArtifact.artifact.label} intake advanced in ${activeArtifact.moduleId}.`,
     });
+
+    if (isReady) {
+      setActiveArtifact(null);
+      showToast("Artifact intake is complete.");
+    }
   }
 
   function handleArtifactContractFieldChange(fieldId: string, value: string) {
@@ -2224,8 +2420,9 @@ function handleCompleteOnboarding(locationId: string) {
           onApprove={handleApprove}
           onCompleteUploadSet={handleCompleteUploadSet}
           onManageUploadSources={handleManageUploadSources}
-          onArtifactAction={handleArtifactAction}
           onDirectUpload={handleDirectArtifactUpload}
+          onRemoveUpload={handleRemoveSavedUpload}
+          onResetLocationUploads={handleResetLocationUploads}
           onEnterSupportMode={handleEnterSupportMode}
           onExpandAll={handleExpandAll}
           onFilterChange={setLogFilter}

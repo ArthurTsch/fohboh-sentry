@@ -127,6 +127,7 @@ export type UploadArtifact = {
 export type IntakeStepKey = "uploaded" | "hash" | "schema" | "fields";
 
 export type IntakeState = {
+  uploadId?: number;
   uploaded: boolean;
   hash: boolean;
   schema: boolean;
@@ -141,6 +142,7 @@ export type IntakeState = {
   matchedColumns?: number;
   expectedColumns?: number;
   unmatchedHeaders?: string[];
+  parseWarnings?: string[];
   updatedAt?: string;
   metrics?: {
     adjustmentAmount?: number;
@@ -189,6 +191,7 @@ export type UploadReceipt = {
   metrics?: IntakeState["metrics"];
   moduleId: "M01" | "M02";
   pageCount?: number;
+  parseWarnings?: string[];
   rows?: number;
   sizeBytes: number;
   status: "ready" | "review";

@@ -75,9 +75,9 @@ const guidePhases: GuidePhase[] = [
       {
         id: "2.4",
         text:
-          "In the Upload Data modal, switch to Manual Entry and enter your contracted rates. Required fields: Merchant ID, Pricing Model, Effective Date, Processor Markup (BPS), and Per-Transaction Fee. Each field has a ? tooltip explaining exactly where to find the value in your agreement.",
+          "Upload Data is now reserved for source documents only. For M01, upload the processor statement, POS export, signed merchant agreement, and matching-period bank statement here. Contract configuration is governed separately in DIY Access and Schema Registry workflows.",
         title: "Enter M01 Contract Config",
-        where: "Where: Upload Data -> M01 -> Manual Entry tab",
+        where: "Where: Upload Data -> M01 document cards; DIY Access for contract governance",
       },
       {
         id: "2.5",
@@ -113,9 +113,9 @@ const guidePhases: GuidePhase[] = [
       {
         id: "3.3",
         text:
-          "Switch to Manual Entry and enter your DSP rates. Required fields: Restaurant UUID, Agreement Effective Date, Commission Base Field, and Delivery Commission Rate. The Commission Base Field dropdown shows all available options - hover the ? icon on each for a description of what it represents and which DSPs use it.",
+          "Upload Data is now reserved for source documents only. For M02, upload the DSP settlement export, POS summary by channel, signed DSP agreement, and matching-period bank statement here. Contract configuration is governed separately in DIY Access and Schema Registry workflows.",
         title: "Enter M02 Contract Config",
-        where: "Where: Upload Data -> M02 -> Manual Entry tab",
+        where: "Where: Upload Data -> M02 document cards; DIY Access for contract governance",
       },
       {
         id: "3.4",

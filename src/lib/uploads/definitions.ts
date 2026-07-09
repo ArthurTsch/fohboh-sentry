@@ -32,12 +32,12 @@ export const ARTIFACT_PURPOSES: Record<string, string> = {
   "m02-settlement": "dsp_settlement_csv",
 };
 
-export const ARTIFACT_EXPECTED_KIND: Record<string, "csv" | "pdf" | "manual"> = {
+export const ARTIFACT_EXPECTED_KIND: Record<string, "csv" | "pdf" | "manual" | "csv_or_pdf"> = {
   "m01-agreement": "pdf",
   "m01-bank": "pdf",
   "m01-contract": "manual",
   "m01-pos": "csv",
-  "m01-processor": "csv",
+  "m01-processor": "csv_or_pdf",
   "m02-agreement": "pdf",
   "m02-bank": "pdf",
   "m02-contract": "manual",
