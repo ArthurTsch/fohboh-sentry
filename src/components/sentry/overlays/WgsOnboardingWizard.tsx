@@ -13,6 +13,44 @@ function getUploadCopy(module: "M01" | "M02") {
   return "Select each active DSP below, then upload all four required documents: settlement CSV, POS summary CSV, signed DSP agreement PDF, and bank statement PDF.";
 }
 
+function getActiveModules(location: LocationRecord) {
+  return location.modules
+    .map((module) => module.label)
+    .filter((label): label is "M01" | "M02" => label === "M01" || label === "M02");
+}
+
+function buildVisibleOnboardingSteps(location: LocationRecord) {
+  const activeModules = getActiveModules(location);
+  const steps = wgsOnboardingSteps
+    .filter((step) => {
+      if (step.type === "upload-m01") return activeModules.includes("M01");
+      if (step.type === "upload-m02") return activeModules.includes("M02");
+      return true;
+    })
+    .map((step) => {
+      if (step.type !== "checklist" || !step.items?.length) {
+        return step;
+      }
+
+      const filteredItems = step.items.filter((item) => {
+        const label = item.label.toUpperCase();
+        if (label.includes("M01")) return activeModules.includes("M01");
+        if (label.includes("M02")) return activeModules.includes("M02");
+        return true;
+      });
+
+      return {
+        ...step,
+        items: filteredItems,
+      };
+    });
+
+  return steps.map((step, index) => ({
+    ...step,
+    eyebrow: step.eyebrow.replace(/Step \d+ of \d+/i, `Step ${index + 1} of ${steps.length}`),
+  }));
+}
+
 function downloadOnboardingTemplate(option: WgsVendorOption, module: "M01" | "M02") {
   if (typeof window === "undefined") return;
   const templates: Record<string, string> = {
@@ -64,21 +102,23 @@ export function WgsOnboardingWizard({
   onComplete: () => void;
   progress: WgsOnboardingProgress;
 }) {
-  const currentStep = wgsOnboardingSteps[progress.stepIndex] ?? wgsOnboardingSteps[0];
-  const totalSteps = wgsOnboardingSteps.length;
+  const visibleSteps = buildVisibleOnboardingSteps(location);
+  const safeStepIndex = Math.max(0, Math.min(progress.stepIndex, Math.max(visibleSteps.length - 1, 0)));
+  const currentStep = visibleSteps[safeStepIndex] ?? visibleSteps[0];
+  const totalSteps = visibleSteps.length;
   const checklistCount = Object.values(progress.checks).reduce(
     (sum, items) => sum + items.filter(Boolean).length,
     0,
   );
   const uploadCount = Object.keys(progress.uploads).length;
-  const progressPercent = Math.round(((progress.stepIndex + 0.5) / totalSteps) * 100);
+  const progressPercent = totalSteps > 0 ? Math.round(((safeStepIndex + 0.5) / totalSteps) * 100) : 0;
 
   function patchProgress(patch: Partial<WgsOnboardingProgress>) {
     onChange({ ...progress, ...patch });
   }
 
   function toggleChecklist(stepId: string, itemIndex: number) {
-    const step = wgsOnboardingSteps.find((item) => item.id === stepId);
+    const step = visibleSteps.find((item) => item.id === stepId);
     if (!step?.items) return;
     const existing = progress.checks[stepId] ?? buildEmptyChecks(step);
     const next = existing.map((value, index) => (index === itemIndex ? !value : value));
@@ -408,6 +448,7 @@ export function WgsOnboardingWizard({
           <div className="mt-5 rounded-2xl border border-[var(--border)] bg-white p-4">
             <div className="flex items-center justify-between text-sm">
               <span>Step {progress.stepIndex + 1} of {totalSteps}</span>
+              
               <span>{progressPercent}% complete</span>
             </div>
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--panel-soft)]">
@@ -418,9 +459,9 @@ export function WgsOnboardingWizard({
             </div>
           </div>
           <div className="mt-5 space-y-3">
-            {wgsOnboardingSteps.map((step, index) => {
-              const isDone = index < progress.stepIndex || (index === progress.stepIndex && progress.completed);
-              const isActive = index === progress.stepIndex;
+            {visibleSteps.map((step, index) => {
+              const isDone = index < safeStepIndex || (index === safeStepIndex && progress.completed);
+              const isActive = index === safeStepIndex;
               return (
                 <button
                   key={step.id}
@@ -496,27 +537,27 @@ export function WgsOnboardingWizard({
                 type="button"
                 onClick={() => goToStep(progress.stepIndex - 1)}
                 className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] disabled:opacity-40"
-                disabled={progress.stepIndex === 0}
+                disabled={safeStepIndex === 0}
               >
                 Back
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  if (progress.stepIndex === totalSteps - 1) {
+                  if (safeStepIndex === totalSteps - 1) {
                     onChange({ ...progress, completed: true });
                     onComplete();
                     return;
                   }
-                  goToStep(progress.stepIndex + 1);
+                  goToStep(safeStepIndex + 1);
                 }}
                 className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition ${
-                  progress.stepIndex === totalSteps - 1
+                  safeStepIndex === totalSteps - 1
                     ? "bg-[var(--success)] hover:opacity-90"
                     : "bg-[var(--text)] hover:bg-[var(--accent)]"
                 }`}
               >
-                {progress.stepIndex === totalSteps - 1 ? "Complete Onboarding" : "Next"}
+                {safeStepIndex === totalSteps - 1 ? "Complete Onboarding" : "Next"}
               </button>
             </div>
           </div>
