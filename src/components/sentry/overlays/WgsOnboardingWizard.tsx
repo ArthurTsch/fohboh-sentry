@@ -8,9 +8,9 @@ function buildEmptyChecks(step: WgsOnboardingStep) {
 
 function getUploadCopy(module: "M01" | "M02") {
   if (module === "M01") {
-    return "Select the processor below, then upload the exact transaction-level CSV exported from the processor portal.";
+    return "Upload the exact transaction-level CSV exported from the saved processor configured for this location.";
   }
-  return "Select each active DSP below, then upload all four required documents: settlement CSV, POS summary CSV, signed DSP agreement PDF, and bank statement PDF.";
+  return "Upload the required source files for each saved active DSP configured for this location: settlement CSV, POS summary CSV, signed DSP agreement PDF, and bank statement PDF.";
 }
 
 function getActiveModules(location: LocationRecord) {
@@ -130,19 +130,6 @@ export function WgsOnboardingWizard({
     });
   }
 
-  function toggleVendor(moduleKey: "m01" | "m02", option: WgsVendorOption) {
-    const existing = progress.selectedVendors[moduleKey];
-    const next = existing.includes(option.key)
-      ? existing.filter((value) => value !== option.key)
-      : [...existing, option.key];
-    patchProgress({
-      selectedVendors: {
-        ...progress.selectedVendors,
-        [moduleKey]: next,
-      },
-    });
-  }
-
   async function handleFileSelected(file: File, option: WgsVendorOption) {
     await handleDocumentUpload(file, option, option.key);
   }
@@ -238,24 +225,21 @@ export function WgsOnboardingWizard({
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-6 text-[var(--muted)]">
           {getUploadCopy(module)}
         </div>
-        <div className="flex flex-wrap gap-2">
-          {options.map((option) => {
-            const active = selectedKeys.includes(option.key);
-            return (
-              <button
-                key={option.key}
-                type="button"
-                onClick={() => toggleVendor(module.toLowerCase() as "m01" | "m02", option)}
-                className={`rounded-full border px-4 py-2 text-sm transition ${
-                  active
-                    ? "border-[var(--accent)] bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"
-                    : "border-[var(--border)] bg-white text-[var(--muted)] hover:border-[var(--text)] hover:text-[var(--text)]"
-                }`}
-              >
-                {option.name}
-              </button>
-            );
-          })}
+        <div className="rounded-2xl border border-[var(--border)] bg-white px-4 py-4">
+          <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+            Saved Active Sources
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {selectedOptions.length > 0 ? (
+              selectedOptions.map((option) => (
+                <Badge key={option.key} tone="neutral">
+                  {option.name}
+                </Badge>
+              ))
+            ) : (
+              <Badge tone="warning">No saved source configured</Badge>
+            )}
+          </div>
         </div>
         <div className="grid gap-3">
           {selectedOptions.length > 0 ? (
@@ -427,7 +411,7 @@ export function WgsOnboardingWizard({
             })
           ) : (
             <div className="rounded-2xl border border-[var(--border)] bg-white px-5 py-10 text-center text-sm text-[var(--muted)]">
-              Select at least one {module === "M01" ? "processor" : "DSP"} to begin intake.
+              No saved {module === "M01" ? "processor" : "DSP"} is configured for this location. Go back to location setup or Manage Sources to define the active source before onboarding can continue.
             </div>
           )}
         </div>

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { getManagerSession } from "@/lib/auth/session";
-import { SUPERADMIN_TABLES } from "@/app/superadmin/table-registry";
 import { PasswordField } from "@/components/sentry/ui/PasswordField";
 import { loginAdminAction, logoutAdminAction } from "./actions";
 
@@ -116,24 +115,23 @@ export function AdminLoginScreen({ error }: { error?: string }) {
 export function AdminShell({
   children,
   currentPath = "/superadmin",
-  currentTable,
   description,
   eyebrow = "Hidden Route",
   title,
 }: {
   children: React.ReactNode;
   currentPath?: string;
-  currentTable?: string;
   description: string;
   eyebrow?: string;
   title: string;
 }) {
   const primaryNav = [
     { href: "/superadmin", label: "Overview" },
+    { href: "/superadmin/engine", label: "Engine Doc" },
     { href: "/superadmin/managers", label: "Managers" },
     { href: "/superadmin/restaurants", label: "Restaurants" },
     { href: "/superadmin/management", label: "Management" },
-    { href: "/superadmin/tables", label: "Tables" },
+    { href: "/superadmin/tables", label: "DB Tables Inspector" },
   ];
 
   return (
@@ -173,41 +171,6 @@ export function AdminShell({
                 })}
               </div>
 
-              <div className="mt-6 space-y-2">
-                <div className="flex items-center justify-between px-3 pb-2">
-                  <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--muted)]">
-                    Used Tables
-                  </div>
-                  <Link
-                    href="/superadmin/tables"
-                    className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent)]"
-                  >
-                    Open
-                  </Link>
-                </div>
-                {SUPERADMIN_TABLES.map((table) => {
-                  const href = `/superadmin/tables?table=${table.name}`;
-                  const active = currentPath === "/superadmin/tables" && currentTable === table.name;
-                  return (
-                    <Link
-                      key={table.name}
-                      href={href}
-                      className={`block rounded-2xl px-4 py-3 transition ${
-                        active
-                          ? "border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)]"
-                          : "hover:bg-[var(--surface)]"
-                      }`}
-                    >
-                      <div className={`truncate text-sm font-medium ${active ? "text-[var(--accent)]" : "text-[var(--text)]"}`}>
-                        {table.label}
-                      </div>
-                      <div className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--muted)]">
-                        {table.description}
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
             </div>
 
             <div className="border-t border-[var(--border)] px-4 py-4">

@@ -9,6 +9,8 @@ Recommended path:
 3. In `M01`, use the `Heartland` card:
    - `FohBoh_Test_M01_Heartland_Processor_Statement.csv`
    - `FohBoh_Test_M01_Heartland_POS_Export.csv`
+   - `FohBoh_Test_M01_Merchant_Agreement.pdf`
+   - `FohBoh_Test_M01_Bank_Statement.pdf`
 4. In `M02`, use the `DoorDash` card:
    - `FohBoh_Test_M02_DoorDash_Settlement.csv`
    - `FohBoh_Test_M02_DoorDash_POS_Summary.csv`
@@ -18,8 +20,8 @@ Recommended path:
 Notes:
 
 - These files are prefilled and follow the current in-app schema matching logic.
-- Agreement and bank evidence test PDFs are included for the M02 DoorDash path.
-- Upload all six files to the same location so the evidence stays location-scoped.
+- Agreement and bank evidence test PDFs are included for both the M01 and M02 paths.
+- Upload all eight files to the same location so the evidence stays location-scoped.
 
 ## Extended QA Evidence Pack
 
@@ -56,13 +58,13 @@ Included files:
 Use these folders when you want predictable certification test scenarios by score band:
 
 - [CAAR-92-Court-Admissible](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/CAAR-92-Court-Admissible)
-  - full evidence pack
+  - full 8-document evidence pack
   - intended for a passing, court-admissible CAAR flow
 
 - [CAAR-74-Missing-Bank](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/CAAR-74-Missing-Bank)
-  - same base evidence, but intentionally omit the bank statement
+  - same base evidence, but intentionally omits both bank statements
   - intended to stay below the CAAR gate because reconciliation is incomplete
 
 - [CAAR-38-Schema-Mismatch](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/CAAR-38-Schema-Mismatch)
-  - intentionally broken CSV headers
+  - intentionally broken CSV headers plus complete agreement/bank evidence
   - intended to trigger schema mismatch / review states and a low trust outcome

@@ -973,17 +973,21 @@ export const wgsOnboardingSteps: WgsOnboardingStep[] = [
 
 export const wgsM01Vendors: WgsVendorOption[] = [
   { key: "heartland", name: "Heartland", module: "M01" },
+  { key: "toast", name: "Toast", module: "M01" },
   { key: "chase", name: "Chase Paymentech", module: "M01" },
   { key: "worldpay", name: "Worldpay", module: "M01" },
   { key: "fiserv", name: "Fiserv / First Data", module: "M01" },
   { key: "square", name: "Square", module: "M01" },
+  { key: "other", name: "Other", module: "M01" },
 ];
 
 export const wgsM02Vendors: WgsVendorOption[] = [
   { key: "doordash", name: "DoorDash", module: "M02" },
   { key: "ubereats", name: "Uber Eats", module: "M02" },
   { key: "grubhub", name: "Grubhub", module: "M02" },
+  { key: "slice", name: "Slice", module: "M02" },
   { key: "postmates", name: "Postmates", module: "M02" },
+  { key: "other", name: "Other", module: "M02" },
 ];
 
 export const wgsAccounts: WgsAccount[] = [

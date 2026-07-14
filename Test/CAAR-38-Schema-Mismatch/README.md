@@ -13,6 +13,8 @@ Use these files on one location configured for:
 Upload set:
 - `FohBoh_Test_M01_Heartland_Processor_Statement_BAD_HEADERS.csv`
 - `FohBoh_Test_M01_Heartland_POS_Export_BAD_HEADERS.csv`
+- `FohBoh_Test_M01_Merchant_Agreement.pdf`
+- `FohBoh_Test_M01_Bank_Statement.pdf`
 - `FohBoh_Test_M02_DoorDash_Settlement_BAD_HEADERS.csv`
 - `FohBoh_Test_M02_DoorDash_POS_Summary_BAD_HEADERS.csv`
 - `FohBoh_Test_M02_DoorDash_Agreement.pdf`

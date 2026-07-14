@@ -39,11 +39,57 @@ export default async function SuperAdminTablesPage({
   return (
     <AdminShell
       currentPath="/superadmin/tables"
-      currentTable={snapshot.definition.name}
-      title="Tables"
-      description="Direct inspection surface for every production table used by the application. Use the structured pages for workflow actions and use this screen for raw table inspection and row-level control."
+      title="DB Tables Inspector"
+      description="Direct inspection surface for every production table used by the application. Use this page to browse the active tables, inspect schema and rows, and perform row-level control where safe."
     >
       <div className="space-y-6">
+        <section className="rounded-[28px] border border-[var(--border)] bg-white p-6 shadow-[0_20px_60px_rgba(0,0,0,0.06)]">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
+                Used Tables
+              </div>
+              <h2 className="mt-3 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
+                Application Table Registry
+              </h2>
+              <p className="mt-3 max-w-3xl text-sm leading-7 text-[var(--muted)]">
+                These are the production tables currently wired into the application. Select one to inspect its schema and current rows.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {tables.map((table) => {
+              const active = snapshot.definition.name === table.name;
+              return (
+                <a
+                  key={table.name}
+                  href={`/superadmin/tables?table=${table.name}`}
+                  className={`rounded-2xl border px-4 py-4 transition ${
+                    active
+                      ? "border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)]"
+                      : "border-[var(--border)] bg-[var(--surface)] hover:border-[var(--text)]"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className={`truncate text-sm font-semibold ${active ? "text-[var(--accent)]" : "text-[var(--text)]"}`}>
+                        {table.label}
+                      </div>
+                      <div className="mt-2 line-clamp-3 text-xs leading-5 text-[var(--muted)]">
+                        {table.description}
+                      </div>
+                    </div>
+                    <div className="shrink-0 rounded-full border border-[var(--border)] bg-white px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
+                      {table.available ? `${table.count} entries` : "N/A"}
+                    </div>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </section>
+
         <section className="rounded-[28px] border border-[var(--border)] bg-white p-6 shadow-[0_20px_60px_rgba(0,0,0,0.06)]">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -60,7 +106,7 @@ export default async function SuperAdminTablesPage({
 
             <div className="grid gap-3 sm:grid-cols-3">
               <StatCard label="Columns" value={String(snapshot.columns.length)} />
-              <StatCard label="Rows Loaded" value={String(snapshot.rows.length)} />
+              <StatCard label="Entries Loaded" value={String(snapshot.rows.length)} />
               <StatCard label="Delete by ID" value={snapshot.hasNumericId ? "Enabled" : "No"} />
             </div>
           </div>
@@ -79,16 +125,6 @@ export default async function SuperAdminTablesPage({
               This table does not exist in the current database schema yet.
             </AdminNotice>
           ) : null}
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
-          {tables.map((table) => (
-            <StatCard
-              key={table.name}
-              label={table.label}
-              value={table.available ? String(table.count) : "N/A"}
-            />
-          ))}
         </section>
 
         <section className="rounded-[28px] border border-[var(--border)] bg-white p-6 shadow-[0_20px_60px_rgba(0,0,0,0.06)]">
@@ -114,7 +150,7 @@ export default async function SuperAdminTablesPage({
               Data
             </div>
             <div className="mt-2 text-sm text-[var(--muted)]">
-              Showing the latest {snapshot.rows.length} rows from `public.{snapshot.definition.name}`.
+              Showing the latest {snapshot.rows.length} entries from `public.{snapshot.definition.name}`.
             </div>
           </div>
 
@@ -182,7 +218,7 @@ export default async function SuperAdminTablesPage({
               </table>
             </div>
           ) : (
-            <div className="px-6 py-10 text-sm text-[var(--muted)]">No rows found in this table.</div>
+            <div className="px-6 py-10 text-sm text-[var(--muted)]">No entries found in this table.</div>
           )}
         </section>
       </div>

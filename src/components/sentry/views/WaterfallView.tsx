@@ -233,6 +233,8 @@ export function WaterfallView({
           const caar = caars.find((record) => record.locationId === location.id);
           const onboarding = location.status === "Onboarding";
           const workflow = workflowByLocation[location.id];
+          const hasM01 = location.modules.some((module) => module.label === "M01");
+          const hasM02 = location.modules.some((module) => module.label === "M02");
           const primaryActionLabel = onboarding
             ? "Start Onboarding"
             : workflow?.primaryLabel ?? "Upload Data";
@@ -264,9 +266,25 @@ export function WaterfallView({
                     <div className="font-[family-name:var(--font-mono)] text-[11px] uppercase tracking-[0.14em] text-[var(--muted)]">
                       {location.id}
                     </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {location.modules
+                        .filter((module) => module.label === "M01" || module.label === "M02")
+                        .map((module) => (
+                          <span
+                            key={`${location.id}:${module.label}`}
+                            className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${
+                              module.label === "M01"
+                                ? "border border-[rgba(0,97,255,0.16)] bg-[rgba(0,97,255,0.08)] text-[var(--info)]"
+                                : "border border-[rgba(255,152,0,0.24)] bg-[rgba(255,152,0,0.12)] text-[#B86A00]"
+                            }`}
+                          >
+                            {module.label}
+                          </span>
+                        ))}
+                    </div>
                   </div>
-                  <div>{onboarding ? <PendingSetup /> : <TrustBadge score={location.m01} />}</div>
-                  <div>{onboarding ? <PendingSetup /> : <TrustBadge score={location.m02} />}</div>
+                  <div>{onboarding ? <PendingSetup /> : hasM01 ? <TrustBadge score={location.m01} /> : <MissingModule />}</div>
+                  <div>{onboarding ? <PendingSetup /> : hasM02 ? <TrustBadge score={location.m02} /> : <MissingModule />}</div>
                   <div>
                     <span className="inline-flex rounded-full border border-[var(--border)] bg-[var(--panel-soft)] px-2 py-1 text-[11px] font-semibold text-[var(--muted)]">
                       Lock M03
@@ -611,6 +629,10 @@ function TrustBadge({ score }: { score: number }) {
 
 function PendingSetup() {
   return <span className="text-[11px] text-[var(--muted)]">Pending setup</span>;
+}
+
+function MissingModule() {
+  return <span className="text-[13px] font-semibold text-[var(--muted)]">-</span>;
 }
 
 function DetailCard({

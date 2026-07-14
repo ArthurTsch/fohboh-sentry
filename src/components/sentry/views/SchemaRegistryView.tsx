@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { DragEvent, useRef, useState } from "react";
 import type { Role, SchemaWorkspace } from "../types";
 import { Badge, HelpTip, MetaBlock, SectionCard } from "../ui/primitives";
 
@@ -13,7 +13,9 @@ export function SchemaRegistryView({
   role: Role;
   workspaces: SchemaWorkspace[];
 }) {
-  if (workspaces.length === 0) {
+  const uniqueWorkspaces = dedupeWorkspaces(workspaces);
+
+  if (uniqueWorkspaces.length === 0) {
     return (
       <SectionCard>
         <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
@@ -29,9 +31,9 @@ export function SchemaRegistryView({
 
   return (
     <div className="space-y-6">
-      {workspaces.map((workspace) => (
+      {uniqueWorkspaces.map((workspace) => (
         <SchemaWorkspaceCard
-          key={`${workspace.account}-${workspace.vendor}-${workspace.module}`}
+          key={buildWorkspaceIdentity(workspace)}
           workspace={workspace}
           onEditWorkspace={onEditWorkspace}
           onSealWorkspace={onSealWorkspace}
@@ -40,6 +42,25 @@ export function SchemaRegistryView({
       ))}
     </div>
   );
+}
+
+function buildWorkspaceIdentity(workspace: SchemaWorkspace) {
+  return [
+    workspace.accountId,
+    workspace.locationId ?? "global",
+    workspace.vendor,
+    workspace.module,
+  ].join(":");
+}
+
+function dedupeWorkspaces(workspaces: SchemaWorkspace[]) {
+  const unique = new Map<string, SchemaWorkspace>();
+
+  for (const workspace of workspaces) {
+    unique.set(buildWorkspaceIdentity(workspace), workspace);
+  }
+
+  return [...unique.values()];
 }
 
 function SchemaWorkspaceCard({
@@ -281,7 +302,9 @@ function ProofZoneCard({ workspace }: { workspace: SchemaWorkspace }) {
     expected: number;
     missing: string[];
   } | null>(null);
+  const [dragActive, setDragActive] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const resultRef = useRef<HTMLDivElement | null>(null);
 
   async function handleFile(file: File) {
     const text = await file.text();
@@ -303,6 +326,28 @@ function ProofZoneCard({ workspace }: { workspace: SchemaWorkspace }) {
       expected: expectedHeaders.length,
       missing,
     });
+    requestAnimationFrame(() => {
+      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
+
+  function handleDragOver(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setDragActive(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setDragActive(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setDragActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) {
+      void handleFile(file);
+    }
   }
 
   const success = upload ? upload.matchPct >= 60 : false;
@@ -344,7 +389,14 @@ function ProofZoneCard({ workspace }: { workspace: SchemaWorkspace }) {
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
-          className="w-full rounded-2xl border-2 border-dashed border-[var(--border)] bg-[#F8F8FA] px-4 py-8 text-center transition hover:border-[var(--accent)] hover:bg-[rgba(214,48,49,0.04)]"
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`w-full rounded-2xl border-2 border-dashed px-4 py-8 text-center transition ${
+            dragActive
+              ? "border-[var(--accent)] bg-[rgba(214,48,49,0.08)]"
+              : "border-[var(--border)] bg-[#F8F8FA] hover:border-[var(--accent)] hover:bg-[rgba(214,48,49,0.04)]"
+          }`}
         >
           <div className="text-[16px] font-semibold text-[var(--text)]">
             Drop {workspace.vendor} CSV here or <span className="text-[var(--accent)]">browse</span>
@@ -359,7 +411,10 @@ function ProofZoneCard({ workspace }: { workspace: SchemaWorkspace }) {
       </div>
 
       {upload ? (
-        <div className={`mt-4 rounded-xl border px-4 py-3 ${success ? "border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.06)]" : "border-[rgba(212,131,10,0.4)] bg-[rgba(214,48,49,0.07)]"}`}>
+        <div
+          ref={resultRef}
+          className={`mt-4 rounded-xl border px-4 py-3 ${success ? "border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.06)]" : "border-[rgba(212,131,10,0.4)] bg-[rgba(214,48,49,0.07)]"}`}
+        >
           <div className={`text-[12px] font-semibold ${success ? "text-[var(--success)]" : "text-[var(--accent)]"}`}>
             {upload.fileName} - {success ? `schema matched (${upload.matchPct}%)` : `partial schema match (${upload.matchPct}%)`}
           </div>

@@ -256,19 +256,29 @@ function findProcessorTotalBlock(lines: string[]) {
     | undefined;
 
   for (let index = 0; index < lines.length; index += 1) {
-    if (!/^total$/i.test(lines[index])) continue;
-    const numericLines = lines
-      .slice(index + 1, index + 8)
-      .map((line) => line.trim())
-      .filter((line) => /[\d,]+\.\d{2}/.test(line))
-      .map((line) => Math.abs(parseCurrency(line)))
-      .filter((value) => value > 0);
+    if (!/^total\b/i.test(lines[index])) continue;
 
-    if (numericLines.length < 3) continue;
-    const basisAmount = numericLines[0];
-    const feeAmount = numericLines.length >= 3 ? numericLines[numericLines.length - 2] : 0;
-    const payoutAmount = numericLines[numericLines.length - 1];
-    const score = numericLines.length * 1000000 + basisAmount;
+    const inlineCurrencyValues = extractCurrencyValuesFromLine(lines[index]);
+    const nearbyCurrencyValues = lines
+      .slice(index + 1, index + 8)
+      .flatMap((line) => extractCurrencyValuesFromLine(line));
+
+    const numericValues =
+      inlineCurrencyValues.length >= 3
+        ? inlineCurrencyValues
+        : nearbyCurrencyValues.length >= 3
+          ? nearbyCurrencyValues
+          : [];
+
+    if (numericValues.length < 3) continue;
+
+    const basisAmount = numericValues[0];
+    const feeAmount = numericValues.length >= 3 ? numericValues[numericValues.length - 2] : 0;
+    const payoutAmount = numericValues[numericValues.length - 1];
+    const score =
+      basisAmount +
+      numericValues.length * 1000000 +
+      (inlineCurrencyValues.length >= 3 ? 500000 : 0);
 
     if (!bestBlock || score > bestBlock.score) {
       bestBlock = {
@@ -304,6 +314,20 @@ function findAmountNearLabel(lines: string[], labelPattern: RegExp) {
     }
   }
   return 0;
+}
+
+function extractCurrencyValuesFromLine(line: string) {
+  const currencyMatches = line.match(
+    /\(?\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})\)?|\(?\$?\d+\.\d{2}\)?/g,
+  );
+
+  if (!currencyMatches?.length) {
+    return [] as number[];
+  }
+
+  return currencyMatches
+    .map((value) => Math.abs(parseCurrency(value)))
+    .filter((value) => value > 0);
 }
 
 function parseCurrency(value: string) {

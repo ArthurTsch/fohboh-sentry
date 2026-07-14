@@ -231,7 +231,7 @@ export function UploadCenterView({
       activeModule === "M01" ? activeSourceConfig?.m01Vendors : activeSourceConfig?.m02Vendors;
 
     if (!selected || selected.length === 0) {
-      return activeMeta.vendors;
+      return [];
     }
 
     const selectedKeys = new Set(selected.map((vendor) => vendor.key));
@@ -260,10 +260,7 @@ export function UploadCenterView({
 
       const selectedVendors =
         moduleId === "M01" ? activeSourceConfig?.m01Vendors : activeSourceConfig?.m02Vendors;
-      const vendors =
-        selectedVendors && selectedVendors.length > 0
-          ? selectedVendors
-          : moduleMeta[moduleId].vendors.map((vendor) => ({ key: vendor.key, name: vendor.name }));
+      const vendors = selectedVendors && selectedVendors.length > 0 ? selectedVendors : [];
 
       const requiredArtifactKeys =
         moduleId === "M01"
@@ -511,7 +508,7 @@ export function UploadCenterView({
                 No active providers configured
               </div>
               <div className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">
-                This location does not currently have any active {activeModule === "M01" ? "card processors" : "DSPs"} configured for {activeModule}. Add one before starting uploads.
+                This location does not currently have any active {activeModule === "M01" ? "card processors" : "DSPs"} configured for {activeModule}. Uploads are blocked until a source is explicitly selected for this location.
               </div>
               {canManageSources && activeSourceConfig ? (
                 <button

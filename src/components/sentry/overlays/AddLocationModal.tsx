@@ -17,34 +17,34 @@ const stepHelp: {
     sections: [
       {
         label: "What It Is",
-        text: "Basic information about the new location: name, address, POS system, and primary contact.",
+        text: "Basic information about the new location: name, address, POS system, and the active processor and DSP sources.",
       },
       {
         label: "What It Does",
-        text: "This data pre-fills the WGS onboarding package sent to your advisor. Accurate details prevent back-and-forth during setup.",
+        text: "This data pre-fills the WGS onboarding package sent to your advisor and becomes the source-of-truth used by Upload Data, DIY Access, and certification workflows.",
       },
       {
         label: "Why It Matters",
-        text: "The location name entered here will appear on all future CAARs and in the Activity Log. Use the exact name used in your POS and processor accounts.",
+        text: "The location name entered here will appear on all future CAARs and in the Activity Log. The saved processor and DSP selections become the only active sources for this location until explicitly changed.",
       },
     ],
     title: "Add Location / Step 1",
   },
   {
     footerLabel: "Required",
-    footerValue: "Module + processor + DSP selections",
+    footerValue: "Module activation only",
     sections: [
       {
         label: "What It Is",
-        text: "Select which Sentry modules to activate for this location and identify your DSP platforms and card processor.",
+        text: "Select which Sentry modules to activate for this location.",
       },
       {
         label: "What It Does",
-        text: "Module selection determines which CSV templates you'll need to provide, which Schema Registry entries WGS will configure, and your monthly per-location fee.",
+        text: "Module selection determines which saved sources must upload evidence, which Schema Registry entries WGS will configure, and which certification workflows are enabled.",
       },
       {
         label: "Why It Matters",
-        text: "Activating M01 without the correct card processor identified means WGS cannot configure the interchange rule set. Both selections are required.",
+        text: "Activating M01 or M02 without the correct saved sources means onboarding and uploads will be blocked until those sources are configured.",
       },
     ],
     title: "Add Location / Step 2",
@@ -109,6 +109,10 @@ export function AddLocationModal({
       return;
     }
     setStep((current) => current + 1);
+  }
+
+  function back() {
+    setStep((current) => Math.max(1, current - 1));
   }
 
   return (
@@ -218,6 +222,53 @@ export function AddLocationModal({
                   </select>
                 </label>
               </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="grid gap-2">
+                  <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
+                    Card Processor
+                  </span>
+                  <select
+                    value={draft.processor}
+                    onChange={(event) => setDraft((current) => ({ ...current, processor: event.target.value }))}
+                    className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm outline-none"
+                  >
+                    {processorOptions.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
+                  </select>
+                </label>
+                <div className="grid gap-2">
+                  <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
+                    DSP Platforms
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {dspOptions.map((dsp) => {
+                      const selected = draft.dsps.includes(dsp);
+                      return (
+                        <button
+                          key={dsp}
+                          type="button"
+                          onClick={() =>
+                            setDraft((current) => ({
+                              ...current,
+                              dsps: current.dsps.includes(dsp)
+                                ? current.dsps.filter((item) => item !== dsp)
+                                : [...current.dsps, dsp],
+                            }))
+                          }
+                          className={`rounded-full border px-3 py-2 text-sm ${
+                            selected
+                              ? "border-[var(--accent)] bg-[rgba(214,48,49,0.04)] text-[var(--accent)]"
+                              : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]"
+                          }`}
+                        >
+                          {dsp}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
               <div className="rounded-[10px] border border-[rgba(212,131,10,0.5)] border-l-4 border-l-[#ff9800] bg-[#2A1500] px-4 py-4">
                 <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
                   ⚠ Before Proceeding
@@ -259,46 +310,20 @@ export function AddLocationModal({
                   </div>
                 </button>
               </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="grid gap-2">
-                  <span className="text-sm font-medium">Card Processor</span>
-                  <select
-                    value={draft.processor}
-                    onChange={(event) => setDraft((current) => ({ ...current, processor: event.target.value }))}
-                    className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm outline-none"
-                  >
-                    {processorOptions.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="grid gap-2">
-                  <span className="text-sm font-medium">DSP Platforms</span>
-                  <div className="flex flex-wrap gap-2">
-                    {dspOptions.map((dsp) => {
-                      const selected = draft.dsps.includes(dsp);
-                      return (
-                        <button
-                          key={dsp}
-                          type="button"
-                          onClick={() =>
-                            setDraft((current) => ({
-                              ...current,
-                              dsps: current.dsps.includes(dsp)
-                                ? current.dsps.filter((item) => item !== dsp)
-                                : [...current.dsps, dsp],
-                            }))
-                          }
-                          className={`rounded-full border px-3 py-2 text-sm ${
-                            selected ? "border-[var(--accent)] bg-[rgba(214,48,49,0.04)] text-[var(--accent)]" : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]"
-                          }`}
-                        >
-                          {dsp}
-                        </button>
-                      );
-                    })}
-                  </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <div className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+                  Saved Active Sources
+                </div>
+                <div className="mt-3 text-sm leading-7 text-[var(--muted)]">
+                  Processor: <span className="font-semibold text-[var(--text)]">{draft.processor}</span>
+                  {" · "}
+                  DSPs:{" "}
+                  <span className="font-semibold text-[var(--text)]">
+                    {draft.dsps.join(", ") || "None"}
+                  </span>
+                </div>
+                <div className="mt-2 text-sm leading-7 text-[var(--muted)]">
+                  These source selections are defined in Location Details and will be used by Upload Data, DIY Access, and onboarding. Change them there or later through Manage Sources.
                 </div>
               </div>
             </div>
@@ -331,13 +356,23 @@ export function AddLocationModal({
 
         <div className="flex items-center justify-between border-t border-[var(--border)] px-6 py-5">
           <div className="text-sm text-[var(--muted)]">{`Step ${step} of 3`}</div>
-          <button
-            type="button"
-            onClick={next}
-            className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#bb2a2b]"
-          >
-            {step === 3 ? "Start Onboarding →" : "Next →"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={back}
+              disabled={step === 1}
+              className="rounded-lg border border-[var(--border)] px-5 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={next}
+              className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#bb2a2b]"
+            >
+              {step === 3 ? "Start Onboarding →" : "Next →"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

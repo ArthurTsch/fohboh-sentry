@@ -806,24 +806,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   }
 
   function resolveUploadModulesForAccount(accountId: string) {
-    const exactModules = uploadState.filter((module) => module.accountId === accountId);
-    if (exactModules.length > 0) {
-      return exactModules;
-    }
-
-    const baseTemplates = uploadModules.filter(
-      (module) => module.accountId === BASE_UPLOAD_TEMPLATE_ACCOUNT_ID,
-    );
-
-    return baseTemplates.map((module) => ({
-      ...module,
-      accountId,
-      artifacts: module.artifacts.map((artifact) => ({
-        ...artifact,
-        status: "Missing" as const,
-        note: "No upload received yet for this location.",
-      })),
-    }));
+    return buildScopedUploadModules(uploadState, accountId);
   }
 
   function getScopedAccountId() {
@@ -1522,11 +1505,26 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     vendor?: { key: string; name: string },
   ): Promise<UploadReceipt | null> {
     const targetLocation = activeUploadLocation ?? visibleLocations[0];
-    const uploadModule = targetLocation
-      ? resolveUploadModulesForAccount(targetLocation.accountId).find((item) => item.id === moduleId)
-      : null;
-    const artifact = uploadModule?.artifacts.find((item) => item.key === artifactKey);
-    if (!uploadModule || !artifact || !targetLocation) return null;
+    if (!targetLocation) return null;
+
+    const uploadModule =
+      resolveUploadModulesForAccount(targetLocation.accountId).find((item) => item.id === moduleId) ??
+      buildScopedUploadModules(uploadState, targetLocation.accountId).find((item) => item.id === moduleId) ??
+      buildScopedUploadModules(uploadModules, targetLocation.accountId).find((item) => item.id === moduleId) ??
+      null;
+
+    const artifact =
+      uploadModule?.artifacts.find(
+        (item) =>
+          item.key === artifactKey ||
+          item.key.startsWith(artifactKey) ||
+          artifactKey.startsWith(item.key),
+      ) ??
+      resolveArtifactTemplate(uploadState, targetLocation.accountId, moduleId, artifactKey) ??
+      resolveArtifactTemplate(uploadModules, targetLocation.accountId, moduleId, artifactKey) ??
+      null;
+
+    if (!uploadModule || !artifact) return null;
 
     const target = {
       accountId: uploadModule.accountId,
@@ -3122,10 +3120,77 @@ function resolveModuleTemplate(
   accountId: string,
   moduleId: "M01" | "M02",
 ) {
-  return (
-    modules.find((module) => module.accountId === accountId && module.id === moduleId) ??
-    modules.find((module) => module.accountId === "C001" && module.id === moduleId)
+  return buildScopedUploadModules(modules, accountId).find((module) => module.id === moduleId);
+}
+
+function resolveArtifactTemplate(
+  modules: UploadModule[],
+  accountId: string,
+  moduleId: "M01" | "M02",
+  artifactKey: string,
+) {
+  return resolveModuleTemplate(modules, accountId, moduleId)?.artifacts.find(
+    (artifact) =>
+      artifact.key === artifactKey ||
+      artifact.key.startsWith(artifactKey) ||
+      artifactKey.startsWith(artifact.key),
   );
+}
+
+function buildScopedUploadModules(modules: UploadModule[], accountId: string) {
+  const baseTemplates = modules.filter(
+    (module) => module.accountId === BASE_UPLOAD_TEMPLATE_ACCOUNT_ID,
+  );
+  const scopedModules = modules.filter((module) => module.accountId === accountId);
+
+  const mergedBaseModules = baseTemplates.map((baseModule) => {
+    const scopedModule = scopedModules.find((module) => module.id === baseModule.id);
+    const matchedScopedArtifacts = new Set<string>();
+
+    const artifacts = baseModule.artifacts.map((baseArtifact) => {
+      const scopedArtifact = scopedModule?.artifacts.find((artifact) => {
+        const matches =
+          artifact.key === baseArtifact.key ||
+          artifact.key.startsWith(baseArtifact.key) ||
+          baseArtifact.key.startsWith(artifact.key);
+
+        if (matches) {
+          matchedScopedArtifacts.add(artifact.key);
+        }
+
+        return matches;
+      });
+
+      if (!scopedArtifact) {
+        return {
+          ...baseArtifact,
+          note: "No upload received yet for this location.",
+          status: "Missing" as const,
+        };
+      }
+
+      return {
+        ...baseArtifact,
+        ...scopedArtifact,
+      };
+    });
+
+    const additionalArtifacts =
+      scopedModule?.artifacts.filter((artifact) => !matchedScopedArtifacts.has(artifact.key)) ?? [];
+
+    return {
+      ...baseModule,
+      ...scopedModule,
+      accountId,
+      artifacts: [...artifacts, ...additionalArtifacts],
+    };
+  });
+
+  const additionalModules = scopedModules.filter(
+    (module) => !mergedBaseModules.some((baseModule) => baseModule.id === module.id),
+  );
+
+  return [...mergedBaseModules, ...additionalModules];
 }
 
 function resolveLocationArtifactIntake(
