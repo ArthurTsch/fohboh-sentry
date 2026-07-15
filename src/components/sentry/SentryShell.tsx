@@ -43,8 +43,18 @@ const navHelp: Record<
     footerLabel: "Legal Standard",
     footerValue: "FRE 803(6) / 902(11) / 1002",
   },
+  billing: {
+    title: "Sidebar / Account",
+    sections: [
+      { label: "What It Is", text: "The billing surface for subscription pricing, certified CAAR transaction fees, monthly statements, and saved payment methods." },
+      { label: "What It Does", text: "Shows what is currently due based on sealed CAAR output and prepares the account for automated monthly invoicing later." },
+      { label: "Why It Matters", text: "Billing is based on certified recoverable amounts, not collection contingency, and must remain traceable to specific sealed CAARs." },
+    ],
+    footerLabel: "Fee Model",
+    footerValue: "Monthly plan + certified CAAR transaction fees",
+  },
   log: {
-    title: "Sidebar / Recovery",
+    title: "Sidebar / Account",
     sections: [
       { label: "What It Is", text: "Immutable timestamped ledger of certifications, uploads, schema changes, and user actions." },
       { label: "What It Does", text: "Filters into SHA-256-protected and editable records with user ID and timestamp on each event." },
@@ -54,17 +64,17 @@ const navHelp: Record<
     footerValue: "SHA-256 sealed / cannot be altered",
   },
   permissions: {
-    title: "Sidebar / Settings",
+    title: "Sidebar / Account",
     sections: [
-      { label: "What It Is", text: "Team access management. Three roles: Admin, Manager, and Viewer." },
-      { label: "What It Does", text: "Assigns roles per user. Role-based controls are enforced at the architecture level, not just the UI." },
-      { label: "Why It Matters", text: "Sealing and governed actions remain restricted regardless of what the interface displays." },
+      { label: "What It Is", text: "Team and access visibility for the current account, including operator authority and governance-sensitive roles." },
+      { label: "What It Does", text: "Shows who can operate locations, certification, and governed WGS workflows under the current production access model." },
+      { label: "Why It Matters", text: "Sealing, certification, and support-mode actions remain role-gated even when a user can see the surface." },
     ],
     footerLabel: "Role Enforcement",
     footerValue: "Architecture-level, not UI-only",
   },
   userguide: {
-    title: "Sidebar / Help",
+    title: "Sidebar / Account",
     sections: [
       { label: "What It Is", text: "Step-by-step platform guide covering onboarding, modules, certification, CAAR, and ExportPack." },
       { label: "What It Does", text: "Walks operators through each stage of the workflow with context on what the step does and why." },
@@ -130,10 +140,10 @@ const navHelp: Record<
     footerValue: "Architecture-level workflow gating",
   },
   profile: {
-    title: "Sidebar / Profile",
+    title: "Sidebar / Account",
     sections: [
-      { label: "What It Is", text: "Your current session identity, role boundary, and account scope." },
-      { label: "What It Does", text: "Opens the profile surface for the logged-in operator or WGS user." },
+      { label: "What It Is", text: "Your account settings surface for identity, password, notification preferences, and session scope." },
+      { label: "What It Does", text: "Opens the settings screen for the logged-in operator or WGS user." },
       { label: "Why It Matters", text: "Access and data visibility are tied to this identity record." },
     ],
     footerLabel: "Identity Source",
@@ -221,7 +231,7 @@ export function SentryShell({
                   />
                 ))}
 
-                {group.section === "Settings & Help" ? (
+                {group.section === "Help" ? (
                   <SidebarItem
                     active={false}
                     help={navHelp.support}
@@ -294,10 +304,15 @@ export function SentryShell({
               className="flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-2 text-left"
             >
               <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[var(--text)] text-sm font-bold text-white">
-                {getInitials(session.email)}
+                {getInitials(session.name?.trim() || session.email)}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm leading-5 text-[var(--text)]">{session.email}</div>
+                <div className="truncate text-sm leading-5 text-[var(--text)]">
+                  {session.name?.trim() || session.email}
+                </div>
+                {session.name?.trim() ? (
+                  <div className="truncate text-xs leading-5 text-[var(--muted)]">{session.email}</div>
+                ) : null}
                 <div className="mt-1 flex flex-wrap gap-1">
                   <span
                     className={`inline-flex rounded-full px-2 py-1 font-[family-name:var(--font-mono)] text-[9px] font-bold uppercase tracking-[0.16em] ${roleClass[session.role]}`}
@@ -485,8 +500,10 @@ function SidebarGlyph({ name }: { name: string }) {
   if (name === "permissions") {
     return (
       <svg viewBox="0 0 16 16" fill="none" className={shared}>
-        <rect x="3" y="7" width="10" height="6" rx="1.4" stroke="currentColor" strokeWidth="1.4" />
-        <path d="M5.2 7V5.8A2.8 2.8 0 0 1 8 3a2.8 2.8 0 0 1 2.8 2.8V7" stroke="currentColor" strokeWidth="1.4" />
+        <circle cx="6" cy="5.4" r="2.1" stroke="currentColor" strokeWidth="1.4" />
+        <circle cx="11.1" cy="6.1" r="1.5" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M2.8 12.8c.5-2.2 2.2-3.6 4.3-3.6 2 0 3.7 1.4 4.2 3.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <path d="M10.1 11.8c.2-1.3 1.1-2.2 2.3-2.5.5-.1.8-.1 1.2 0" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       </svg>
     );
   }
@@ -532,6 +549,25 @@ function SidebarGlyph({ name }: { name: string }) {
       <svg viewBox="0 0 16 16" fill="none" className={shared}>
         <path d="M8 2.5 13 5.2v5.6L8 13.5 3 10.8V5.2L8 2.5Z" stroke="currentColor" strokeWidth="1.4" />
         <path d="M8 5.2v5.6M5.2 6.7 8 8.2l2.8-1.5" stroke="currentColor" strokeWidth="1.4" />
+      </svg>
+    );
+  }
+
+  if (name === "billing") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <rect x="2.5" y="3.5" width="11" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M2.5 6.2h11" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M5.2 10.2h2.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      </svg>
+    );
+  }
+
+  if (name === "profile") {
+    return (
+      <svg viewBox="0 0 16 16" fill="none" className={shared}>
+        <circle cx="8" cy="5.3" r="2.3" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M3.7 13c.6-2 2.3-3.2 4.3-3.2 2 0 3.7 1.2 4.3 3.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       </svg>
     );
   }

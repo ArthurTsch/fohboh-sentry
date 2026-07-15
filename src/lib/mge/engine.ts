@@ -910,7 +910,25 @@ function scoreDataCompleteness(context: RuleContext): Mq6Score {
     return scoreDetail(0, "No governed artifacts are available for this module.");
   }
   const satisfied = requiredArtifacts.filter((artifact) => artifactSatisfiesCompleteness(context, artifact)).length;
-  const score = roundInteger((satisfied / requiredArtifacts.length) * 100);
+  const baseScore = roundInteger((satisfied / requiredArtifacts.length) * 100);
+  const statementComplete = context.statement ? artifactSatisfiesCompleteness(context, context.statement) : false;
+  const posComplete = context.pos ? artifactSatisfiesCompleteness(context, context.pos) : false;
+  const bankComplete =
+    context.cadence === "weekly_preliminary"
+      ? true
+      : context.bank
+        ? artifactSatisfiesCompleteness(context, context.bank)
+        : false;
+
+  let score = baseScore;
+  if (!statementComplete || !posComplete) {
+    // A broken source or POS file means the package is present but not structurally certifiable.
+    score = Math.min(score, 20);
+  } else if (!bankComplete) {
+    // Monthly-final runs without the governed bank artifact stay in the blocked middle band.
+    score = Math.min(score, 40);
+  }
+
   return scoreDetail(
     score,
     `${satisfied} of ${requiredArtifacts.length} required certification artifacts passed the structural completeness gate.`,
@@ -936,19 +954,29 @@ function scoreDataFreshness(context: RuleContext): Mq6Score {
 
 function scoreSourceAuthenticity(context: RuleContext): Mq6Score {
   let score = 0;
-  const contractEvidence = Boolean(context.agreement?.uploaded && context.agreement.hash);
-  const posEvidence = Boolean(context.pos?.uploaded && context.pos.hash && context.pos.schema);
+  const statementEvidence = Boolean(
+    context.statement?.uploaded &&
+      context.statement.hash &&
+      context.statement.schema &&
+      context.statement.fields,
+  );
+  const posEvidence = Boolean(
+    context.pos?.uploaded &&
+      context.pos.hash &&
+      context.pos.schema &&
+      context.pos.fields,
+  );
   const bankRequired = context.cadence === "monthly_final";
   const bankEvidence = bankRequired
     ? Boolean(context.bank?.uploaded && context.bank.hash)
-    : Boolean(context.statement?.uploaded && context.statement.hash);
+    : statementEvidence;
 
-  if (contractEvidence) score += 34;
+  if (statementEvidence) score += 34;
   if (posEvidence) score += 33;
   if (bankEvidence) score += 33;
 
   const detailParts = [
-    contractEvidence ? "signed agreement verified" : "signed agreement missing or unverified",
+    statementEvidence ? "source statement verified" : "source statement missing or unverified",
     posEvidence ? "POS source verified" : "POS source missing or unverified",
     bankRequired
       ? bankEvidence
@@ -965,19 +993,30 @@ function scoreSourceAuthenticity(context: RuleContext): Mq6Score {
 function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
   let score = 0;
   const detailParts: string[] = [];
+  const statementGoverned = Boolean(
+    context.statement?.uploaded &&
+      context.statement.schema &&
+      context.statement.fields,
+  );
+  const posGoverned = Boolean(
+    context.pos?.uploaded &&
+      context.pos.schema &&
+      context.pos.fields,
+  );
+  const bankGoverned = Boolean(context.bank?.uploaded && context.bank.hash);
   const statementBasis = numberValue(context.statement?.metrics?.basisAmount);
   const posBasis = numberValue(context.pos?.metrics?.basisAmount);
   const statementFees = numberValue(context.statement?.metrics?.feeAmount);
   const bankDeposit = numberValue(context.bank?.metrics?.depositAmount);
   const payoutAmount = numberValue(context.statement?.metrics?.payoutAmount);
 
-  if (statementBasis > 0 && posBasis > 0) {
+  if (statementGoverned && posGoverned && statementBasis > 0 && posBasis > 0) {
     const delta = relativeDelta(statementBasis, posBasis);
     if (delta <= 0.05) {
-      score += 33;
+      score += 25;
       detailParts.push("POS-to-source basis tied within 5%.");
     } else if (delta <= 0.12) {
-      score += 16;
+      score += 12;
       detailParts.push("POS-to-source basis tied within 12% but remains outside final tolerance.");
     } else {
       detailParts.push("POS-to-source basis failed tolerance.");
@@ -986,23 +1025,23 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
     detailParts.push("POS-to-source basis could not be reconciled.");
   }
 
-  if (statementFees > 0 && context.contract) {
-    score += 33;
+  if (statementGoverned && statementFees > 0 && context.contract) {
+    score += 25;
     detailParts.push("Contract-driven shadow fee could be computed from governed statement evidence.");
   } else {
     detailParts.push("Contract or statement evidence was insufficient for shadow fee computation.");
   }
 
   if (context.cadence === "weekly_preliminary") {
-    score += 34;
+    score += 50;
     detailParts.push("Monthly bank tie-out deferred by weekly preliminary cadence.");
-  } else if (bankDeposit > 0 && payoutAmount > 0) {
+  } else if (statementGoverned && bankGoverned && bankDeposit > 0 && payoutAmount > 0) {
     const delta = relativeDelta(bankDeposit, payoutAmount);
     if (delta <= 0.05) {
-      score += 34;
+      score += 50;
       detailParts.push("Settlement-to-bank tie-out cleared within 5%.");
     } else if (delta <= 0.12) {
-      score += 17;
+      score += 25;
       detailParts.push("Settlement-to-bank tie-out remains outside final tolerance.");
     } else {
       detailParts.push("Settlement-to-bank tie-out failed.");
@@ -1016,14 +1055,21 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
 
 function scoreRuleIntegrity(context: RuleContext): Mq6Score {
   const hasContract = Boolean(context.contract && Object.keys(context.contract).length > 0);
-  const hasStatement = Boolean(context.statement?.uploaded);
-  const hasSchema = Boolean(context.statement?.schema || context.pos?.schema);
-  const score = hasContract && hasStatement && hasSchema ? 100 : hasStatement ? 50 : 0;
+  const hasGovernedStatement = Boolean(
+    context.statement?.uploaded &&
+      context.statement.schema &&
+      context.statement.fields,
+  );
+  const hasSchema = Boolean(
+    (context.statement?.schema && context.statement.fields) ||
+      (context.pos?.schema && context.pos.fields),
+  );
+  const score = hasContract && hasGovernedStatement && hasSchema ? 100 : 0;
   return scoreDetail(
     score,
     score === 100
       ? "Deterministic rule registry executed against governed inputs without integrity gaps."
-      : "Rule execution was materially limited by missing contract, statement, or schema inputs.",
+      : "Rule execution was blocked because governed contract, statement, or schema inputs were incomplete.",
   );
 }
 

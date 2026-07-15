@@ -7,6 +7,7 @@ import { checkRateLimit } from "@/lib/ops/rate-limit";
 import prisma from "@/lib/prisma";
 import { buildGeneratedUnitId } from "@/lib/restaurants/ids";
 import { resolveVendorKey } from "@/components/sentry/vendor-catalog";
+import { getScopedRestaurantWhere, getTeamAccountId } from "@/lib/auth/team-access";
 
 function isMissingSentryStateTable(error: unknown) {
   return (
@@ -58,15 +59,12 @@ function normalizeStringArray(value: unknown) {
 export async function GET() {
   try {
     const session = await requireManagerSession();
+    const scopedWhere = await getScopedRestaurantWhere(session);
 
     const restaurants = await prisma.restaurants.findMany({
       where: {
         active: true,
-        ...(session.role === "WGS Manager" || session.role === "SuperAdmin"
-          ? {}
-          : typeof session.managerId === "number"
-            ? { created_by: session.managerId }
-            : { id: -1 }),
+        ...scopedWhere,
       },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],
       select: {
@@ -215,10 +213,38 @@ export async function POST(request: Request) {
 
     const unitId = body.unitId?.trim() || null;
     const createdBy = typeof session.managerId === "number" ? session.managerId : null;
+    const teamAccountId =
+      session.role === "WGS Manager" ? null : await getTeamAccountId(session);
     const resolvedAccountId =
-      session.role === "WGS Manager" || session.role === "SuperAdmin"
+      session.role === "WGS Manager"
         ? body.accountId ?? null
-        : session.accountId ?? body.accountId ?? null;
+        : teamAccountId;
+
+    if (session.role !== "WGS Manager" && !resolvedAccountId) {
+      return withRequestHeaders(
+        NextResponse.json(
+          {
+            error:
+              "A real team account is required before creating a location. Open Team & Access and set the customer team account first.",
+          },
+          { status: 400 },
+        ),
+        requestContext,
+      );
+    }
+
+    if (session.role === "WGS Manager" && !resolvedAccountId) {
+      return withRequestHeaders(
+        NextResponse.json(
+          {
+            error:
+              "WGS location creation requires an explicit customer account target.",
+          },
+          { status: 400 },
+        ),
+        requestContext,
+      );
+    }
     const existingLocationCount = await prisma.restaurants.count({
       where: {
         active: true,

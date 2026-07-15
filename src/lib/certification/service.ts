@@ -15,6 +15,7 @@ import type {
 import prisma from "@/lib/prisma";
 import { persistGeneratedCaar } from "@/lib/caar/persistence";
 import { ensureLocationV2ForRestaurant } from "@/lib/production/legacy-sync";
+import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
 
 const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
 const DIMENSION_WEIGHT_BPS: Record<string, number> = {
@@ -88,14 +89,6 @@ function parseModulesJson(value: unknown) {
           "note" in item,
       )
     : [];
-}
-
-function getScopedRestaurantWhere(session: SessionState) {
-  return session.role === "WGS Manager" || session.role === "SuperAdmin"
-    ? {}
-    : typeof session.managerId === "number"
-      ? { created_by: session.managerId }
-      : { id: -1 };
 }
 
 function getArtifactStateKey(
@@ -254,10 +247,11 @@ async function getScopedRestaurant(
   session: SessionState,
   locationId: string,
 ) {
+  const scopedWhere = await getScopedRestaurantWhere(session);
   const restaurant = await prisma.restaurants.findFirst({
     where: {
       active: true,
-      ...getScopedRestaurantWhere(session),
+      ...scopedWhere,
       OR: [
         { unit_id: locationId },
         { store_id: locationId },

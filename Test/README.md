@@ -11,17 +11,29 @@ Recommended path:
    - `FohBoh_Test_M01_Heartland_POS_Export.csv`
    - `FohBoh_Test_M01_Merchant_Agreement.pdf`
    - `FohBoh_Test_M01_Bank_Statement.pdf`
-4. In `M02`, use the `DoorDash` card:
+4. Or in `M01`, use the `Toast` card:
+   - `FohBoh_Test_M01_Toast_Processor_Statement.csv`
+   - or `FohBoh_Test_M01_Toast_Processor_Statement.pdf`
+   - `FohBoh_Test_M01_Toast_POS_Export.csv`
+   - `FohBoh_Test_M01_Toast_Merchant_Agreement.pdf`
+   - `FohBoh_Test_M01_Toast_Bank_Statement.pdf`
+5. In `M02`, use the `DoorDash` card:
    - `FohBoh_Test_M02_DoorDash_Settlement.csv`
    - `FohBoh_Test_M02_DoorDash_POS_Summary.csv`
    - `FohBoh_Test_M02_DoorDash_Agreement.pdf`
    - `FohBoh_Test_M02_Bank_Statement.pdf`
+6. Or in `M02`, use the `Uber Eats` card:
+   - `FohBoh_Test_M02_UberEats_Settlement.csv`
+   - `FohBoh_Test_M02_UberEats_POS_Summary.csv`
+   - `FohBoh_Test_M02_UberEats_Agreement.pdf`
+   - `FohBoh_Test_M02_UberEats_Bank_Statement.pdf`
 
 Notes:
 
 - These files are prefilled and follow the current in-app schema matching logic.
 - Agreement and bank evidence test PDFs are included for both the M01 and M02 paths.
-- Upload all eight files to the same location so the evidence stays location-scoped.
+- Upload one full M01 vendor set plus one full M02 vendor set to the same location so the evidence stays location-scoped.
+- M02 can be tested with either `DoorDash` or `Uber Eats`.
 
 ## Extended QA Evidence Pack
 
@@ -59,12 +71,32 @@ Use these folders when you want predictable certification test scenarios by scor
 
 - [CAAR-92-Court-Admissible](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/CAAR-92-Court-Admissible)
   - full 8-document evidence pack
-  - intended for a passing, court-admissible CAAR flow
+  - validated to pass the monthly-final release gate and produce a court-admissible CAAR
 
 - [CAAR-74-Missing-Bank](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/CAAR-74-Missing-Bank)
   - same base evidence, but intentionally omits both bank statements
-  - intended to stay below the CAAR gate because reconciliation is incomplete
+  - validated to land in the blocked mid band because monthly-final bank reconciliation is incomplete
 
 - [CAAR-38-Schema-Mismatch](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/CAAR-38-Schema-Mismatch)
   - intentionally broken CSV headers plus complete agreement/bank evidence
-  - intended to trigger schema mismatch / review states and a low trust outcome
+  - validated to trigger schema mismatch / review states and a low-fail Trust Score outcome
+
+## Recovery-Oriented Packs
+
+Use these folders when you want predictable module-specific recoverable amounts:
+
+- [RECOVERY-M01-ONLY](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/RECOVERY-M01-ONLY)
+  - `M01` produces recoverable variance
+  - `M02` certifies cleanly with zero recovery
+
+- [RECOVERY-M02-ONLY](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/RECOVERY-M02-ONLY)
+  - `M02` produces recoverable variance
+  - `M01` certifies cleanly with zero recovery
+
+- [RECOVERY-BOTH](C:/Users/Kasutaja/Documents/arthur_dev/fohboh-sentry/Test/RECOVERY-BOTH)
+  - both `M01` and `M02` produce recoverable variance in the same run
+
+Verification:
+
+- Run `pnpm run verify:caar-scenarios` to replay all three score-oriented packs against the real certification engine.
+- Run `pnpm run verify:recovery-packs` to replay the module-specific recovery packs and confirm the recoverable amounts land in the intended module.

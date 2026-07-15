@@ -7,6 +7,7 @@ import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/requ
 import { checkRateLimit } from "@/lib/ops/rate-limit";
 import prisma from "@/lib/prisma";
 import { getArtifactPurpose, getExpectedKind } from "@/lib/uploads/definitions";
+import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
 import {
   type PersistedUploadValidation,
   validateUploadArtifact,
@@ -50,14 +51,11 @@ function toJsonValue(value: unknown) {
 }
 
 async function getScopedRestaurants(session: SessionState) {
+  const scopedWhere = await getScopedRestaurantWhere(session);
   const restaurants = await prisma.restaurants.findMany({
     where: {
       active: true,
-      ...(session.role === "WGS Manager" || session.role === "SuperAdmin"
-        ? {}
-        : typeof session.managerId === "number"
-          ? { created_by: session.managerId }
-          : { id: -1 }),
+      ...scopedWhere,
     },
     orderBy: [{ created_at: "desc" }, { id: "desc" }],
     select: {

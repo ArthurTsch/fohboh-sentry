@@ -32,7 +32,7 @@ export function DiyAccessView({
   const unlocked = role === "Admin" || role === "SuperAdmin" || role === "WGS Manager";
   const canSeal = role === "SuperAdmin" || role === "WGS Manager";
   const dbWorkspaces = useMemo(
-    () => workspaces.filter((workspace) => Boolean(workspace.locationId)),
+    () => dedupeWorkspaces(workspaces.filter((workspace) => Boolean(workspace.locationId))),
     [workspaces],
   );
 
@@ -431,6 +431,13 @@ function RegistryWorkspacePanel({
   const missingFields = workspace.fields.filter((field) => field.confidence === "Missing");
   const reviewFields = workspace.fields.filter((field) => field.confidence === "Needs Review");
   const commissionBase = requiredFields[0]?.source ?? workspace.fields[0]?.source ?? "source column";
+  const selectedLocation = locations.find((location) => location.id === selectedLocationId) ?? null;
+  const uniqueVendors = [...new Set(workspaces.map((item) => item.vendor))];
+  const vendorLabel = workspace.module === "M01" ? "Processor" : "DSP";
+  const sourceDocumentLabel =
+    workspace.module === "M01"
+      ? `${workspace.vendor} processor statement upload (CSV, or processor PDF where supported)`
+      : `${workspace.vendor} settlement upload (CSV)`;
 
   return (
     <SectionCard className="space-y-4">
@@ -448,39 +455,57 @@ function RegistryWorkspacePanel({
             {workspace.locationName ?? workspace.locationId ?? "Location workspace"}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap gap-2">
-            {locations.map((location) => (
-              <button
-                key={`${workspace.module}:location:${location.id}`}
-                type="button"
-                onClick={() => onChangeLocation(location.id)}
-                className={`rounded-full border px-3 py-1.5 text-[12px] transition ${
-                  location.id === selectedLocationId
-                    ? "border-[var(--accent)] bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"
-                    : "border-[var(--border)] bg-white text-[var(--muted)] hover:border-[var(--text)] hover:text-[var(--text)]"
-                }`}
+        <div className="flex flex-wrap items-end gap-3">
+          {locations.length > 1 ? (
+            <label className="min-w-[220px]">
+              <div className="mb-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                Location
+              </div>
+              <select
+                value={selectedLocationId}
+                onChange={(event) => onChangeLocation(event.target.value)}
+                className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-2.5 text-sm text-[var(--text)] outline-none transition focus:border-[var(--accent)]"
               >
-                {location.name}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {workspaces.map((item) => (
-              <button
-                key={`${item.module}:${item.locationId ?? "global"}:${item.vendor}`}
-                type="button"
-                onClick={() => onChangeVendor(item.vendor)}
-                className={`rounded-full border px-3 py-1.5 text-[12px] transition ${
-                  item.vendor === workspace.vendor
-                    ? "border-[var(--accent)] bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"
-                    : "border-[var(--border)] bg-white text-[var(--muted)] hover:border-[var(--text)] hover:text-[var(--text)]"
-                }`}
+                {locations.map((location) => (
+                  <option key={`${workspace.module}:location:${location.id}`} value={location.id}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {uniqueVendors.length > 1 ? (
+            <label className="min-w-[180px]">
+              <div className="mb-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                Vendor
+              </div>
+              <select
+                value={workspace.vendor}
+                onChange={(event) => onChangeVendor(event.target.value)}
+                className="w-full rounded-xl border border-[var(--border)] bg-white px-4 py-2.5 text-sm text-[var(--text)] outline-none transition focus:border-[var(--accent)]"
               >
-                {item.vendor}
-              </button>
-            ))}
-          </div>
+                {uniqueVendors.map((vendor) => (
+                  <option key={`${workspace.module}:${selectedLocationId}:${vendor}`} value={vendor}>
+                    {vendor}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {locations.length <= 1 && uniqueVendors.length <= 1 ? (
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
+              <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                Active Workspace
+              </div>
+              <div className="mt-1 text-sm text-[var(--text)]">
+                <span className="font-medium">{selectedLocation?.name ?? "Unknown location"}</span>
+                <span className="mx-2 text-[var(--border)]">•</span>
+                <span>
+                  {vendorLabel}: {workspace.vendor}
+                </span>
+              </div>
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={() => downloadWorkspaceTemplate(workspace)}
@@ -528,30 +553,42 @@ function RegistryWorkspacePanel({
             }`}
           >
             {panel === "mappings"
-              ? "Column Mappings"
+              ? "Source Column Mapping"
               : panel === "missing"
-                ? "Missing Fields"
+                ? "Unmapped / Missing Source Fields"
                 : panel === "contract"
-                  ? "Contract Config"
-                  : "Vault Record"}
+                  ? "Contract Terms Used by Engine"
+                  : "Sealed Vault Record"}
           </button>
         ))}
       </div>
 
       {activePanel === "mappings" ? (
         <div className="space-y-3">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-sm leading-7 text-[var(--muted)]">
+            This panel shows how columns from the{" "}
+            <span className="font-medium text-[var(--text)]">{sourceDocumentLabel}</span> are mapped into FohBoh&apos;s
+            canonical recovery fields for <span className="font-medium text-[var(--text)]">{workspace.module}</span>.
+            The left side is the field the engine needs. The middle value is the exact native column header currently
+            bound to it.
+          </div>
           {workspace.fields.map((field) => (
             <div
               key={field.canonical}
               className="grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 md:grid-cols-[1fr_1fr_140px]"
             >
               <div>
-                <div className="font-medium text-[var(--text)]">{field.canonical}</div>
+                <div className="font-medium text-[var(--text)]">Engine field: {field.canonical}</div>
                 <div className="mt-1 text-xs text-[var(--muted)]">
                   {field.required ? "Required canonical field" : "Optional canonical field"}
                 </div>
               </div>
-              <div className="font-[family-name:var(--font-mono)] text-sm text-[var(--info)]">{field.source}</div>
+              <div>
+                <div className="font-[family-name:var(--font-mono)] text-sm text-[var(--info)]">{field.source}</div>
+                <div className="mt-1 text-xs text-[var(--muted)]">
+                  Mapped native column header from the {sourceDocumentLabel}
+                </div>
+              </div>
               <div className="md:text-right">
                 <Badge
                   tone={
@@ -572,6 +609,12 @@ function RegistryWorkspacePanel({
 
       {activePanel === "missing" ? (
         <div className="space-y-4">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-sm leading-7 text-[var(--muted)]">
+            This panel shows which fields from the{" "}
+            <span className="font-medium text-[var(--text)]">{sourceDocumentLabel}</span> are still unresolved for this
+            workspace. If a required engine field has no trustworthy source column from that document, certification
+            should stay blocked.
+          </div>
           <div className="grid gap-3 md:grid-cols-3">
             <MetricCard label="Missing Fields" value={String(missingFields.length)} tone="danger" />
             <MetricCard label="Needs Review" value={String(reviewFields.length)} tone="warning" />
@@ -588,11 +631,11 @@ function RegistryWorkspacePanel({
               .map((field) => (
                 <div key={field.canonical} className="rounded-xl border border-[var(--border)] bg-white p-4">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="font-medium text-[var(--text)]">{field.canonical}</div>
+                    <div className="font-medium text-[var(--text)]">Engine field: {field.canonical}</div>
                     <Badge tone={field.confidence === "Missing" ? "danger" : "warning"}>{field.confidence}</Badge>
                   </div>
                   <div className="mt-2 font-[family-name:var(--font-mono)] text-xs text-[var(--muted)]">
-                    Source column: {field.source}
+                    Current source column: {field.source}
                   </div>
                 </div>
               ))}
@@ -602,6 +645,10 @@ function RegistryWorkspacePanel({
 
       {activePanel === "contract" ? (
         <div className="space-y-4">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-sm leading-7 text-[var(--muted)]">
+            These are the contract terms currently used by the engine when reconstructing expected fees and calculating
+            recoverable variance for <span className="font-medium text-[var(--text)]">{workspace.vendor}</span>.
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             {workspace.contract.map((field) => (
               <div key={field.label} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
@@ -636,6 +683,10 @@ function RegistryWorkspacePanel({
 
       {activePanel === "vault" ? (
         <div className="space-y-4">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4 text-sm leading-7 text-[var(--muted)]">
+            This is the sealed governance record for this workspace. It is the immutable version of the mapping and
+            contract state used as evidentiary truth during certification.
+          </div>
           <div className="grid gap-4 md:grid-cols-2">
             <MetaBlock label="Version" value={workspace.vault.version} />
             <MetaBlock label="Hash" value={workspace.vault.hash} />
@@ -715,6 +766,25 @@ function downloadWorkspaceTemplate(workspace: SchemaWorkspace) {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+function buildWorkspaceIdentity(workspace: SchemaWorkspace) {
+  return [
+    workspace.accountId,
+    workspace.locationId ?? "global",
+    workspace.vendor,
+    workspace.module,
+  ].join(":");
+}
+
+function dedupeWorkspaces(workspaces: SchemaWorkspace[]) {
+  const unique = new Map<string, SchemaWorkspace>();
+
+  for (const workspace of workspaces) {
+    unique.set(buildWorkspaceIdentity(workspace), workspace);
+  }
+
+  return [...unique.values()];
 }
 
 function getWorkspaceStatus(workspace: SchemaWorkspace): "draft" | "sealed" {

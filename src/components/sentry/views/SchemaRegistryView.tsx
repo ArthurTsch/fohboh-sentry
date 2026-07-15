@@ -351,6 +351,26 @@ function ProofZoneCard({ workspace }: { workspace: SchemaWorkspace }) {
   }
 
   const success = upload ? upload.matchPct >= 60 : false;
+  const proofDocumentLabel =
+    workspace.module === "M01"
+      ? `${workspace.vendor} processor statement CSV sample`
+      : `${workspace.vendor} settlement CSV sample`;
+  const proofPortalLabel =
+    workspace.module === "M01"
+      ? `${workspace.vendor} card-processor portal`
+      : `${workspace.vendor} DSP merchant portal`;
+  const notThisLabel =
+    workspace.module === "M01"
+      ? "This is not the POS export, not the signed agreement PDF, and not the bank statement."
+      : "This is not the POS export, not the DSP agreement PDF, and not the bank statement.";
+  const proofPurposeLabel =
+    workspace.module === "M01"
+      ? "Use the processor statement CSV sample only to verify that the sealed source column mappings still match the live processor export."
+      : "Use the settlement CSV sample only to verify that the sealed source column mappings still match the live DSP settlement export.";
+  const dropTitle =
+    workspace.module === "M01"
+      ? `Drop ${workspace.vendor} processor statement sample CSV here or `
+      : `Drop ${workspace.vendor} settlement sample CSV here or `;
 
   return (
     <SectionCard className="bg-[var(--surface)]">
@@ -361,8 +381,14 @@ function ProofZoneCard({ workspace }: { workspace: SchemaWorkspace }) {
         <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
           Human Verification Required | Monthly Proof Cycle
         </div>
-        <div className="mt-2">
-          On the 1st of every month: download a 10-row sample from the {workspace.vendor} portal, upload it here, and verify all column names still match the sealed schema.
+        <div className="mt-2 space-y-2">
+          <div>
+            On the 1st of every month, download a 10-row sample of the{" "}
+            <span className="font-medium text-[var(--text)]">{proofDocumentLabel}</span> from the{" "}
+            <span className="font-medium text-[var(--text)]">{proofPortalLabel}</span>, then upload it here.
+          </div>
+          <div>{proofPurposeLabel}</div>
+          <div className="font-medium text-[var(--accent)]">{notThisLabel}</div>
         </div>
       </div>
 
@@ -399,14 +425,18 @@ function ProofZoneCard({ workspace }: { workspace: SchemaWorkspace }) {
           }`}
         >
           <div className="text-[16px] font-semibold text-[var(--text)]">
-            Drop {workspace.vendor} CSV here or <span className="text-[var(--accent)]">browse</span>
+            {dropTitle}<span className="text-[var(--accent)]">browse</span>
           </div>
           <div className="mt-2 font-[family-name:var(--font-mono)] text-[10px] text-[var(--muted)]">
-            Upload exactly as downloaded from the vendor portal | no reformatting
+            {workspace.module === "M01"
+              ? "Exact processor statement CSV sample from the processor portal | no reformatting"
+              : "Exact settlement CSV sample from the DSP portal | no reformatting"}
           </div>
         </button>
         <div className="mt-3 rounded-lg border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.05)] px-3 py-2 text-[12px] text-[var(--accent)]">
-          Adjustments file: refunds, disputes, and promotional credits require a separate upload after the main statement.
+          {workspace.module === "M01"
+            ? "If the processor now exports separate adjustment files for refunds, disputes, or promotional credits, those changes must also be reflected in the governed schema before resealing."
+            : "If the DSP now exports separate adjustment files for refunds, disputes, promo credits, or tax remittance, those changes must also be reflected in the governed schema before resealing."}
         </div>
       </div>
 

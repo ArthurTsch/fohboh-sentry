@@ -812,7 +812,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   function getScopedAccountId() {
     if (supportMode.active && supportMode.accountId) return supportMode.accountId;
     if (effectiveSession?.accountId) return effectiveSession.accountId;
-    return "C001";
+    return null;
   }
 
   function getScopedAccountName() {
@@ -913,8 +913,9 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     locationName?: string;
     summary: string;
   }) {
+    const accountId = args.accountId ?? getScopedAccountId() ?? "unscoped";
     appendLog({
-      accountId: args.accountId ?? getScopedAccountId(),
+      accountId,
       action: args.summary,
       immutable: Boolean(args.immutable),
       location: args.locationName ?? "Portfolio",
@@ -927,7 +928,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        accountId: args.accountId ?? getScopedAccountId(),
+        accountId,
         action: args.action,
         entityId: args.entityId,
         entityType: args.entityType ?? "ui_event",
@@ -984,6 +985,12 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   }
 
   async function handleOpenAddLocation() {
+    if (!effectiveSession?.accountId && effectiveSession?.role !== "WGS Manager") {
+      showToast("Set a real team account in Team & Access before creating a location.");
+      startTransition(() => setActiveViewOverride("permissions"));
+      return;
+    }
+
     let nextDraft = emptyAddLocationDraft;
 
     try {
@@ -1088,13 +1095,20 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   }
 
   async function handleAddLocation(draft: AddLocationDraft) {
+    const scopedAccountId = getScopedAccountId();
+    if (!scopedAccountId && effectiveSession?.role !== "WGS Manager") {
+      showToast("A real team account is required before creating a location.");
+      startTransition(() => setActiveViewOverride("permissions"));
+      return;
+    }
+
     const createResponse = await fetch("/api/restaurants", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        accountId: getScopedAccountId(),
+        accountId: scopedAccountId,
         address: draft.address,
         creatorEmail: effectiveSession?.email ?? null,
         locationName: draft.name,
@@ -1157,7 +1171,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       draft.locId.trim() ||
       `LOC-DB-${createdRestaurant?.id ?? Date.now()}`;
     const location = {
-      accountId: getScopedAccountId(),
+      accountId: scopedAccountId ?? "",
       id: locationId,
       name: createdRestaurant?.name?.trim() || draft.name,
       market: createdRestaurant?.address?.trim() || draft.address || "New market",
@@ -1985,7 +1999,6 @@ function handleCompleteOnboarding(locationId: string) {
     const progress = wgsOnboardingState[locationId];
     if (!location || !progress) return;
 
-    const uploadCount = Object.keys(progress.uploads).length;
     updateRuntimeLocation(locationId, (item) => ({
       ...item,
       status: Math.round((item.m01 + item.m02) / 2) >= 85 ? "Certified" : "At Risk",
@@ -1994,8 +2007,8 @@ function handleCompleteOnboarding(locationId: string) {
         module.label === "Evidence"
           ? {
               ...module,
-              score: Math.min(92, 60 + uploadCount * 6),
-              note: `${uploadCount} onboarding uploads captured. WGS activation workflow completed and ready for ongoing certification.`,
+              score: Math.max(module.score, 55),
+              note: "WGS activation workflow completed. Upload the real certification evidence in Upload Data before running certification.",
             }
           : module,
       ),
@@ -2021,8 +2034,8 @@ function handleCompleteOnboarding(locationId: string) {
         module.label === "Evidence"
           ? {
               ...module,
-              score: Math.min(92, 60 + uploadCount * 6),
-              note: `${uploadCount} onboarding uploads captured. WGS activation workflow completed and ready for ongoing certification.`,
+              score: Math.max(module.score, 55),
+              note: "WGS activation workflow completed. Upload the real certification evidence in Upload Data before running certification.",
             }
           : module,
       ),
@@ -2399,16 +2412,17 @@ function handleCompleteOnboarding(locationId: string) {
           diyLocationSourceConfigs={diyLocationSourceConfigs}
           approvals={wgsApprovalState}
           averageTrust={averageTrust}
-          artifactContractState={artifactContractState}
-          artifactIntakeState={artifactIntakeState}
-          caars={visibleCaars}
-          completed={onboardingState}
-          expandedLocations={expandedLocations}
-          faqOpen={faqOpen}
-          faqQuery={faqQuery}
-          filteredFaq={filteredFaq}
-          filteredLogs={filteredLogs}
-          locations={visibleLocations}
+        artifactContractState={artifactContractState}
+        artifactIntakeState={artifactIntakeState}
+        caars={visibleCaars}
+        completed={onboardingState}
+        expandedLocations={expandedLocations}
+        faqOpen={faqOpen}
+        faqQuery={faqQuery}
+        filteredFaq={filteredFaq}
+        filteredLogs={filteredLogs}
+        hasTeamAccount={Boolean(effectiveSession?.accountId)}
+        locations={visibleLocations}
           logFilter={logFilter}
           onAddLocation={handleOpenAddLocation}
           onAddUser={() => {
@@ -2419,6 +2433,7 @@ function handleCompleteOnboarding(locationId: string) {
           onCompleteUploadSet={handleCompleteUploadSet}
           onManageUploadSources={handleManageUploadSources}
           onDirectUpload={handleDirectArtifactUpload}
+          onGoToTeamAccess={() => startTransition(() => setActiveViewOverride("permissions"))}
           onRemoveUpload={handleRemoveSavedUpload}
           onResetLocationUploads={handleResetLocationUploads}
           onEnterSupportMode={handleEnterSupportMode}

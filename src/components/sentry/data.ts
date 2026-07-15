@@ -830,7 +830,7 @@ export const wgsOnboardingSteps: WgsOnboardingStep[] = [
     label: "Data Package",
     eyebrow: "Step 1 of 6 · WGS Action",
     title: "Send Data Collection Package",
-    desc: "Before any data can be uploaded, the operator must receive and return a complete source package. Confirm each item below as received.",
+    desc: "Before real certification evidence is uploaded in Upload Data, the operator must receive and return a complete source package. Confirm each item below as received.",
     type: "checklist",
     items: [
       {

@@ -12,6 +12,7 @@ import { writeAuditLog, logServerError } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
 import prisma from "@/lib/prisma";
 import { ensureLocationV2ForRestaurant } from "@/lib/production/legacy-sync";
+import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
 
 type ScopedRestaurant = {
   accountId: string | null;
@@ -170,14 +171,11 @@ function deriveGovernanceLifecycleStatus({
 }
 
 async function getScopedRestaurants(session: SessionState) {
+  const scopedWhere = await getScopedRestaurantWhere(session);
   const restaurants = await prisma.restaurants.findMany({
     where: {
       active: true,
-      ...(session.role === "WGS Manager" || session.role === "SuperAdmin"
-        ? {}
-        : typeof session.managerId === "number"
-          ? { created_by: session.managerId }
-          : { id: -1 }),
+      ...scopedWhere,
     },
     orderBy: [{ created_at: "desc" }, { id: "desc" }],
     select: {

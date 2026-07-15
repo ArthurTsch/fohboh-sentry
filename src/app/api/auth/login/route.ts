@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateManager } from "@/lib/auth/manager-auth";
+import prisma from "@/lib/prisma";
+import { Prisma } from "@/app/generated/prisma/client";
 import {
   createSessionCookieValue,
   getSessionCookieOptions,
@@ -49,6 +51,17 @@ export async function POST(request: Request) {
       });
       const response = NextResponse.json({ error: result.error }, { status: result.status });
       return withRequestHeaders(response, requestContext);
+    }
+
+    if (typeof result.session.managerId === "number") {
+      await prisma.$executeRaw(Prisma.sql`
+        UPDATE public.account_memberships_v2
+        SET
+          last_active_at = now(),
+          updated_at = now()
+        WHERE manager_id = ${result.session.managerId}
+          AND status = 'active'
+      `).catch(() => 0);
     }
 
     await writeAuditLog({

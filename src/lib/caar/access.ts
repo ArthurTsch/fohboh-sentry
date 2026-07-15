@@ -1,22 +1,18 @@
 import type { SessionState } from "@/components/sentry/types";
 import prisma from "@/lib/prisma";
-
-function getScopedRestaurantWhere(session: SessionState) {
-  return session.role === "WGS Manager" || session.role === "SuperAdmin"
-    ? {}
-    : typeof session.managerId === "number"
-      ? { created_by: session.managerId }
-      : { id: -1 };
-}
+import { getScopedRestaurantIds, getScopedRestaurantWhere } from "@/lib/auth/team-access";
 
 export async function getScopedPersistedCaar(session: SessionState, caarExternalId: string) {
+  const scopedRestaurantIds = await getScopedRestaurantIds(session);
   const report = await prisma.caar_reports.findFirst({
     where: {
       caar_id: caarExternalId,
       ...(session.role === "WGS Manager" || session.role === "SuperAdmin"
         ? {}
-        : typeof session.managerId === "number"
-          ? { created_by: session.managerId }
+        : Array.isArray(scopedRestaurantIds)
+          ? scopedRestaurantIds.length > 0
+            ? { restaurant_id: { in: scopedRestaurantIds } }
+            : { id: -1 }
           : { id: -1 }),
     },
     select: {
@@ -34,7 +30,7 @@ export async function getScopedPersistedCaar(session: SessionState, caarExternal
       ? await prisma.restaurants.findFirst({
           where: {
             id: report.restaurant_id,
-            ...getScopedRestaurantWhere(session),
+            ...(await getScopedRestaurantWhere(session)),
           },
           select: {
             id: true,

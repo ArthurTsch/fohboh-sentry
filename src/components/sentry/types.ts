@@ -1,9 +1,12 @@
 export type Role = "Admin" | "SuperAdmin" | "Manager" | "Viewer" | "WGS Manager";
+export type TeamRole = "Owner" | "Finance" | "Location Manager" | "Read-only";
+export type TeamAccessScope = "all_locations" | "selected_locations";
 
 export type ViewId =
   | "dashboard"
   | "waterfall"
   | "caars"
+  | "billing"
   | "log"
   | "profile"
   | "permissions"
@@ -93,6 +96,47 @@ export type PermissionRecord = {
   role: Role;
   scope: string;
   lastSeen: string;
+};
+
+export type TeamLocationOption = {
+  id: number;
+  label: string;
+  locationId: string;
+  name: string;
+};
+
+export type TeamMemberRecord = {
+  accountHolder: boolean;
+  accessScope: TeamAccessScope;
+  email: string;
+  id: number;
+  invitedAt: string | null;
+  lastActive: string | null;
+  locationAccess: TeamLocationOption[];
+  name: string;
+  status: "active" | "revoked";
+  teamRole: TeamRole;
+};
+
+export type TeamInviteRecord = {
+  accessScope: TeamAccessScope;
+  createdAt: string;
+  email: string;
+  id: number;
+  locationAccess: TeamLocationOption[];
+  role: TeamRole;
+  status: "pending" | "cancelled" | "accepted" | "revoked";
+};
+
+export type TeamAccessPayload = {
+  canBootstrapOwnerAccount: boolean;
+  canManageTeam: boolean;
+  currentAccountId: string | null;
+  currentMemberId: number | null;
+  invites: TeamInviteRecord[];
+  locations: TeamLocationOption[];
+  members: TeamMemberRecord[];
+  usesLegacyAccountModel: boolean;
 };
 
 export type GuideStep = {
@@ -374,6 +418,7 @@ export type SessionState = {
   managerId?: number | null;
   name?: string;
   role: Role;
+  teamRole?: TeamRole | null;
 };
 
 export type LocationWorkflowAction = "onboarding" | "uploads" | "diy" | "certification";

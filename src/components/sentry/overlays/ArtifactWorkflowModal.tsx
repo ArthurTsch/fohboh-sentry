@@ -61,6 +61,7 @@ export function ArtifactWorkflowModal({
   const requiredFieldIds = getRequiredFieldIds(moduleId, artifact, fieldDefs);
   const completedRequired = requiredFieldIds.filter((fieldId) => getFieldValue(contractValues, fieldId).trim()).length;
   const manualActionLabel = getManualActionLabel(artifact);
+  const progressActionLabel = getProgressActionLabel(artifact);
   const manualSaveReady = requiredFieldIds.length > 0 && completedRequired === requiredFieldIds.length;
   const ready = intake.uploaded && intake.hash && intake.schema && intake.fields;
   const workflowSteps = [
@@ -187,7 +188,7 @@ export function ArtifactWorkflowModal({
                   onClick={onProgressIntake}
                   className="mt-3 w-full rounded-lg border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
                 >
-                  Advance Intake Checks
+                  {progressActionLabel}
                 </button>
               </>
             ) : null}
@@ -276,7 +277,7 @@ export function ArtifactWorkflowModal({
                 onClick={onProgressIntake}
                 className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
               >
-                Advance Intake Workflow
+                {progressActionLabel}
               </button>
             ) : null}
             <button
@@ -961,6 +962,30 @@ function getManualActionLabel(artifact: UploadArtifact) {
   }
 
   return "Save Manual Record";
+}
+
+function getProgressActionLabel(artifact: UploadArtifact) {
+  if (artifact.key.includes("processor")) {
+    return "Continue Processor Review";
+  }
+
+  if (artifact.key.includes("settlement")) {
+    return "Continue Settlement Review";
+  }
+
+  if (artifact.key.includes("pos")) {
+    return "Continue POS Review";
+  }
+
+  if (artifact.key.includes("agreement") || artifact.key.includes("agr")) {
+    return "Continue Agreement Review";
+  }
+
+  if (artifact.key.includes("bank")) {
+    return "Continue Bank Review";
+  }
+
+  return "Continue";
 }
 
 function getManualFieldDefs(moduleId: "M01" | "M02", artifact: UploadArtifact) {

@@ -1,0 +1,5 @@
+statement_date,settlement_date,gross_card_sales,net_sales,tx_fees,proc_fee,misc_fee,recovery_delta,deposit_total,brand,entry,applied_rate,txn_cnt,commentary
+2026-06-01,2026-06-01,1842.65,1798.11,18.43,22.02,4.09,6.72,1798.11,VISA,SWIPE,0.0182,42,broken header set
+2026-06-02,2026-06-02,1675.10,1634.60,16.75,20.21,4.29,6.10,1634.60,MC,SWIPE,0.0179,38,broken header set
+2026-06-03,2026-06-03,1932.44,1886.05,19.32,23.20,4.51,6.73,1886.05,AMEX,TAP,0.0221,45,broken header set
+2026-06-04,2026-06-04,1754.33,1712.09,17.54,21.12,4.12,6.24,1712.09,VISA,SWIPE,0.0184,40,broken header set

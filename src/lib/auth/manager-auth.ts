@@ -1,6 +1,8 @@
 import { compare } from "bcryptjs";
+import { Prisma } from "@/app/generated/prisma/client";
 import prisma from "@/lib/prisma";
 import type { Role, SessionState } from "@/components/sentry/types";
+import { normalizeTeamRole } from "@/lib/auth/team-access";
 
 type ManagerRecord = {
   active: boolean | null;
@@ -12,8 +14,9 @@ type ManagerRecord = {
   role: string;
 };
 
-const SEEDED_ACCOUNT_BY_EMAIL: Record<string, string> = {
-  "romeo-adorapos@fohboh.ai": "C001",
+type MembershipRecord = {
+  account_id: string;
+  team_role: string;
 };
 
 function mapManagerRole(role: string): Role | null {
@@ -34,12 +37,10 @@ function mapManagerRole(role: string): Role | null {
   return null;
 }
 
-function resolveManagerAccountId(email: string, role: Role): string | null {
-  if (role === "WGS Manager" || role === "SuperAdmin") {
-    return null;
-  }
-
-  return SEEDED_ACCOUNT_BY_EMAIL[email.trim().toLowerCase()] ?? `mgr:${email.trim().toLowerCase()}`;
+export function resolveManagerAccountId(email: string, role: Role): string | null {
+  void email;
+  void role;
+  return null;
 }
 
 export async function authenticateManager(
@@ -98,14 +99,26 @@ export async function authenticateManager(
     return { ok: false, error: "Invalid email or password.", status: 401 };
   }
 
+  const membershipRows = await prisma.$queryRaw<MembershipRecord[]>(Prisma.sql`
+    SELECT account_id, team_role
+    FROM public.account_memberships_v2
+    WHERE manager_id = ${manager.id}
+      AND status = 'active'
+    LIMIT 1
+  `).catch(() => []);
+
+  const membership = membershipRows[0] ?? null;
+  const normalizedTeamRole = normalizeTeamRole(membership?.team_role);
+
   return {
     ok: true,
     session: {
-      accountId: resolveManagerAccountId(manager.email, appRole),
+      accountId: membership?.account_id ?? null,
       email: manager.email,
       managerId: manager.id,
       name: manager.full_name?.trim() || undefined,
       role: appRole,
+      teamRole: normalizedTeamRole,
     },
   };
 }

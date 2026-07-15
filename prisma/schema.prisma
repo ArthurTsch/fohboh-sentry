@@ -16,11 +16,22 @@ model managers {
   email_verified      Boolean?  @default(false)
   full_name           String?   @db.VarChar(100)
   phone_number        String?   @db.VarChar(20)
+  title               String?   @db.VarChar(100)
   address             String?
   profile_image       String?   @db.VarChar(255)
+  two_factor_enabled  Boolean   @default(false)
+  two_factor_method   String    @default("none") @db.VarChar(30)
+  notify_caar_certified Boolean @default(true)
+  notify_trust_score_blocked Boolean @default(true)
+  notify_statement_due Boolean @default(true)
+  notify_weekly_digest Boolean @default(false)
+  notify_access_changes Boolean @default(true)
   created_at          DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime? @default(now()) @db.Timestamptz(6)
   created_by          Int?
   regional_manager_id Int?
+
+  @@index([email], map: "idx_managers_email")
 }
 
 model restaurants {
@@ -349,4 +360,124 @@ model access_requests_v2 {
   @@index([status, created_at], map: "idx_access_requests_v2_status_created")
   @@index([requester_email], map: "idx_access_requests_v2_email")
   @@map("access_requests_v2")
+}
+
+model billing_accounts_v2 {
+  id                 Int       @id @default(autoincrement())
+  account_id         String    @unique @db.VarChar(255)
+  plan_code          String    @default("m01_m02_bundle") @db.VarChar(50)
+  subscription_cents Int       @default(29900)
+  fee_rate_bps       Int       @default(1250)
+  autopay_enabled    Boolean   @default(false)
+  cycle_day          Int       @default(25)
+  created_at         DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([account_id], map: "idx_billing_accounts_v2_account_id")
+  @@map("billing_accounts_v2")
+}
+
+model payment_methods_v2 {
+  id               Int       @id @default(autoincrement())
+  account_id       String    @db.VarChar(255)
+  method_type      String    @db.VarChar(30)
+  provider         String?   @db.VarChar(50)
+  brand            String?   @db.VarChar(50)
+  masked_label     String    @db.VarChar(100)
+  billing_name     String?   @db.VarChar(255)
+  expires_month    Int?
+  expires_year     Int?
+  status           String    @default("pending") @db.VarChar(30)
+  is_primary       Boolean   @default(false)
+  token_reference  String?   @db.VarChar(255)
+  created_at       DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([account_id, status], map: "idx_payment_methods_v2_account_status")
+  @@map("payment_methods_v2")
+}
+
+model billing_statements_v2 {
+  id                 Int       @id @default(autoincrement())
+  statement_id       String    @unique @db.VarChar(100)
+  account_id         String    @db.VarChar(255)
+  period_label       String    @db.VarChar(50)
+  subscription_cents Int       @default(0)
+  caar_fee_cents     Int       @default(0)
+  total_cents        Int       @default(0)
+  status             String    @default("draft") @db.VarChar(30)
+  due_on             DateTime? @db.Timestamptz(6)
+  paid_on            DateTime? @db.Timestamptz(6)
+  source             String    @default("derived") @db.VarChar(30)
+  created_at         DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([account_id, period_label], map: "idx_billing_statements_v2_account_period")
+  @@index([account_id, status], map: "idx_billing_statements_v2_account_status")
+  @@map("billing_statements_v2")
+}
+
+model account_memberships_v2 {
+  id                Int       @id @default(autoincrement())
+  manager_id        Int       @unique
+  account_id        String    @db.VarChar(255)
+  team_role         String    @db.VarChar(50)
+  access_scope      String    @default("all_locations") @db.VarChar(30)
+  status            String    @default("active") @db.VarChar(20)
+  account_holder    Boolean   @default(false)
+  invited_by        Int?
+  invited_at        DateTime? @db.Timestamptz(6)
+  accepted_at       DateTime? @db.Timestamptz(6)
+  revoked_at        DateTime? @db.Timestamptz(6)
+  last_active_at    DateTime? @db.Timestamptz(6)
+  created_at        DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([account_id, status], map: "idx_account_memberships_v2_account_status")
+  @@index([manager_id, status], map: "idx_account_memberships_v2_manager_status")
+  @@map("account_memberships_v2")
+}
+
+model account_member_locations_v2 {
+  id            Int       @id @default(autoincrement())
+  membership_id Int
+  restaurant_id Int
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([membership_id, restaurant_id], map: "uq_account_member_locations_v2_membership_restaurant")
+  @@index([membership_id], map: "idx_account_member_locations_v2_membership_id")
+  @@index([restaurant_id], map: "idx_account_member_locations_v2_restaurant_id")
+  @@map("account_member_locations_v2")
+}
+
+model team_invitations_v2 {
+  id            Int       @id @default(autoincrement())
+  account_id    String    @db.VarChar(255)
+  email         String    @db.VarChar(255)
+  team_role     String    @db.VarChar(50)
+  access_scope  String    @default("all_locations") @db.VarChar(30)
+  status        String    @default("pending") @db.VarChar(20)
+  invite_token  String    @unique @db.VarChar(120)
+  invited_by    Int?
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime? @default(now()) @db.Timestamptz(6)
+  cancelled_at  DateTime? @db.Timestamptz(6)
+  accepted_at   DateTime? @db.Timestamptz(6)
+  expires_at    DateTime? @db.Timestamptz(6)
+
+  @@index([account_id, status], map: "idx_team_invitations_v2_account_status")
+  @@index([email, status], map: "idx_team_invitations_v2_email_status")
+  @@map("team_invitations_v2")
+}
+
+model team_invitation_locations_v2 {
+  id            Int       @id @default(autoincrement())
+  invitation_id Int
+  restaurant_id Int
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([invitation_id, restaurant_id], map: "uq_team_invitation_locations_v2_invitation_restaurant")
+  @@index([invitation_id], map: "idx_team_invitation_locations_v2_invitation_id")
+  @@index([restaurant_id], map: "idx_team_invitation_locations_v2_restaurant_id")
+  @@map("team_invitation_locations_v2")
 }

@@ -16,20 +16,25 @@ export const viewMeta: Record<ViewId, { eyebrow: string; title: string; sub: str
     title: "CAARs",
     sub: "Court-admissible reports and remediation candidates generated from sealed evidence packages.",
   },
+  billing: {
+    eyebrow: "Account",
+    title: "Billing",
+    sub: "Plan, payment methods, monthly statements, and certified CAAR transaction fees for this account.",
+  },
   log: {
-    eyebrow: "Recovery",
+    eyebrow: "Account",
     title: "Activity Log",
     sub: "Timestamped operational events with immutable and draft-state separation.",
   },
   profile: {
     eyebrow: "Account",
-    title: "Profile",
-    sub: "Current session identity, role scope, and visible account footprint.",
+    title: "Account Settings",
+    sub: "Current session identity, profile preferences, password, and visible account footprint.",
   },
   permissions: {
-    eyebrow: "Settings",
-    title: "Permissions",
-    sub: "Role-based access control for operators, support staff, and WGS governance users.",
+    eyebrow: "Account",
+    title: "Team & Access",
+    sub: "Account access, role scope, and who can operate locations, governance, and certification workflows.",
   },
   diy: {
     eyebrow: "Advanced",
@@ -78,14 +83,21 @@ export const navigation = [
     items: [
       { id: "waterfall" as ViewId, label: "Location Waterfall", icon: "waterfall" },
       { id: "caars" as ViewId, label: "CAARs", icon: "caars" },
-      { id: "log" as ViewId, label: "Activity Log", icon: "log" },
     ],
   },
   {
-    section: "Settings & Help",
+    section: "Account",
     items: [
-      { id: "permissions" as ViewId, label: "Permissions", icon: "permissions" },
+      { id: "billing" as ViewId, label: "Billing", icon: "billing" },
+      { id: "permissions" as ViewId, label: "Team & Access", icon: "permissions" },
+      { id: "log" as ViewId, label: "Activity Log", icon: "log" },
+      { id: "profile" as ViewId, label: "Account Settings", icon: "profile" },
       { id: "userguide" as ViewId, label: "User Guide", icon: "userguide" },
+    ],
+  },
+  {
+    section: "Help",
+    items: [
       { id: "faq" as ViewId, label: "FAQ", icon: "faq" },
     ],
   },

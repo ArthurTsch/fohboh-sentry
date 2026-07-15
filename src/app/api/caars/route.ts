@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireManagerSession } from "@/lib/auth/session";
 import prisma from "@/lib/prisma";
 import type { CaarRecord } from "@/components/sentry/types";
+import { getScopedRestaurantIds } from "@/lib/auth/team-access";
 
 function parseCurrencyToCents(value: string) {
   const numeric = Number(value.replace(/[^0-9.-]/g, "")) || 0;
@@ -39,13 +40,16 @@ export async function GET(request: Request) {
   try {
     await request;
     const session = await requireManagerSession();
+    const scopedRestaurantIds = await getScopedRestaurantIds(session);
 
     const reports = await prisma.caar_reports.findMany({
       where: {
-        ...(session.role === "WGS Manager"
+        ...(session.role === "WGS Manager" || session.role === "SuperAdmin"
           ? {}
-          : typeof session.managerId === "number"
-            ? { created_by: session.managerId }
+          : Array.isArray(scopedRestaurantIds)
+            ? scopedRestaurantIds.length > 0
+              ? { restaurant_id: { in: scopedRestaurantIds } }
+              : { id: -1 }
             : { id: -1 }),
       },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],

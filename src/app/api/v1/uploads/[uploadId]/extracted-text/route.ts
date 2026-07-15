@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { SessionState } from "@/components/sentry/types";
 import { requireManagerSession } from "@/lib/auth/session";
+import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
 import prisma from "@/lib/prisma";
 import { extractPdfText } from "@/lib/uploads/pdf";
 import { readUploadBlob } from "@/lib/uploads/storage";
@@ -32,14 +33,11 @@ function isMissingUploadSchema(error: unknown) {
 }
 
 async function getScopedRestaurants(session: SessionState) {
+  const scopedWhere = await getScopedRestaurantWhere(session);
   const restaurants = await prisma.restaurants.findMany({
     where: {
       active: true,
-      ...(session.role === "WGS Manager" || session.role === "SuperAdmin"
-        ? {}
-        : typeof session.managerId === "number"
-          ? { created_by: session.managerId }
-          : { id: -1 }),
+      ...scopedWhere,
     },
     orderBy: [{ created_at: "desc" }, { id: "desc" }],
     select: {

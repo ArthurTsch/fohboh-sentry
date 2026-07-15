@@ -19,6 +19,7 @@ import type {
   WgsUser,
 } from "./types";
 import { CaarListView } from "./views/CaarListView";
+import { BillingView } from "./views/BillingView";
 import { DashboardView } from "./views/DashboardView";
 import { DiyAccessView } from "./views/DiyAccessView";
 import { FaqView } from "./views/FaqView";
@@ -51,6 +52,7 @@ export function SentryViewRouter({
   faqQuery,
   filteredFaq,
   filteredLogs,
+  hasTeamAccount,
   locations,
   logFilter,
   onAddLocation,
@@ -59,6 +61,7 @@ export function SentryViewRouter({
   onCompleteUploadSet,
   onManageUploadSources,
   onDirectUpload,
+  onGoToTeamAccess,
   onRemoveUpload,
   onResetLocationUploads,
   onEnterSupportMode,
@@ -110,6 +113,7 @@ export function SentryViewRouter({
   faqQuery: string;
   filteredFaq: { answer: string; question: string; topic: string }[];
   filteredLogs: LogRecord[];
+  hasTeamAccount: boolean;
   locations: LocationRecord[];
   logFilter: "all" | "immutable" | "editable";
   onAddLocation: () => void;
@@ -128,6 +132,7 @@ export function SentryViewRouter({
     file: File,
     vendor?: { key: string; name: string },
   ) => Promise<UploadReceipt | null>;
+  onGoToTeamAccess: () => void;
   onRemoveUpload: (
     moduleId: "M01" | "M02",
     artifactKey: string,
@@ -184,8 +189,10 @@ export function SentryViewRouter({
       <WaterfallView
         caars={caars}
         expandedLocations={expandedLocations}
+        hasTeamAccount={hasTeamAccount}
         locations={locations}
         onAddLocation={onAddLocation}
+        onGoToTeamAccess={onGoToTeamAccess}
         onExpandAll={onExpandAll}
         onOpenCaar={onOpenCaar}
         onOpenDiy={onOpenDiy}
@@ -202,6 +209,10 @@ export function SentryViewRouter({
 
   if (activeView === "caars") {
     return <CaarListView onDownloadPdf={onDownloadPdf} onOpenCaar={onOpenCaar} records={caars} />;
+  }
+
+  if (activeView === "billing") {
+    return <BillingView caars={caars} locations={locations} />;
   }
 
   if (activeView === "log") {

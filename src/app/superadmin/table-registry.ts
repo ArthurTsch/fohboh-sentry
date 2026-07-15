@@ -5,6 +5,10 @@ import prisma from "@/lib/prisma";
 
 export const SUPERADMIN_TABLES = [
   { name: "managers", label: "Managers", description: "Login-capable manager and superadmin accounts.", allowDelete: true },
+  { name: "account_memberships_v2", label: "Account Memberships", description: "Shared-account team roster with team role, status, and access scope.", allowDelete: true },
+  { name: "account_member_locations_v2", label: "Member Location Access", description: "Per-member location assignments for selected-location team access.", allowDelete: true },
+  { name: "team_invitations_v2", label: "Team Invitations", description: "Pending and cancelled teammate invites before acceptance is implemented.", allowDelete: true },
+  { name: "team_invitation_locations_v2", label: "Invite Location Access", description: "Per-invite location assignments for scoped pending invites.", allowDelete: true },
   { name: "restaurants", label: "Restaurants", description: "Restaurant/location records used by Sentry.", allowDelete: true },
   { name: "restaurant_sentry_state", label: "Restaurant Sentry State", description: "Per-location workflow state, Trust Scores, and onboarding persistence.", allowDelete: true },
   { name: "caar_reports", label: "CAAR Reports", description: "Persisted CAAR summaries rendered in the application UI.", allowDelete: true },
@@ -18,6 +22,9 @@ export const SUPERADMIN_TABLES = [
   { name: "caar_artifacts_v2", label: "CAAR Artifacts", description: "Persisted exhibits and derived CAAR artifacts.", allowDelete: true },
   { name: "rule_citations_v2", label: "Rule Citations", description: "Rule-level findings produced during certification.", allowDelete: true },
   { name: "mq6_scores_v2", label: "MQ6 Scores", description: "Dimension-level Trust Score evidence per run.", allowDelete: true },
+  { name: "billing_accounts_v2", label: "Billing Accounts", description: "Account-level subscription and CAAR transaction fee configuration.", allowDelete: true },
+  { name: "payment_methods_v2", label: "Payment Methods", description: "Future tokenized card and ACH method references for account billing.", allowDelete: true },
+  { name: "billing_statements_v2", label: "Billing Statements", description: "Monthly billing statements for subscription and certified CAAR transaction fees.", allowDelete: true },
   { name: "audit_log_v2", label: "Audit Log", description: "Immutable operational audit trail.", allowDelete: true },
   { name: "support_tickets_v2", label: "Support Tickets", description: "Persisted support tickets created from the support workflows.", allowDelete: true },
   { name: "access_requests_v2", label: "Access Requests", description: "Persisted request-access submissions and review status.", allowDelete: true },

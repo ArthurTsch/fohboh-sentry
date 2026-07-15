@@ -3,7 +3,7 @@
 << /Type /Catalog /Pages 2 0 R >>
 endobj
 2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+<< /Type /Pages /Count 1 /Kids [3 0 R] >>
 endobj
 3 0 obj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
@@ -12,19 +12,18 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
 endobj
 5 0 obj
-<< /Length 355 >>
+<< /Length 350 >>
 stream
 BT
 /F1 12 Tf
-50 760 Td
-14 TL
+72 740 Td
 (FohBoh Test Document) Tj
-T* (Bank Deposit Statement - Test Fixture) Tj
-T* (Account: Test Restaurant Operating Account) Tj
-T* (Statement period: 2026-06-01 to 2026-06-05) Tj
-T* (Deposit source: DoorDash payouts) Tj
-T* (Reference unit: TEST-001) Tj
-T* (Status: Matching-period bank deposit evidence for upload validation) Tj
+0 -24 Td (Bank Deposit Statement - DoorDash Test Fixture) Tj
+0 -24 Td (Account: Test Restaurant Operating Account) Tj
+0 -24 Td (Statement period: 2026-06-01 to 2026-06-05) Tj
+0 -24 Td (Deposit source: DoorDash payouts) Tj
+0 -24 Td (Deposit amount: $390.93) Tj
+0 -24 Td (Reference unit: TEST-001) Tj
 ET
 endstream
 endobj
@@ -39,5 +38,5 @@ xref
 trailer
 << /Size 6 /Root 1 0 R >>
 startxref
-717
+712
 %%EOF

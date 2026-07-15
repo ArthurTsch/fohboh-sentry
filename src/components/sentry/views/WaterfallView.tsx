@@ -4,8 +4,10 @@ import { Badge, HelpTip, SectionCard } from "../ui/primitives";
 export function WaterfallView({
   caars,
   expandedLocations,
+  hasTeamAccount,
   locations,
   onAddLocation,
+  onGoToTeamAccess,
   onExpandAll,
   onOpenCaar,
   onOpenDiy,
@@ -19,8 +21,10 @@ export function WaterfallView({
 }: {
   caars: CaarRecord[];
   expandedLocations: string[];
+  hasTeamAccount: boolean;
   locations: LocationRecord[];
   onAddLocation: () => void;
+  onGoToTeamAccess: () => void;
   onExpandAll: () => void;
   onOpenCaar: (record: CaarRecord) => void;
   onOpenDiy: () => void;
@@ -95,7 +99,12 @@ export function WaterfallView({
             <button
               type="button"
               onClick={onAddLocation}
-              className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+              disabled={!hasTeamAccount && role !== "WGS Manager"}
+              className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                !hasTeamAccount && role !== "WGS Manager"
+                  ? "cursor-not-allowed border border-[var(--border)] bg-[var(--panel-soft)] text-[var(--muted)] opacity-70"
+                  : "bg-[var(--accent)] text-white hover:opacity-90"
+              }`}
             >
               Add Location
             </button>
@@ -116,11 +125,31 @@ export function WaterfallView({
                 },
               ]}
               footerLabel="Lead Time"
-              footerValue="WGS setup: 2-5 business days"
+              footerValue={
+                !hasTeamAccount && role !== "WGS Manager"
+                  ? "Set team account first"
+                  : "WGS setup: 2-5 business days"
+              }
             />
           </div>
         </div>
       </div>
+
+      {!hasTeamAccount && role !== "WGS Manager" ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] bg-[rgba(214,48,49,0.04)] px-5 py-4">
+          <div className="text-sm text-[var(--accent)]">
+            A real team account is required before a location can be created. Open `Team & Access`
+            and set the customer team account first.
+          </div>
+          <button
+            type="button"
+            onClick={onGoToTeamAccess}
+            className="rounded-lg border border-[rgba(214,48,49,0.2)] bg-white px-3 py-2 text-sm font-semibold text-[var(--accent)] transition hover:bg-[rgba(214,48,49,0.05)]"
+          >
+            Open Team &amp; Access
+          </button>
+        </div>
+      ) : null}
 
       <div className="hidden grid-cols-[220px_90px_90px_90px_110px_110px_1fr] gap-3 bg-[var(--panel-soft)] px-5 py-3 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)] lg:grid">
         <span>Location</span>
