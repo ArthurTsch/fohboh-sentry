@@ -92,6 +92,13 @@ type PendingCertificationRequest = {
   locationId: string;
   locationName: string;
   locations?: { id: string; name: string }[];
+  selectedModules: Array<"M01" | "M02">;
+  selectableModules: Array<{
+    blockers: string[];
+    enabled: boolean;
+    moduleId: "M01" | "M02";
+    ready: boolean;
+  }>;
 };
 
 type CertificationBlockerState = {
@@ -1554,29 +1561,34 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   }
 
   async function persistWorkspace(workspace: SchemaWorkspace, action: "draft" | "seal") {
-    const response = await fetch("/api/v1/governance/workspaces", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        action,
-        workspace,
-      }),
-    });
+    try {
+      const response = await fetch("/api/v1/governance/workspaces", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          workspace,
+        }),
+      });
 
-    const payload = (await response.json().catch(() => null)) as
-      | { error?: string; workspace?: PersistedWorkspaceRecord }
-      | null;
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string; workspace?: PersistedWorkspaceRecord }
+        | null;
 
-    if (!response.ok || !payload?.workspace) {
-      showToast(payload?.error ?? "Unable to save the governance workspace.");
+      if (!response.ok || !payload?.workspace) {
+        showToast(payload?.error ?? "Unable to save the governance workspace.");
+        return null;
+      }
+
+      applyPersistedWorkspace(payload.workspace);
+      setEditingWorkspace(null);
+      return payload.workspace;
+    } catch {
+      showToast("Unable to save the governance workspace right now.");
       return null;
     }
-
-    applyPersistedWorkspace(payload.workspace);
-    setEditingWorkspace(null);
-    return payload.workspace;
   }
 
   async function handleSaveWorkspace(workspace: SchemaWorkspace) {
@@ -2219,6 +2231,16 @@ function handleCompleteOnboarding(locationId: string) {
     const location = runtimeLocationState.find((item) => item.id === locationId);
     if (!location) return;
     const workflow = workflowByLocation[locationId];
+    const selectableModules = (["M01", "M02"] as const).map((moduleId) => ({
+      blockers: workflow?.moduleReadiness?.[moduleId]?.blockers ?? [],
+      enabled: workflow?.moduleReadiness?.[moduleId]?.enabled ?? false,
+      moduleId,
+      ready: workflow?.moduleReadiness?.[moduleId]?.ready ?? false,
+    }));
+    const defaultSelectedModules = selectableModules
+      .filter((item) => item.enabled && item.ready)
+      .map((item) => item.moduleId);
+
     if (workflow && !workflow.readyForCertification) {
       setCertificationBlocker({
         blockers: workflow.blockers,
@@ -2233,6 +2255,8 @@ function handleCompleteOnboarding(locationId: string) {
     setPendingCertificationRequest({
       locationId,
       locationName: location.name,
+      selectedModules: defaultSelectedModules,
+      selectableModules,
     });
   }
 
@@ -2241,6 +2265,10 @@ function handleCompleteOnboarding(locationId: string) {
     if (!request) return;
     const location = runtimeLocationState.find((item) => item.id === request.locationId);
     if (!location) return;
+    if (request.selectedModules.length === 0) {
+      showToast("Select at least one ready module before running certification.");
+      return;
+    }
     setPendingCertificationRequest(null);
 
     const response = await fetch("/api/v1/certifications/run", {
@@ -2251,6 +2279,7 @@ function handleCompleteOnboarding(locationId: string) {
       body: JSON.stringify({
           cadence,
           locationId: request.locationId,
+          modules: request.selectedModules,
       }),
     });
 
@@ -2390,10 +2419,21 @@ function handleCompleteOnboarding(locationId: string) {
             showToast("No location is available for certification.");
             return;
           }
+          const workflow = workflowByLocation[primaryLocation.id];
+          const selectableModules = (["M01", "M02"] as const).map((moduleId) => ({
+            blockers: workflow?.moduleReadiness?.[moduleId]?.blockers ?? [],
+            enabled: workflow?.moduleReadiness?.[moduleId]?.enabled ?? false,
+            moduleId,
+            ready: workflow?.moduleReadiness?.[moduleId]?.ready ?? false,
+          }));
           setPendingCertificationRequest({
             locationId: primaryLocation.id,
             locationName: primaryLocation.name,
             locations: selectableLocations,
+            selectedModules: selectableModules
+              .filter((item) => item.enabled && item.ready)
+              .map((item) => item.moduleId),
+            selectableModules,
           });
         }}
         onSignOut={handleSignOut}
@@ -2567,22 +2607,45 @@ function handleCompleteOnboarding(locationId: string) {
           locationId={pendingCertificationRequest.locationId}
           locations={pendingCertificationRequest.locations}
           locationName={pendingCertificationRequest.locationName}
+          selectedModules={pendingCertificationRequest.selectedModules}
+          selectableModules={pendingCertificationRequest.selectableModules}
           onChangeLocation={(locationId) => {
             const nextLocation =
               pendingCertificationRequest.locations?.find((location) => location.id === locationId) ?? null;
             if (!nextLocation) {
               return;
             }
+            const nextWorkflow = workflowByLocation[nextLocation.id];
+            const nextSelectableModules = (["M01", "M02"] as const).map((moduleId) => ({
+              blockers: nextWorkflow?.moduleReadiness?.[moduleId]?.blockers ?? [],
+              enabled: nextWorkflow?.moduleReadiness?.[moduleId]?.enabled ?? false,
+              moduleId,
+              ready: nextWorkflow?.moduleReadiness?.[moduleId]?.ready ?? false,
+            }));
             setPendingCertificationRequest((current) =>
               current
                 ? {
                     ...current,
                     locationId: nextLocation.id,
                     locationName: nextLocation.name,
+                    selectedModules: nextSelectableModules
+                      .filter((item) => item.enabled && item.ready)
+                      .map((item) => item.moduleId),
+                    selectableModules: nextSelectableModules,
                   }
                 : current,
             );
           }}
+          onChangeModules={(modules) =>
+            setPendingCertificationRequest((current) =>
+              current
+                ? {
+                    ...current,
+                    selectedModules: modules,
+                  }
+                : current,
+            )
+          }
           onClose={() => setPendingCertificationRequest(null)}
           onSubmit={executeRunCertification}
         />
@@ -2843,6 +2906,10 @@ function deriveLocationWorkflowState({
   const activeModules = location.modules
     .map((module) => module.label)
     .filter((label): label is "M01" | "M02" => label === "M01" || label === "M02");
+  const moduleReadiness: NonNullable<LocationWorkflowState["moduleReadiness"]> = {
+    M01: { blockers: [], enabled: activeModules.includes("M01"), ready: false, warnings: [] },
+    M02: { blockers: [], enabled: activeModules.includes("M02"), ready: false, warnings: [] },
+  };
 
   if (location.status === "Onboarding") {
     blockers.push("Complete onboarding and activation for this location before certification can run.");
@@ -2867,8 +2934,11 @@ function deriveLocationWorkflowState({
   let uploadBlocked = false;
   const governanceGaps: string[] = [];
   const evidenceGaps: string[] = [];
+  let anyModuleReady = false;
 
   for (const moduleId of activeModules) {
+    const moduleBlockers: string[] = [];
+    const moduleWarnings: string[] = [];
     const sealedWorkspace = schemaState.some(
       (workspace) =>
         workspace.accountId === location.accountId &&
@@ -2880,7 +2950,7 @@ function deriveLocationWorkflowState({
     if (!sealedWorkspace) {
       schemaBlocked = true;
       const message = `${moduleId} schema registry and contract config must be sealed in DIY Access.`;
-      blockers.push(message);
+      moduleBlockers.push(message);
       governanceGaps.push(`${moduleId} schema + contract seal missing`);
     }
 
@@ -2901,7 +2971,7 @@ function deriveLocationWorkflowState({
     if (missingArtifacts.length > 0) {
       uploadBlocked = true;
       const message = `${moduleId} evidence still missing: ${missingArtifacts.join(", ")}.`;
-      blockers.push(message);
+      moduleBlockers.push(message);
       evidenceGaps.push(`${moduleId}: ${missingArtifacts.join(", ")}`);
     }
 
@@ -2920,7 +2990,20 @@ function deriveLocationWorkflowState({
       .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))[0];
 
     if (latestArtifact?.updatedAt && isStaleArtifactDate(latestArtifact.updatedAt)) {
-      warnings.push(`${moduleId} uploads are older than 31 days. Upload the current period evidence before rerun.`);
+      moduleWarnings.push(`${moduleId} uploads are older than 31 days. Upload the current period evidence before rerun.`);
+    }
+
+    const moduleReady = location.status !== "Onboarding" && moduleBlockers.length === 0;
+    moduleReadiness[moduleId] = {
+      blockers: moduleBlockers,
+      enabled: true,
+      ready: moduleReady,
+      warnings: moduleWarnings,
+    };
+    anyModuleReady ||= moduleReady;
+
+    if (moduleReady) {
+      warnings.push(...moduleWarnings);
     }
   }
 
@@ -2951,12 +3034,26 @@ function deriveLocationWorkflowState({
       activeModules.length === 0 ? "not_applicable" : evidenceGaps.length === 0 ? "complete" : "action_required",
   });
 
-  const readyForCertification = blockers.length === 0;
+  if (!anyModuleReady) {
+    blockers.push(
+      ...activeModules.flatMap((moduleId) => moduleReadiness[moduleId].blockers),
+    );
+  } else {
+    warnings.push(
+      ...activeModules
+        .filter((moduleId) => !moduleReadiness[moduleId].ready)
+        .flatMap((moduleId) =>
+          moduleReadiness[moduleId].blockers.map((message) => `${moduleId} blocked: ${message}`),
+        ),
+    );
+  }
+
+  const readyForCertification = anyModuleReady;
   const primaryAction = location.status === "Onboarding"
     ? "onboarding"
-    : schemaBlocked
+    : !anyModuleReady && schemaBlocked
       ? "diy"
-      : uploadBlocked
+      : !anyModuleReady && uploadBlocked
         ? "uploads"
         : "certification";
 
@@ -2971,6 +3068,7 @@ function deriveLocationWorkflowState({
 
   return {
     blockers,
+    moduleReadiness,
     primaryAction,
     primaryLabel,
     readyForCertification,

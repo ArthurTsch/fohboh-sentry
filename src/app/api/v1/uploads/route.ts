@@ -46,6 +46,10 @@ function isMissingUploadSchema(error: unknown) {
   );
 }
 
+function getMissingUploadSchemaMessage() {
+  return "The production upload storage tables are not fully migrated yet. Apply the latest Prisma migrations before using persisted uploads on Vercel.";
+}
+
 function toJsonValue(value: unknown) {
   return value as Prisma.InputJsonValue;
 }
@@ -243,8 +247,7 @@ export async function GET() {
     if (isMissingUploadSchema(error)) {
       return NextResponse.json(
         {
-          error:
-            "The uploads_v2 Phase 3 migration has not been applied yet. Update the database before using persisted uploads.",
+          error: getMissingUploadSchemaMessage(),
         },
         { status: 503 },
       );
@@ -461,8 +464,7 @@ export async function POST(request: Request) {
     if (isMissingUploadSchema(error)) {
       return withRequestHeaders(NextResponse.json(
         {
-          error:
-            "The uploads_v2 Phase 3 migration has not been applied yet. Update the database before using persisted uploads.",
+          error: getMissingUploadSchemaMessage(),
         },
         { status: 503 },
       ), requestContext);
@@ -629,8 +631,7 @@ export async function DELETE(request: Request) {
       return withRequestHeaders(
         NextResponse.json(
           {
-            error:
-              "The uploads_v2 Phase 3 migration has not been applied yet. Update the database before using persisted uploads.",
+            error: getMissingUploadSchemaMessage(),
           },
           { status: 503 },
         ),

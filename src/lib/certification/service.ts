@@ -305,10 +305,12 @@ async function getScopedRestaurant(
 export async function executePersistedCertification({
   cadence = "monthly_final",
   locationId,
+  modules,
   session,
 }: {
   cadence?: "monthly_final" | "weekly_preliminary";
   locationId: string;
+  modules?: Array<"M01" | "M02">;
   session: SessionState;
 }): Promise<CertificationExecutionResult> {
   if (typeof session.managerId !== "number") {
@@ -383,13 +385,22 @@ export async function executePersistedCertification({
 
   const schemaRows = [...pickLatestByKey(schemaRowsRaw).values()];
   const contractRows = [...pickLatestByKey(contractRowsRaw).values()];
-  const activeModules = getActiveModuleIds(restaurant.modules, uploadRows, contractRows, schemaRows);
+  const configuredModules = getActiveModuleIds(restaurant.modules, uploadRows, contractRows, schemaRows);
 
-  if (activeModules.length === 0) {
+  if (configuredModules.length === 0) {
     throw new Error("This location has no active certification modules configured.");
   }
 
-  ensureGovernedModules({ activeModules, contractRows, schemaRows });
+  const requestedModules =
+    modules && modules.length > 0
+      ? configuredModules.filter((module) => modules.includes(module))
+      : configuredModules;
+
+  if (requestedModules.length === 0) {
+    throw new Error("None of the requested modules are enabled for this location.");
+  }
+
+  ensureGovernedModules({ activeModules: requestedModules, contractRows, schemaRows });
 
   const artifactIntakeState: Record<string, IntakeState> = {};
   for (const upload of uploadRows) {
@@ -481,7 +492,7 @@ export async function executePersistedCertification({
     period: cadence === "weekly_preliminary" ? `${period} (Weekly Preliminary)` : period,
     recordId: `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${inputHash.slice(0, 8).toUpperCase()}`,
     runAt: evaluationDate,
-    uploadModules: resolveUploadModulesForAccount(restaurant.accountId, activeModules),
+    uploadModules: resolveUploadModulesForAccount(restaurant.accountId, requestedModules),
   });
 
   const lastCertified = new Date().toISOString().slice(0, 10);

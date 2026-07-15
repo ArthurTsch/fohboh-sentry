@@ -438,13 +438,27 @@ export async function POST(request: Request) {
         : undefined) ??
       restaurants.find((item) => item.accountId === workspace.accountId);
 
-    if (!restaurant?.accountId) {
+    if (!restaurant) {
       return withRequestHeaders(NextResponse.json(
         { error: "Unable to resolve a governed location for this workspace." },
         { status: 404 },
       ), requestContext);
     }
-    const accountId = restaurant.accountId;
+    const accountId =
+      restaurant.accountId?.trim() ||
+      workspace.accountId?.trim() ||
+      session.accountId?.trim() ||
+      null;
+
+    if (!accountId) {
+      return withRequestHeaders(NextResponse.json(
+        {
+          error:
+            "This location is missing its customer account binding. Reopen Team & Access or re-save the location so the account can be attached before governance is sealed.",
+        },
+        { status: 409 },
+      ), requestContext);
+    }
 
     const normalizedWorkspace: SchemaWorkspace = {
       ...workspace,

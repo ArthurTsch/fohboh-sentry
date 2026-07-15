@@ -435,6 +435,15 @@ export type WorkflowRequirementStatus = {
 
 export type LocationWorkflowState = {
   blockers: string[];
+  moduleReadiness?: Record<
+    "M01" | "M02",
+    {
+      blockers: string[];
+      enabled: boolean;
+      ready: boolean;
+      warnings: string[];
+    }
+  >;
   primaryAction: LocationWorkflowAction;
   primaryLabel: string;
   readyForCertification: boolean;
