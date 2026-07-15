@@ -32,7 +32,9 @@ let pdfParseModulePromise: Promise<PdfParseFunction> | undefined;
 async function loadPdfParse(): Promise<PdfParseFunction> {
   if (!pdfParseModulePromise) {
     pdfParseModulePromise = Promise.resolve().then(() => {
-      const loaded = require("pdf-parse") as PdfParseFunction | { default?: PdfParseFunction };
+      const loaded = require("pdf-parse/lib/pdf-parse.js") as
+        | PdfParseFunction
+        | { default?: PdfParseFunction };
       return typeof loaded === "function" ? loaded : loaded.default!;
     });
   }
