@@ -1,5 +1,4 @@
-import path from "path";
-import { pathToFileURL } from "url";
+import { createRequire } from "module";
 
 type PdfMetricExtraction = {
   metrics?: {
@@ -18,75 +17,48 @@ type ExtractedPdfDocument = {
   text: string;
 };
 
-const importPdfJsModule = new Function(
-  "moduleUrl",
-  "return import(moduleUrl);",
-) as (moduleUrl: string) => Promise<{
-  getDocument: (options: {
-    data: Uint8Array;
-    standardFontDataUrl: string;
-    useWorkerFetch: boolean;
-  }) => {
-    destroy: () => Promise<void>;
-    promise: Promise<{
-      getPage: (pageNumber: number) => Promise<{
-        cleanup: () => void;
-        getTextContent: () => Promise<{
-          items: Array<{ hasEOL?: boolean; str?: string }>;
-        }>;
-      }>;
-      numPages: number;
+const require = createRequire(import.meta.url);
+
+type PdfParseInstance = {
+  destroy: () => Promise<void>;
+  getText: () => Promise<{
+    pages?: Array<{
+      num?: number;
+      text?: string;
     }>;
+    text?: string;
+    total?: number;
+  }>;
+};
+
+function createPdfParser(buffer: Buffer): PdfParseInstance {
+  const pdfParseModule = require("pdf-parse") as {
+    PDFParse: new (options: { data: Uint8Array; verbosity?: number }) => PdfParseInstance;
   };
-}>;
+
+  return new pdfParseModule.PDFParse({
+    data: new Uint8Array(buffer),
+  });
+}
 
 export async function extractPdfDocument(buffer: Buffer): Promise<ExtractedPdfDocument> {
-  const pdfjs = await importPdfJsModule(
-    pathToFileURL(
-      path.join(process.cwd(), "node_modules", "pdfjs-dist", "legacy", "build", "pdf.mjs"),
-    ).href
-  );
-  const loadingTask = pdfjs.getDocument({
-    data: new Uint8Array(buffer),
-    standardFontDataUrl: `${path
-      .join(process.cwd(), "node_modules", "pdfjs-dist", "standard_fonts")
-      .replace(/\\/g, "/")}/`,
-    useWorkerFetch: false,
-  });
+  const parser = createPdfParser(buffer);
 
   try {
-    const document = await loadingTask.promise;
-    const pageTexts: string[] = [];
-
-    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-      const page = await document.getPage(pageNumber);
-      try {
-        const textContent = await page.getTextContent();
-        const pageLines: string[] = [];
-
-        for (const item of textContent.items) {
-          if (!("str" in item) || typeof item.str !== "string") {
-            continue;
-          }
-
-          pageLines.push(item.str);
-          if (item.hasEOL) {
-            pageLines.push("\n");
-          }
-        }
-
-        pageTexts.push(pageLines.join(" "));
-      } finally {
-        page.cleanup();
-      }
-    }
+    const result = await parser.getText();
+    const pageTexts = (result.pages ?? [])
+      .map((page) => page.text?.trim())
+      .filter((text): text is string => Boolean(text));
+    const fallbackText = result.text?.trim() ?? "";
 
     return {
-      pageCount: document.numPages || 1,
-      text: normalizeExtractedPdfText(pageTexts.join("\n\n")),
+      pageCount: result.total || pageTexts.length || 1,
+      text: normalizeExtractedPdfText(
+        pageTexts.length > 0 ? pageTexts.join("\n\n") : fallbackText,
+      ),
     };
   } finally {
-    await loadingTask.destroy();
+    await parser.destroy();
   }
 }
 
