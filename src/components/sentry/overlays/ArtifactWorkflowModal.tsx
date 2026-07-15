@@ -32,7 +32,6 @@ const FIELD_ALIASES: Record<string, string[]> = {
 export function ArtifactWorkflowModal({
   artifact,
   contractValues,
-  defaultEntryMode,
   intake,
   moduleId,
   onClose,
@@ -43,7 +42,6 @@ export function ArtifactWorkflowModal({
 }: {
   artifact: UploadArtifact;
   contractValues: Record<string, string>;
-  defaultEntryMode?: "manual" | "upload";
   intake: IntakeState;
   moduleId: "M01" | "M02";
   onClose: () => void;
@@ -53,10 +51,7 @@ export function ArtifactWorkflowModal({
   vendorName?: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const manualMode =
-    artifact.type === "Manual Entry" ||
-    contractValues.__entry_mode === "manual" ||
-    defaultEntryMode === "manual";
+  const manualMode = artifact.type === "Manual Entry";
   const fieldDefs = getManualFieldDefs(moduleId, artifact);
   const requiredFieldIds = getRequiredFieldIds(moduleId, artifact, fieldDefs);
   const completedRequired = requiredFieldIds.filter((fieldId) => getFieldValue(contractValues, fieldId).trim()).length;
@@ -195,33 +190,6 @@ export function ArtifactWorkflowModal({
           </div>
 
           <div className="min-h-0 overflow-y-auto p-6">
-            {artifact.type !== "Manual Entry" ? (
-              <div className="mb-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleFieldChange("__entry_mode", "upload")}
-                  className={`rounded-lg px-3 py-2 text-sm transition ${
-                    !manualMode
-                      ? "bg-[var(--text)] font-semibold text-white"
-                      : "border border-[var(--border)] text-[var(--muted)] hover:border-[var(--text)] hover:text-[var(--text)]"
-                  }`}
-                >
-                  Upload File
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleFieldChange("__entry_mode", "manual")}
-                  className={`rounded-lg px-3 py-2 text-sm transition ${
-                    manualMode
-                      ? "bg-[var(--text)] font-semibold text-white"
-                      : "border border-[var(--border)] text-[var(--muted)] hover:border-[var(--text)] hover:text-[var(--text)]"
-                  }`}
-                >
-                  Manual Entry
-                </button>
-              </div>
-            ) : null}
-
             {manualMode ? (
               renderManualContent({
                 artifact,

@@ -1787,10 +1787,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
 
     let next: IntakeState;
     const manualValues = artifactContractState[key] ?? {};
-    const usingManualMode =
-      activeArtifact.artifact.type === "Manual Entry" ||
-      activeArtifact.entryMode === "manual" ||
-      manualValues.__entry_mode === "manual";
+    const usingManualMode = activeArtifact.artifact.type === "Manual Entry";
 
     if (usingManualMode) {
       const providedValues = Object.entries(manualValues).filter(
@@ -2532,7 +2529,6 @@ function handleCompleteOnboarding(locationId: string) {
         <ArtifactWorkflowModal
           artifact={activeArtifact.artifact}
           contractValues={artifactContractState[activeArtifactStateKey] ?? {}}
-          defaultEntryMode={activeArtifact.entryMode}
           intake={
             artifactIntakeState[activeArtifactStateKey] ?? {
               uploaded: false,
