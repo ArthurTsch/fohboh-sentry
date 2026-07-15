@@ -20,7 +20,12 @@ type PdfParseResult = {
   text?: string;
 };
 
-type PdfParseFunction = (buffer: Buffer) => Promise<PdfParseResult>;
+type PdfParseOptions = {
+  max?: number;
+  version?: string;
+};
+
+type PdfParseFunction = (buffer: Buffer, options?: PdfParseOptions) => Promise<PdfParseResult>;
 
 let pdfParseModulePromise: Promise<PdfParseFunction> | undefined;
 
@@ -36,20 +41,46 @@ async function loadPdfParse(): Promise<PdfParseFunction> {
 }
 
 export async function extractPdfDocument(buffer: Buffer): Promise<ExtractedPdfDocument> {
-  try {
-    const parsePdf = await loadPdfParse();
-    const parsed = await parsePdf(buffer);
+  const parsePdf = await loadPdfParse();
+  const candidates: PdfParseOptions[] = [
+    { max: 0 },
+    { max: 0, version: "v1.10.100" },
+    { max: 0, version: "v1.10.88" },
+    { max: 0, version: "v1.9.426" },
+    { max: 0, version: "v2.0.550" },
+  ];
 
-    return {
-      pageCount: parsed.numpages || 1,
-      text: normalizeExtractedPdfText(parsed.text || ""),
-    };
-  } catch {
-    return {
-      pageCount: 1,
-      text: "",
-    };
+  let bestText = "";
+  let bestPageCount = 1;
+
+  for (const options of candidates) {
+    try {
+      const parsed = await parsePdf(buffer, options);
+      const normalized = normalizeExtractedPdfText(parsed.text || "");
+      if (normalized.length > bestText.length) {
+        bestText = normalized;
+        bestPageCount = parsed.numpages || bestPageCount || 1;
+      }
+      if (normalized.length > 0) {
+        break;
+      }
+    } catch {
+      continue;
+    }
   }
+
+  if (!bestText) {
+    const embeddedText = normalizeExtractedPdfText(extractEmbeddedPdfText(buffer));
+    if (embeddedText.length > 0) {
+      bestText = embeddedText;
+      bestPageCount = estimatePdfPageCountFromBuffer(buffer);
+    }
+  }
+
+  return {
+    pageCount: bestPageCount,
+    text: bestText,
+  };
 }
 
 export async function extractPdfText(buffer: Buffer) {
@@ -88,6 +119,51 @@ function normalizeExtractedPdfText(text: string) {
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function extractEmbeddedPdfText(buffer: Buffer) {
+  const source = buffer.toString("latin1");
+  const textFragments: string[] = [];
+  const literalTextPattern = /\((?:\\.|[^\\)])*\)\s*Tj/g;
+  const arrayTextPattern = /\[([\s\S]*?)\]\s*TJ/g;
+
+  for (const match of source.matchAll(literalTextPattern)) {
+    const fragment = decodePdfLiteral(match[0].replace(/\)\s*Tj$/, ""));
+    if (fragment) {
+      textFragments.push(fragment);
+    }
+  }
+
+  for (const match of source.matchAll(arrayTextPattern)) {
+    const inner = match[1] ?? "";
+    const literals = inner.match(/\((?:\\.|[^\\)])*\)/g) ?? [];
+    const fragment = literals.map((item) => decodePdfLiteral(item)).join("");
+    if (fragment) {
+      textFragments.push(fragment);
+    }
+  }
+
+  return textFragments.join("\n");
+}
+
+function decodePdfLiteral(value: string) {
+  const trimmed = value.replace(/^\(/, "").replace(/\)$/, "");
+  return trimmed
+    .replace(/\\\(/g, "(")
+    .replace(/\\\)/g, ")")
+    .replace(/\\\\/g, "\\")
+    .replace(/\\r/g, "\r")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\b/g, "\b")
+    .replace(/\\f/g, "\f")
+    .replace(/\\([0-7]{1,3})/g, (_match, octal) => String.fromCharCode(Number.parseInt(octal, 8)));
+}
+
+function estimatePdfPageCountFromBuffer(buffer: Buffer) {
+  const text = buffer.toString("latin1");
+  const matches = text.match(/\/Type\s*\/Page\b/g);
+  return matches?.length || 1;
 }
 
 function extractBankMetrics(artifactKey: string, text: string): PdfMetricExtraction {
