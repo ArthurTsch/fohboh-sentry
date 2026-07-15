@@ -15,81 +15,40 @@ type ExtractedPdfDocument = {
   text: string;
 };
 
-type PdfJsTextItem = {
-  hasEOL?: boolean;
-  str?: string;
+type PdfParseResult = {
+  numpages?: number;
+  text?: string;
 };
 
-type PdfJsPage = {
-  cleanup: () => void;
-  getTextContent: () => Promise<{
-    items: PdfJsTextItem[];
-  }>;
-};
+type PdfParseFunction = (buffer: Buffer) => Promise<PdfParseResult>;
 
-type PdfJsDocument = {
-  getPage: (pageNumber: number) => Promise<PdfJsPage>;
-  numPages: number;
-};
+let pdfParseModulePromise: Promise<PdfParseFunction> | undefined;
 
-type PdfJsLoadingTask = {
-  destroy: () => Promise<void>;
-  promise: Promise<PdfJsDocument>;
-};
+async function loadPdfParse(): Promise<PdfParseFunction> {
+  if (!pdfParseModulePromise) {
+    pdfParseModulePromise = Promise.resolve().then(() => {
+      const loaded = require("pdf-parse") as PdfParseFunction | { default?: PdfParseFunction };
+      return typeof loaded === "function" ? loaded : loaded.default!;
+    });
+  }
 
-type PdfJsModule = {
-  getDocument: (options: {
-    data: Uint8Array;
-    disableWorker?: boolean;
-    useWorkerFetch?: boolean;
-  }) => PdfJsLoadingTask;
-};
-
-async function importPdfJsModule(): Promise<PdfJsModule> {
-  return import("pdfjs-dist/legacy/build/pdf.mjs") as Promise<PdfJsModule>;
+  return pdfParseModulePromise;
 }
 
 export async function extractPdfDocument(buffer: Buffer): Promise<ExtractedPdfDocument> {
-  const pdfjs = await importPdfJsModule();
-  const loadingTask = pdfjs.getDocument({
-    data: new Uint8Array(buffer),
-    disableWorker: true,
-    useWorkerFetch: false,
-  });
-
   try {
-    const document = await loadingTask.promise;
-    const pageTexts: string[] = [];
-
-    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-      const page = await document.getPage(pageNumber);
-      try {
-        const textContent = await page.getTextContent();
-        const pageLines: string[] = [];
-
-        for (const item of textContent.items) {
-          if (typeof item.str !== "string") {
-            continue;
-          }
-
-          pageLines.push(item.str);
-          if (item.hasEOL) {
-            pageLines.push("\n");
-          }
-        }
-
-        pageTexts.push(pageLines.join(" "));
-      } finally {
-        page.cleanup();
-      }
-    }
+    const parsePdf = await loadPdfParse();
+    const parsed = await parsePdf(buffer);
 
     return {
-      pageCount: document.numPages || 1,
-      text: normalizeExtractedPdfText(pageTexts.join("\n\n")),
+      pageCount: parsed.numpages || 1,
+      text: normalizeExtractedPdfText(parsed.text || ""),
     };
-  } finally {
-    await loadingTask.destroy();
+  } catch {
+    return {
+      pageCount: 1,
+      text: "",
+    };
   }
 }
 
