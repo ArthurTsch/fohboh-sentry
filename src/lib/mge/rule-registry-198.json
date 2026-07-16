@@ -1,0 +1,1273 @@
+{
+  "source": "docs/SentryFiles/Trust Score Matters-Arthur/FohBoh MGE 198 Rule Registry DCLS v2 copy.pdf",
+  "ruleCount": 198,
+  "sections": [
+    {
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization",
+      "startRuleId": "R001",
+      "endRuleId": "R015",
+      "ruleCount": 15
+    },
+    {
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR",
+      "startRuleId": "R016",
+      "endRuleId": "R055",
+      "ruleCount": 40
+    },
+    {
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR",
+      "startRuleId": "R056",
+      "endRuleId": "R095",
+      "ruleCount": 40
+    },
+    {
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3",
+      "startRuleId": "R096",
+      "endRuleId": "R115",
+      "ruleCount": 20
+    },
+    {
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation",
+      "startRuleId": "R116",
+      "endRuleId": "R135",
+      "ruleCount": 20
+    },
+    {
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS",
+      "startRuleId": "R136",
+      "endRuleId": "R145",
+      "ruleCount": 10
+    },
+    {
+      "sectionNumber": 7,
+      "sectionTitle": "CAAR & Output Finalization",
+      "startRuleId": "R146",
+      "endRuleId": "R152",
+      "ruleCount": 7
+    },
+    {
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection",
+      "startRuleId": "R153",
+      "endRuleId": "R165",
+      "ruleCount": 13
+    },
+    {
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation",
+      "startRuleId": "R166",
+      "endRuleId": "R175",
+      "ruleCount": 10
+    },
+    {
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow",
+      "startRuleId": "R176",
+      "endRuleId": "R185",
+      "ruleCount": 10
+    },
+    {
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic",
+      "startRuleId": "R186",
+      "endRuleId": "R198",
+      "ruleCount": 13
+    }
+  ],
+  "rules": [
+    {
+      "ruleId": "R001",
+      "ruleName": "Source File Receipt",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R002",
+      "ruleName": "Vendor Type Classification",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R003",
+      "ruleName": "Parser Version Selection",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R004",
+      "ruleName": "Parse Execution",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R005",
+      "ruleName": "Parse Failure Handling",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R006",
+      "ruleName": "Column Mapping Application",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R007",
+      "ruleName": "Unmapped Column Detection",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R008",
+      "ruleName": "Canonical Schema Validation",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R009",
+      "ruleName": "Schema Rejection Rule",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R010",
+      "ruleName": "Duplicate Detection",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R011",
+      "ruleName": "Date Range Validation",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R012",
+      "ruleName": "Null Amount Rejection",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R013",
+      "ruleName": "Negative Amount Flag",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R014",
+      "ruleName": "Vendor Profile Lookup",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R015",
+      "ruleName": "Normalization Completion Log",
+      "sectionNumber": 1,
+      "sectionTitle": "Data Ingestion & Normalization"
+    },
+    {
+      "ruleId": "R016",
+      "ruleName": "DSP Commission Basis Check",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R017",
+      "ruleName": "DSP Rate Contract Match",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R018",
+      "ruleName": "Promotional Rate Validation",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R019",
+      "ruleName": "Cancelled Order Credit Check",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R020",
+      "ruleName": "Cancelled Pre - Dispatch Credit",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R021",
+      "ruleName": "POS Price Match",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R022",
+      "ruleName": "Menu Update Lag Detection",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R023",
+      "ruleName": "Duplicate Order Detection",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R024",
+      "ruleName": "Order Volume Reconciliation",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R025",
+      "ruleName": "Settlement Timing Validation",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R026",
+      "ruleName": "DoorDash Rate Tier Validation",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R027",
+      "ruleName": "Uber Eats Rate Tier Validation",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R028",
+      "ruleName": "Grubhub Allocation Check",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R029",
+      "ruleName": "Instacart Pickup vs Delivery",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R030",
+      "ruleName": "DSP Adjustment Credit Audit",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R031",
+      "ruleName": "Alcohol Commission Exclusion",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R032",
+      "ruleName": "Third -Party Delivery Mismatch",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R033",
+      "ruleName": "Minimum Order Guarantee Check",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R034",
+      "ruleName": "Error Rate Threshold Trigger",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R035",
+      "ruleName": "DSP Fee Cap Compliance",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R036",
+      "ruleName": "Multi -Platform Reconciliation",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R037",
+      "ruleName": "Refund Recovery Verification",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R038",
+      "ruleName": "Marketing Charge Segregation",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R039",
+      "ruleName": "DSP Currency Variance",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R040",
+      "ruleName": "New Location Onboarding Rate",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R041",
+      "ruleName": "Subscription Plan Commission",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R042",
+      "ruleName": "Peak -Hour Surcharge Check",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R043",
+      "ruleName": "Bundled Order Split Fee",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R044",
+      "ruleName": "DSP Fraud Chargeback Fee",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R045",
+      "ruleName": "DFR Certification Threshold",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R046",
+      "ruleName": "DFR Below Threshold",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R047",
+      "ruleName": "DFR Period Completeness",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R048",
+      "ruleName": "DFR Prior Period Carryover",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R049",
+      "ruleName": "DFR Systematic Variance",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R050",
+      "ruleName": "DFR Contextual Benchmark",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R051",
+      "ruleName": "DFR Trust Score Contribution",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R052",
+      "ruleName": "DSP Contract Absence Flag",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R053",
+      "ruleName": "DFR Multi -Location Rollup",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R054",
+      "ruleName": "DFR Audit Trail Completion",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R055",
+      "ruleName": "DFR Narrative Token Set",
+      "sectionNumber": 2,
+      "sectionTitle": "Delivery Fee Recovery / DFR"
+    },
+    {
+      "ruleId": "R056",
+      "ruleName": "Interchange Category Check",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R057",
+      "ruleName": "SIC Code Validation",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R058",
+      "ruleName": "Effective Rate Benchmark",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R059",
+      "ruleName": "Non -Negotiated Fee Detection",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R060",
+      "ruleName": "Duplicate Transaction Charge",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R061",
+      "ruleName": "Surcharge Rate Compliance",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R062",
+      "ruleName": "Surcharge Card Type Exclusion",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R063",
+      "ruleName": "Batch Settlement Timing",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R064",
+      "ruleName": "Card Brand Fee Audit",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R065",
+      "ruleName": "Address Verification Downgrade",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R066",
+      "ruleName": "CVV Non -Compliance Downgrade",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R067",
+      "ruleName": "Partial Auth Handling",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R068",
+      "ruleName": "Monthly Minimum Fee Check",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R069",
+      "ruleName": "Early Termination Fee Check",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R070",
+      "ruleName": "Tiered Pricing Validation",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R071",
+      "ruleName": "Rewards Card Surcharge",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R072",
+      "ruleName": "Refund Processing Fee",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R073",
+      "ruleName": "Chargeback Fee Audit",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R074",
+      "ruleName": "Retrieval Fee Audit",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R075",
+      "ruleName": "PCI Non -Compliance Fee",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R076",
+      "ruleName": "Interchange Rate Table Match",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R077",
+      "ruleName": "Amex OptBlue Rate Check",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R078",
+      "ruleName": "Processor Markup Audit",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R079",
+      "ruleName": "Volume Discount Verification",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R080",
+      "ruleName": "Equipment Rental Fee Check",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R081",
+      "ruleName": "International Transaction Fee",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R082",
+      "ruleName": "Currency Conversion Fee",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R083",
+      "ruleName": "Statement Fee Audit",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R084",
+      "ruleName": "Annual Fee Validation",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R085",
+      "ruleName": "Rate Increase Notification",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R086",
+      "ruleName": "Processor Error Reversal",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R087",
+      "ruleName": "MFR Error Rate Threshold",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R088",
+      "ruleName": "MFR Below Threshold",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R089",
+      "ruleName": "MFR Certification Threshold",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R090",
+      "ruleName": "MFR Contract Absence Flag",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R091",
+      "ruleName": "MFR Systematic Variance",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R092",
+      "ruleName": "MFR Period Completeness",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R093",
+      "ruleName": "MFR Trust Score Contribution",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R094",
+      "ruleName": "MFR Audit Trail Completion",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R095",
+      "ruleName": "MFR Narrative Token Set",
+      "sectionNumber": 3,
+      "sectionTitle": "Merchant Fee Recovery / MFR"
+    },
+    {
+      "ruleId": "R096",
+      "ruleName": "Franchisee Remittance Receipt",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R097",
+      "ruleName": "Gross Sales Calculation",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R098",
+      "ruleName": "Sales Exclusion Validation",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R099",
+      "ruleName": "Royalty Fee Calculation",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R100",
+      "ruleName": "Royalty Variance Detection",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R101",
+      "ruleName": "Marketing Fund Calculation",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R102",
+      "ruleName": "Marketing Fund Variance",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R103",
+      "ruleName": "Self-Reporting Discrepancy",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R104",
+      "ruleName": "Underreporting Pattern",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R105",
+      "ruleName": "Royalty Rate Period Check",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R106",
+      "ruleName": "Franchise Agreement Absence",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R107",
+      "ruleName": "New Franchisee Grace Period",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R108",
+      "ruleName": "Multi -Concept Allocation",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R109",
+      "ruleName": "Transfer Fee Audit",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R110",
+      "ruleName": "Royalty Waiver Verification",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R111",
+      "ruleName": "Royalty Below Threshold",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R112",
+      "ruleName": "Royalty Certification Trigger",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R113",
+      "ruleName": "Royalty Trust Score Contribution",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R114",
+      "ruleName": "Royalty Audit Trail",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R115",
+      "ruleName": "Royalty Narrative Token Set",
+      "sectionNumber": 4,
+      "sectionTitle": "Royalty / Spoke 3"
+    },
+    {
+      "ruleId": "R116",
+      "ruleName": "TG01 \u2014 Data Completeness",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R117",
+      "ruleName": "TG01 \u2014 POS Data Presence",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R118",
+      "ruleName": "TG02 \u2014 Source Authenticity",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R119",
+      "ruleName": "TG02 \u2014 File Integrity Hash",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R120",
+      "ruleName": "TG03 \u2014 Vendor Profile Current",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R121",
+      "ruleName": "TG03 \u2014 Contract Currency",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R122",
+      "ruleName": "TG04 \u2014 POS Reconciliation",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R123",
+      "ruleName": "TG04 \u2014 POS Reconciliation Fail",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R124",
+      "ruleName": "TG05 \u2014 Duplicate Absence",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R125",
+      "ruleName": "TG05 \u2014 Duplicate Detected",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R126",
+      "ruleName": "TG06 \u2014 Period Coverage",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R127",
+      "ruleName": "TG06 \u2014 Gap Penalty",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R128",
+      "ruleName": "TG07 \u2014 Fee Legitimacy Score",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R129",
+      "ruleName": "TG07 \u2014 Fee Variance Grade",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R130",
+      "ruleName": "TG07 \u2014 High Variance Flag",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R131",
+      "ruleName": "TG08 \u2014 KPI Formula Currency",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R132",
+      "ruleName": "TG08 \u2014 Mid-Period Formula Change",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R133",
+      "ruleName": "TG09 \u2014 Audit Trail Integrity",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R134",
+      "ruleName": "TG10 \u2014 Narrative Hash Match",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R135",
+      "ruleName": "TG11 \u2014 CAAR Eligibility",
+      "sectionNumber": 5,
+      "sectionTitle": "Trust Gate Evaluation"
+    },
+    {
+      "ruleId": "R136",
+      "ruleName": "Trust Score Calculation",
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS"
+    },
+    {
+      "ruleId": "R137",
+      "ruleName": "Unverified Zone Assignment",
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS"
+    },
+    {
+      "ruleId": "R138",
+      "ruleName": "Provisional Zone Assignment",
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS"
+    },
+    {
+      "ruleId": "R139",
+      "ruleName": "Conditional Zone Assignment",
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS"
+    },
+    {
+      "ruleId": "R140",
+      "ruleName": "Validated Zone Assignment",
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS"
+    },
+    {
+      "ruleId": "R141",
+      "ruleName": "Certified Zone Assignment",
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS"
+    },
+    {
+      "ruleId": "R142",
+      "ruleName": "Certification Record Lock",
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS"
+    },
+    {
+      "ruleId": "R143",
+      "ruleName": "DCLS Template Selection",
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS"
+    },
+    {
+      "ruleId": "R144",
+      "ruleName": "Token Injection Execution",
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS"
+    },
+    {
+      "ruleId": "R145",
+      "ruleName": "Narrative Hash Generation",
+      "sectionNumber": 6,
+      "sectionTitle": "Certification State & DCLS"
+    },
+    {
+      "ruleId": "R146",
+      "ruleName": "CAAR Eligibility Confirmation",
+      "sectionNumber": 7,
+      "sectionTitle": "CAAR & Output Finalization"
+    },
+    {
+      "ruleId": "R147",
+      "ruleName": "CAAR Template Selection",
+      "sectionNumber": 7,
+      "sectionTitle": "CAAR & Output Finalization"
+    },
+    {
+      "ruleId": "R148",
+      "ruleName": "CAAR Evidence Bundle",
+      "sectionNumber": 7,
+      "sectionTitle": "CAAR & Output Finalization"
+    },
+    {
+      "ruleId": "R149",
+      "ruleName": "CAAR Attestation Block",
+      "sectionNumber": 7,
+      "sectionTitle": "CAAR & Output Finalization"
+    },
+    {
+      "ruleId": "R150",
+      "ruleName": "CAAR Hash Computation",
+      "sectionNumber": 7,
+      "sectionTitle": "CAAR & Output Finalization"
+    },
+    {
+      "ruleId": "R151",
+      "ruleName": "Evidence ExportPack Assembly",
+      "sectionNumber": 7,
+      "sectionTitle": "CAAR & Output Finalization"
+    },
+    {
+      "ruleId": "R152",
+      "ruleName": "Immutable Audit Finalization",
+      "sectionNumber": 7,
+      "sectionTitle": "CAAR & Output Finalization"
+    },
+    {
+      "ruleId": "R153",
+      "ruleName": "Loop B Batch Window Activation",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R154",
+      "ruleName": "Cross -Period Variance Trend",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R155",
+      "ruleName": "Vendor Behavior Anomaly Detection",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R156",
+      "ruleName": "Merchant Cluster Benchmark Variance",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R157",
+      "ruleName": "Recurring Error Signature Detection",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R158",
+      "ruleName": "New Error Type Discovery",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R159",
+      "ruleName": "Loop B Re - Certification Trigger",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R160",
+      "ruleName": "Pattern Confidence Score",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R161",
+      "ruleName": "Seasonal Pattern Adjustment",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R162",
+      "ruleName": "Cross -Vendor Pattern Correlation",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R163",
+      "ruleName": "Pattern -Based CAAR Eligibility",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R164",
+      "ruleName": "Loop B Audit Trail Write",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R165",
+      "ruleName": "Loop B Token Set Assembly",
+      "sectionNumber": 8,
+      "sectionTitle": "Loop B Pattern Analysis & Anomaly Detection"
+    },
+    {
+      "ruleId": "R166",
+      "ruleName": "DFR-MFR Order Volume Reconciliation",
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation"
+    },
+    {
+      "ruleId": "R167",
+      "ruleName": "Royalty -DFR Sales Channel Reconciliation",
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation"
+    },
+    {
+      "ruleId": "R168",
+      "ruleName": "Cross -Module Variance Aggregation",
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation"
+    },
+    {
+      "ruleId": "R169",
+      "ruleName": "Total Recovery Calculation",
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation"
+    },
+    {
+      "ruleId": "R170",
+      "ruleName": "Cross -Module Trust Score Roll -Up",
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation"
+    },
+    {
+      "ruleId": "R171",
+      "ruleName": "Module Coverage Completeness",
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation"
+    },
+    {
+      "ruleId": "R172",
+      "ruleName": "Cross -Module Conflict Resolution",
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation"
+    },
+    {
+      "ruleId": "R173",
+      "ruleName": "Composite Certification Record",
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation"
+    },
+    {
+      "ruleId": "R174",
+      "ruleName": "Cross -Module Audit Trail",
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation"
+    },
+    {
+      "ruleId": "R175",
+      "ruleName": "Cross -Module Token Set",
+      "sectionNumber": 9,
+      "sectionTitle": "Cross-Module Reconciliation"
+    },
+    {
+      "ruleId": "R176",
+      "ruleName": "Operator Authentication",
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow"
+    },
+    {
+      "ruleId": "R177",
+      "ruleName": "Certification Action Authorization",
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow"
+    },
+    {
+      "ruleId": "R178",
+      "ruleName": "Manual Review Queue Routing",
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow"
+    },
+    {
+      "ruleId": "R179",
+      "ruleName": "Operator Override Logging",
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow"
+    },
+    {
+      "ruleId": "R180",
+      "ruleName": "Dispute Filing Trigger",
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow"
+    },
+    {
+      "ruleId": "R181",
+      "ruleName": "Recovery Action Tracking",
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow"
+    },
+    {
+      "ruleId": "R182",
+      "ruleName": "Operator Attribution Recording",
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow"
+    },
+    {
+      "ruleId": "R183",
+      "ruleName": "Workflow State Transition",
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow"
+    },
+    {
+      "ruleId": "R184",
+      "ruleName": "Notification Dispatch",
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow"
+    },
+    {
+      "ruleId": "R185",
+      "ruleName": "Operator Activity Audit Trail",
+      "sectionNumber": 10,
+      "sectionTitle": "Operator Actions & Workflow"
+    },
+    {
+      "ruleId": "R186",
+      "ruleName": "KPI Vault Integrity Check",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R187",
+      "ruleName": "Parser Registry Currency Check",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R188",
+      "ruleName": "Rule Registry Version Match",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R189",
+      "ruleName": "Formula Version Validation",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R190",
+      "ruleName": "Audit Trail Completeness Check",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R191",
+      "ruleName": "System Clock Synchronization",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R192",
+      "ruleName": "Hash Chain Verification",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R193",
+      "ruleName": "Certification Backlog Monitor",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R194",
+      "ruleName": "Rule Execution Performance",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R195",
+      "ruleName": "Loop A / Loop B Coordination",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R196",
+      "ruleName": "System Health Trust Score Impact",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R197",
+      "ruleName": "System Health Audit Trail",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    },
+    {
+      "ruleId": "R198",
+      "ruleName": "Master System Certification",
+      "sectionNumber": 11,
+      "sectionTitle": "System Health & Self-Diagnostic"
+    }
+  ]
+}

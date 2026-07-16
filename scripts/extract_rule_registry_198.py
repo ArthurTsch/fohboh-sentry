@@ -10,8 +10,8 @@ from PyPDF2 import PdfReader
 SOURCE_PDF = Path(
     "docs/SentryFiles/Trust Score Matters-Arthur/FohBoh MGE 198 Rule Registry DCLS v2 copy.pdf"
 )
-EXTRACT_TXT = Path("docs/rule-registry-198-extract.txt")
-OUTPUT_JSON = Path("docs/rule-registry-198.json")
+EXTRACT_TXT = Path("src/lib/mge/rule-registry-198-extract.txt")
+OUTPUT_JSON = Path("src/lib/mge/rule-registry-198.json")
 
 SECTION_RANGES = [
     (1, 1, 15, "Data Ingestion & Normalization"),
