@@ -4,6 +4,31 @@ import { Badge, HelpTip, MetaBlock } from "../ui/primitives";
 
 type TabId = "mappings" | "contract" | "missing" | "posschema" | "upload" | "vault";
 
+const CANONICAL_FIELD_HELP: Record<
+  string,
+  {
+    whatDoes: string;
+    whatIs: string;
+    whyMatters: string;
+  }
+> = {
+  gross_sales_amount: {
+    whatDoes: "Feeds the engine with the billed card-sales base used to reconstruct expected processor fees.",
+    whatIs: "The gross card-processing sales amount from the governed processor source file, typically a CSV export.",
+    whyMatters: "M01 fee-overcharge calculations and Trust Score checks break if the sales base is mapped to the wrong source column.",
+  },
+  processor_markup_bps: {
+    whatDoes: "Lets the engine compare observed fee behavior against the sealed processor markup basis points.",
+    whatIs: "The markup or effective processor-bps field extracted from the governed processor source file.",
+    whyMatters: "This field is used to detect markup drift, overbilling, and variance against the sealed contract configuration.",
+  },
+  network_fee_amount: {
+    whatDoes: "Adds network-fee evidence into the fee reconstruction path when the source vendor exposes it separately.",
+    whatIs: "An optional source column for pass-through network-fee amounts from the governed processor file.",
+    whyMatters: "When available, it improves the accuracy of fee attribution and reduces false review flags in certification.",
+  },
+};
+
 export function SchemaEditorModal({
   workspace,
   onClose,
@@ -222,7 +247,28 @@ export function SchemaEditorModal({
                     className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 md:grid-cols-[1fr_1fr_160px]"
                   >
                     <div>
-                      <div className="font-medium">{field.canonical}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="font-medium">{field.canonical}</div>
+                        {CANONICAL_FIELD_HELP[field.canonical] ? (
+                          <HelpTip
+                            title={`Schema Field · ${field.canonical}`}
+                            sections={[
+                              {
+                                label: "What It Is",
+                                text: CANONICAL_FIELD_HELP[field.canonical].whatIs,
+                              },
+                              {
+                                label: "What It Does",
+                                text: CANONICAL_FIELD_HELP[field.canonical].whatDoes,
+                              },
+                              {
+                                label: "Why It Matters",
+                                text: CANONICAL_FIELD_HELP[field.canonical].whyMatters,
+                              },
+                            ]}
+                          />
+                        ) : null}
+                      </div>
                       <div className="text-xs text-[var(--muted)]">
                         {field.required ? "Required for sealing" : "Optional field"}
                       </div>

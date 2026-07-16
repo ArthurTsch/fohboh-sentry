@@ -1,4 +1,7 @@
-import registry from "../../../docs/rule-registry-198.json";
+import "server-only";
+
+import { readFileSync } from "fs";
+import path from "path";
 
 export type CanonicalRuleSection = {
   endRuleId: string;
@@ -42,7 +45,13 @@ type CanonicalRegistryDocument = {
   source: string;
 };
 
-const canonicalRegistry = registry as CanonicalRegistryDocument;
+function loadCanonicalRegistry(): CanonicalRegistryDocument {
+  const registryPath = path.join(process.cwd(), "docs", "rule-registry-198.json");
+  const raw = readFileSync(registryPath, "utf8");
+  return JSON.parse(raw) as CanonicalRegistryDocument;
+}
+
+const canonicalRegistry = loadCanonicalRegistry();
 
 export const CANONICAL_RULE_COUNT = canonicalRegistry.ruleCount;
 export const CANONICAL_RULES = canonicalRegistry.rules;
