@@ -13,6 +13,7 @@ import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/requ
 import prisma from "@/lib/prisma";
 import { ensureLocationV2ForRestaurant } from "@/lib/production/legacy-sync";
 import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
+import { resolveVendorKey } from "@/components/sentry/vendor-catalog";
 
 type ScopedRestaurant = {
   accountId: string | null;
@@ -28,6 +29,27 @@ type GovernanceStateRow = {
   restaurant_id: number;
 };
 
+type GovernanceSealBlockerPayload = {
+  action: "upload_agreement" | "upload_source";
+  artifactKey: string;
+  ctaLabel: string;
+  error: string;
+  locationId: string;
+  locationName: string;
+  moduleId: "M01" | "M02";
+  vendor: string;
+};
+
+class GovernanceSealBlockedError extends Error {
+  payload: GovernanceSealBlockerPayload;
+
+  constructor(payload: GovernanceSealBlockerPayload) {
+    super(payload.error);
+    this.name = "GovernanceSealBlockedError";
+    this.payload = payload;
+  }
+}
+
 function getAuthErrorResponse(error: unknown) {
   if (!(error instanceof Error)) return null;
   if (error.message === "Unauthorized") {
@@ -40,6 +62,9 @@ function getAuthErrorResponse(error: unknown) {
 }
 
 function getGovernanceValidationErrorResponse(error: unknown) {
+  if (error instanceof GovernanceSealBlockedError) {
+    return NextResponse.json(error.payload, { status: 409 });
+  }
   if (!(error instanceof Error)) return null;
   if (error.message.startsWith("Seal blocked: ")) {
     return NextResponse.json({ error: error.message }, { status: 409 });
@@ -92,6 +117,12 @@ function normalizeVendorKey(value: string) {
   return value.trim().toLowerCase();
 }
 
+function buildUploadVendorCandidates(moduleId: "M01" | "M02", vendor: string) {
+  const display = vendor.trim();
+  const key = resolveVendorKey(moduleId, vendor).trim();
+  return [...new Set([display, key].filter(Boolean))];
+}
+
 function isSealedStatus(value: string | null | undefined) {
   return value === "sealed" || value === "seal";
 }
@@ -102,6 +133,14 @@ function getSourceArtifactKey(module: "M01" | "M02") {
 
 function getAgreementArtifactKey(module: "M01" | "M02") {
   return module === "M01" ? "m01-agreement" : "m02-agreement";
+}
+
+function getSourceArtifactLabel(module: "M01" | "M02") {
+  return module === "M01" ? "processor source file" : "settlement source file";
+}
+
+function getAgreementArtifactLabel(module: "M01" | "M02") {
+  return module === "M01" ? "signed merchant agreement" : "signed DSP agreement";
 }
 
 function buildExpectedGovernancePairs(
@@ -524,25 +563,32 @@ export async function POST(request: Request) {
       });
 
       const [latestSchema, latestContract, latestSourceUpload, latestAgreementUpload, stateRow] = await Promise.all([
-        tx.schema_registry_v2.findFirst({
-          where: {
-            location_id: location.id,
-            module: normalizedWorkspace.module,
-            vendor: normalizedWorkspace.vendor,
-          },
-          orderBy: [{ version: "desc" }, { id: "desc" }],
-          select: {
-            fields: true,
-            id: true,
-            location_id: true,
-            module: true,
-            sealed_at: true,
-            sha256: true,
-            status: true,
-            vendor: true,
-            version: true,
-          },
-        }),
+        (() => {
+          const uploadVendorCandidates = buildUploadVendorCandidates(
+            normalizedWorkspace.module,
+            normalizedWorkspace.vendor,
+          );
+
+          return tx.schema_registry_v2.findFirst({
+            where: {
+              location_id: location.id,
+              module: normalizedWorkspace.module,
+              vendor: normalizedWorkspace.vendor,
+            },
+            orderBy: [{ version: "desc" }, { id: "desc" }],
+            select: {
+              fields: true,
+              id: true,
+              location_id: true,
+              module: true,
+              sealed_at: true,
+              sha256: true,
+              status: true,
+              vendor: true,
+              version: true,
+            },
+          });
+        })(),
         tx.contract_configs_v2.findFirst({
           where: {
             location_id: location.id,
@@ -568,7 +614,9 @@ export async function POST(request: Request) {
             location_id: restaurant.id,
             module: normalizedWorkspace.module,
             superseded_by: null,
-            vendor: normalizedWorkspace.vendor,
+            vendor: {
+              in: buildUploadVendorCandidates(normalizedWorkspace.module, normalizedWorkspace.vendor),
+            },
           },
           orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
           select: {
@@ -582,7 +630,9 @@ export async function POST(request: Request) {
             location_id: restaurant.id,
             module: normalizedWorkspace.module,
             superseded_by: null,
-            vendor: normalizedWorkspace.vendor,
+            vendor: {
+              in: buildUploadVendorCandidates(normalizedWorkspace.module, normalizedWorkspace.vendor),
+            },
           },
           orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
           select: {
@@ -677,14 +727,28 @@ export async function POST(request: Request) {
       const sampleHeaders = normalizedWorkspace.fields.map((field) => field.source).filter(Boolean);
 
       if (action === "seal" && !latestSourceUpload) {
-        throw new Error(
-          `Seal blocked: upload the governed source file first (${getSourceArtifactKey(normalizedWorkspace.module)}).`,
-        );
+        throw new GovernanceSealBlockedError({
+          action: "upload_source",
+          artifactKey: getSourceArtifactKey(normalizedWorkspace.module),
+          ctaLabel: "Open Upload Data",
+          error: `Cannot seal ${normalizedWorkspace.module} ${normalizedWorkspace.vendor} workspace yet. Upload the governed ${getSourceArtifactLabel(normalizedWorkspace.module)} first.`,
+          locationId: restaurant.locationId,
+          locationName: restaurant.name,
+          moduleId: normalizedWorkspace.module,
+          vendor: normalizedWorkspace.vendor,
+        });
       }
       if (action === "seal" && !latestAgreementUpload) {
-        throw new Error(
-          `Seal blocked: upload the signed agreement first (${getAgreementArtifactKey(normalizedWorkspace.module)}).`,
-        );
+        throw new GovernanceSealBlockedError({
+          action: "upload_agreement",
+          artifactKey: getAgreementArtifactKey(normalizedWorkspace.module),
+          ctaLabel: "Open Upload Data",
+          error: `Cannot seal ${normalizedWorkspace.module} ${normalizedWorkspace.vendor} workspace yet. Upload the ${getAgreementArtifactLabel(normalizedWorkspace.module)} PDF first.`,
+          locationId: restaurant.locationId,
+          locationName: restaurant.name,
+          moduleId: normalizedWorkspace.module,
+          vendor: normalizedWorkspace.vendor,
+        });
       }
 
       const [schemaRecord, contractRecord] = await Promise.all([
@@ -918,6 +982,10 @@ export async function POST(request: Request) {
     const authResponse = getAuthErrorResponse(error);
     if (authResponse) {
       return withRequestHeaders(authResponse, requestContext);
+    }
+    const validationResponse = getGovernanceValidationErrorResponse(error);
+    if (validationResponse) {
+      return withRequestHeaders(validationResponse, requestContext);
     }
 
     if (isMissingGovernanceSchema(error)) {

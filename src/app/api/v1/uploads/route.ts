@@ -26,6 +26,15 @@ type ScopedRestaurant = {
   unit_id: string | null;
 };
 
+function extractGovernedPosHeaders(value: unknown) {
+  if (!value || typeof value !== "object") return [];
+  const posSchema = (value as { posSchema?: unknown }).posSchema;
+  if (!posSchema || typeof posSchema !== "object") return [];
+  const validatedHeaders = (posSchema as { validatedHeaders?: unknown }).validatedHeaders;
+  if (!Array.isArray(validatedHeaders)) return [];
+  return validatedHeaders.map((entry) => String(entry).trim()).filter(Boolean);
+}
+
 function getAuthErrorResponse(error: unknown) {
   if (!(error instanceof Error)) return null;
   if (error.message === "Unauthorized") {
@@ -358,10 +367,45 @@ export async function POST(request: Request) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    let expectedHeadersOverride: string[] | undefined;
+
+    if ((artifactKey === "m01-pos" || artifactKey === "m02-pos") && vendorName) {
+      const locationRecord = await prisma.locations_v2.findFirst({
+        where: {
+          deleted_at: null,
+          external_id: locationId,
+        },
+        orderBy: [{ id: "desc" }],
+        select: {
+          id: true,
+        },
+      });
+
+      if (locationRecord) {
+        const latestSchema = await prisma.schema_registry_v2.findFirst({
+          where: {
+            location_id: locationRecord.id,
+            module: moduleId,
+            vendor: vendorName,
+          },
+          orderBy: [{ version: "desc" }, { id: "desc" }],
+          select: {
+            fields: true,
+          },
+        });
+
+        const governedHeaders = extractGovernedPosHeaders(latestSchema?.fields);
+        if (governedHeaders.length > 0) {
+          expectedHeadersOverride = governedHeaders;
+        }
+      }
+    }
+
     const validation = await validateUploadArtifact({
       artifactKey,
       buffer,
       contentType: file.type,
+      expectedHeadersOverride,
       fileName: file.name,
       vendorKey,
       vendorName,

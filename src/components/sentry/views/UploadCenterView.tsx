@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { LocationSourceSettingsModal } from "../overlays/LocationSourceSettingsModal";
 import { Badge } from "../ui/primitives";
 import type { IntakeState, LocationSourceConfig, UploadModule, UploadReceipt } from "../types";
@@ -49,10 +50,14 @@ const moduleMeta = {
 } as const;
 
 export function UploadCenterView({
+  activeArtifactHint,
   activeLocationId,
+  activeModuleHint,
   activeLocationModules,
   activeLocationName,
   activeSourceConfig,
+  activeVendorKeyHint,
+  activeVendorNameHint,
   canManageSources,
   intakeState,
   modules,
@@ -61,12 +66,17 @@ export function UploadCenterView({
   onDirectUpload,
   onRemoveUpload,
   onResetLocationUploads,
+  onOpenSchema,
   uploadFeedback,
 }: {
+  activeArtifactHint?: string | null;
   activeLocationId: string | null;
+  activeModuleHint?: "M01" | "M02" | null;
   activeLocationModules: Array<"M01" | "M02">;
   activeLocationName: string | null;
   activeSourceConfig: LocationSourceConfig | null;
+  activeVendorKeyHint?: string | null;
+  activeVendorNameHint?: string | null;
   canManageSources: boolean;
   contractState: Record<string, Record<string, string>>;
   intakeState: Record<string, IntakeState>;
@@ -103,6 +113,7 @@ export function UploadCenterView({
   } | null>(null);
   const [pdfViewer, setPdfViewer] = useState<PdfViewerState | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const focusedCardRef = useRef<HTMLDivElement | null>(null);
   const availableModules = useMemo(() => {
     if (activeLocationModules.length > 0) {
       return activeLocationModules;
@@ -124,10 +135,15 @@ export function UploadCenterView({
   }, [activeLocationModules, activeSourceConfig, modules]);
 
   useEffect(() => {
+    if (activeModuleHint && availableModules.includes(activeModuleHint) && activeModuleHint !== activeModule) {
+      setActiveModule(activeModuleHint);
+      return;
+    }
+
     if (!availableModules.includes(activeModule) && availableModules[0]) {
       setActiveModule(availableModules[0]);
     }
-  }, [activeModule, availableModules]);
+  }, [activeModule, activeModuleHint, availableModules]);
 
   useEffect(() => {
     setCardState({});
@@ -137,6 +153,18 @@ export function UploadCenterView({
       fileInputRef.current.value = "";
     }
   }, [activeLocationId]);
+
+  useEffect(() => {
+    if (!activeArtifactHint || !activeLocationId) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      focusedCardRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeArtifactHint, activeLocationId, activeModuleHint, activeVendorKeyHint]);
 
   async function handleViewExtractedText({
     artifactKey,
@@ -403,6 +431,19 @@ export function UploadCenterView({
             </button>
           ) : null}
         </div>
+        {activeArtifactHint && activeLocationName ? (
+          <div className="mt-4 rounded-2xl border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)] px-4 py-3">
+            <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
+              Required Next Upload
+            </div>
+            <div className="mt-2 text-sm text-[var(--text)]">
+              Upload the highlighted governed document for <span className="font-semibold">{activeLocationName}</span>
+              {activeModuleHint ? <> in <span className="font-semibold">{activeModuleHint}</span></> : null}
+              {activeVendorNameHint ? <> with <span className="font-semibold">{activeVendorNameHint}</span></> : null}
+              .
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="border-b border-[var(--border)] bg-[var(--surface)] px-5 py-4">
@@ -577,6 +618,18 @@ export function UploadCenterView({
                 {activeModule === "M02" ? (
                   <div className="space-y-5">
                     <DocumentSection
+                      emphasized={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === settlementArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                      }
+                      emphasisRef={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === settlementArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                          ? focusedCardRef
+                          : undefined
+                      }
                       title="1 | DSP Settlement CSV"
                       subtitle={`${vendor.name} order-level statement`}
                       primaryLabel="Upload CSV"
@@ -615,11 +668,24 @@ export function UploadCenterView({
                           ? () => onRemoveUpload(activeModule, settlementArtifactKey, vendor.key)
                           : undefined
                       }
+                      onOpenSchema={onOpenSchema}
                       emptyTitle={`Drop ${vendor.name} CSV or browse`}
                       emptySub="Order-level export | exact portal download"
                     />
 
                     <DocumentSection
+                      emphasized={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === posArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                      }
+                      emphasisRef={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === posArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                          ? focusedCardRef
+                          : undefined
+                      }
                       title="2 | POS Summary by Channel"
                       subtitle="POS net sales breakdown for the same period"
                       primaryLabel="Upload CSV"
@@ -655,11 +721,24 @@ export function UploadCenterView({
                           ? () => onRemoveUpload(activeModule, posArtifactKey, vendor.key)
                           : undefined
                       }
+                      onOpenSchema={onOpenSchema}
                       emptyTitle="Drop POS Summary CSV or browse"
                       emptySub="channel | pos_net_sales | commission_variance"
                     />
 
                     <DocumentSection
+                      emphasized={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === agreementArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                      }
+                      emphasisRef={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === agreementArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                          ? focusedCardRef
+                          : undefined
+                      }
                       title="3 | DSP Agreement"
                       subtitle="Signed commercial agreement including the rate schedule"
                       primaryLabel="Upload PDF"
@@ -699,11 +778,24 @@ export function UploadCenterView({
                           ? () => onRemoveUpload(activeModule, agreementArtifactKey, vendor.key)
                           : undefined
                       }
+                      onOpenSchema={onOpenSchema}
                       emptyTitle={`Drop signed ${vendor.name} agreement PDF or browse`}
                       emptySub="PDF only | signed executed copy"
                     />
 
                     <DocumentSection
+                      emphasized={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === bankArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                      }
+                      emphasisRef={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === bankArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                          ? focusedCardRef
+                          : undefined
+                      }
                       title="4 | Bank Statement"
                       subtitle="Matching-period deposit statement for payout reconciliation"
                       primaryLabel="Upload PDF"
@@ -739,6 +831,7 @@ export function UploadCenterView({
                           ? () => onRemoveUpload(activeModule, bankArtifactKey, vendor.key)
                           : undefined
                       }
+                      onOpenSchema={onOpenSchema}
                       emptyTitle="Drop bank statement PDF or browse"
                       emptySub="PDF only | matching period"
                     />
@@ -746,6 +839,18 @@ export function UploadCenterView({
                 ) : (
                   <div className="space-y-5">
                     <DocumentSection
+                      emphasized={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === settlementArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                      }
+                      emphasisRef={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === settlementArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                          ? focusedCardRef
+                          : undefined
+                      }
                       title="1 | Processor Statement"
                       subtitle={`${vendor.name} raw processor export or original statement PDF`}
                       primaryLabel="Upload File"
@@ -784,11 +889,24 @@ export function UploadCenterView({
                           ? () => onRemoveUpload(activeModule, settlementArtifactKey, vendor.key)
                           : undefined
                       }
+                      onOpenSchema={onOpenSchema}
                       emptyTitle={`Drop ${vendor.name} CSV/PDF or browse`}
                       emptySub="CSV preferred | original PDF accepted | no reformatting"
                     />
 
                     <DocumentSection
+                      emphasized={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === posArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                      }
+                      emphasisRef={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === posArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                          ? focusedCardRef
+                          : undefined
+                      }
                       title="2 | POS Export CSV"
                       subtitle="Matching-period POS export for cross-system reconciliation"
                       primaryLabel="Upload CSV"
@@ -824,11 +942,24 @@ export function UploadCenterView({
                           ? () => onRemoveUpload(activeModule, posArtifactKey, vendor.key)
                           : undefined
                       }
+                      onOpenSchema={onOpenSchema}
                       emptyTitle="Drop POS export CSV or browse"
                       emptySub="gross_sales | tenders | transactions"
                     />
 
                     <DocumentSection
+                      emphasized={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === agreementArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                      }
+                      emphasisRef={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === agreementArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                          ? focusedCardRef
+                          : undefined
+                      }
                       title="3 | Merchant Agreement"
                       subtitle="Signed merchant services agreement with rate schedule"
                       primaryLabel="Upload PDF"
@@ -868,11 +999,24 @@ export function UploadCenterView({
                           ? () => onRemoveUpload(activeModule, agreementArtifactKey, vendor.key)
                           : undefined
                       }
+                      onOpenSchema={onOpenSchema}
                       emptyTitle={`Drop signed ${vendor.name} agreement PDF or browse`}
                       emptySub="PDF only | signed executed copy"
                     />
 
                     <DocumentSection
+                      emphasized={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === bankArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                      }
+                      emphasisRef={
+                        activeModule === activeModuleHint &&
+                        activeArtifactHint === bankArtifactKey &&
+                        (!activeVendorKeyHint || activeVendorKeyHint === vendor.key)
+                          ? focusedCardRef
+                          : undefined
+                      }
                       title="4 | Bank Statement"
                       subtitle="Matching-period bank statement for processor deposit reconciliation"
                       primaryLabel="Upload PDF"
@@ -908,6 +1052,7 @@ export function UploadCenterView({
                           ? () => onRemoveUpload(activeModule, bankArtifactKey, vendor.key)
                           : undefined
                       }
+                      onOpenSchema={onOpenSchema}
                       emptyTitle="Drop bank statement PDF or browse"
                       emptySub="PDF only | matching period"
                     />
@@ -1142,6 +1287,8 @@ function UploadStateBadge({
 }
 
 function DocumentSection({
+  emphasized = false,
+  emphasisRef,
   title,
   subtitle,
   primaryLabel,
@@ -1151,12 +1298,15 @@ function DocumentSection({
   onViewExtractedText,
   canViewExtractedText = false,
   onRemove,
+  onOpenSchema,
   intake,
   hasUpload,
   uploadState,
   emptyTitle,
   emptySub,
 }: {
+  emphasized?: boolean;
+  emphasisRef?: RefObject<HTMLDivElement | null>;
   title: string;
   subtitle: string;
   primaryLabel: string;
@@ -1166,6 +1316,7 @@ function DocumentSection({
   onViewExtractedText?: () => void;
   canViewExtractedText?: boolean;
   onRemove?: () => void;
+  onOpenSchema?: () => void;
   intake?: IntakeState;
   hasUpload: boolean;
   uploadState?: UploadCardState;
@@ -1173,7 +1324,19 @@ function DocumentSection({
   emptySub: string;
 }) {
   return (
-    <div className="rounded-xl border border-[var(--border)] p-3">
+    <div
+      ref={emphasized ? emphasisRef : undefined}
+      className={`rounded-xl border p-3 transition ${
+        emphasized
+          ? "border-[var(--accent)] bg-[rgba(214,48,49,0.04)] shadow-[0_0_0_3px_rgba(214,48,49,0.08)]"
+          : "border-[var(--border)]"
+      }`}
+    >
+      {emphasized ? (
+        <div className="mb-3 inline-flex rounded-full border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.08)] px-2.5 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]">
+          Upload This Next
+        </div>
+      ) : null}
       <div className="mb-2 flex items-center justify-between gap-3">
         <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
           {title}
@@ -1237,7 +1400,15 @@ function DocumentSection({
           {uploadState.message}
         </div>
       ) : null}
-      <UploadTile intake={intake} hasUpload={hasUpload} emptyTitle={emptyTitle} emptySub={emptySub} onClick={onPrimary} compact />
+      <UploadTile
+        intake={intake}
+        hasUpload={hasUpload}
+        emptyTitle={emptyTitle}
+        emptySub={emptySub}
+        onClick={onPrimary}
+        onOpenSchema={onOpenSchema}
+        compact
+      />
     </div>
   );
 }
@@ -1248,6 +1419,7 @@ function UploadTile({
   emptyTitle,
   emptySub,
   onClick,
+  onOpenSchema,
   compact = false,
 }: {
   intake?: IntakeState;
@@ -1255,11 +1427,14 @@ function UploadTile({
   emptyTitle: string;
   emptySub: string;
   onClick: () => void;
+  onOpenSchema?: () => void;
   compact?: boolean;
 }) {
   const hasParseWarning = Boolean(intake?.parseWarnings?.length);
   const hasSchemaWarning = intake?.matchPct !== undefined && intake.matchPct < 60;
   const reviewState = hasParseWarning || hasSchemaWarning;
+  const schemaGatePassed = Boolean(intake?.schema) && !hasSchemaWarning;
+  const fieldsGatePassed = Boolean(intake?.fields) && !reviewState;
 
   return (
     <>
@@ -1330,6 +1505,17 @@ function UploadTile({
           <div className="mt-2 text-[11px] leading-5 text-[var(--muted)]">
             Verify this is the correct file and that the Schema Registry column mappings are up to date. Run the monthly proof cycle if vendor has changed their export format.
           </div>
+          {onOpenSchema ? (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={onOpenSchema}
+                className="rounded-lg border border-[rgba(214,48,49,0.24)] bg-white px-3 py-2 text-[12px] font-semibold text-[var(--accent)] transition hover:border-[var(--accent)] hover:bg-[rgba(214,48,49,0.06)]"
+              >
+                Open Schema Registry
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -1343,8 +1529,8 @@ function UploadTile({
         <div className="mt-3 flex gap-2">
           <IntakeDot done={Boolean(intake?.uploaded)} label="Upload" />
           <IntakeDot done={Boolean(intake?.hash)} label="Hash" />
-          <IntakeDot done={Boolean(intake?.schema)} label="Schema" />
-          <IntakeDot done={hasParseWarning ? false : Boolean(intake?.fields)} label="Fields" />
+          <IntakeDot done={schemaGatePassed} label="Schema" />
+          <IntakeDot done={fieldsGatePassed} label="Fields" />
         </div>
       ) : null}
     </>

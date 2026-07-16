@@ -90,7 +90,7 @@ function SchemaWorkspaceCard({
             {workspace.account} | {workspace.module} | {workspace.vendor}
           </div>
           <div className="text-sm text-[var(--muted)]">
-            Column mappings, contract config, missing fields, proof-zone upload, and vault state.
+            Column mappings, POS source schema, contract config, proof-zone upload, and vault state.
           </div>
         </div>
         <div className="flex gap-2">
@@ -146,7 +146,7 @@ function SchemaWorkspaceCard({
                 },
                 {
                   label: "What It Does",
-                  text: "Controls how uploaded data is interpreted before certification, scoring, and CAAR generation.",
+                  text: "Controls how uploaded source data is interpreted before certification, scoring, and CAAR generation.",
                 },
                 {
                   label: "Why It Matters",
@@ -182,6 +182,49 @@ function SchemaWorkspaceCard({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <PanelTitle
+              title="POS Source Schema"
+              tipTitle="Schema Registry / POS Source Schema"
+              sections={[
+                {
+                  label: "What It Is",
+                  text: "A governed sample POS export header set uploaded or entered inside the workspace editor.",
+                },
+                {
+                  label: "What It Does",
+                  text: "Defines the expected live POS export columns used by Upload Data validation for recurring POS evidence.",
+                },
+                {
+                  label: "Why It Matters",
+                  text: "It lets the platform seal the POS file shape, not just the processor or DSP source mapping, so recurring uploads can be checked against governed truth.",
+                },
+              ]}
+              footerLabel="Seal Status"
+              footerValue={
+                workspace.posSchema?.validatedHeaders?.length
+                  ? `${workspace.posSchema.validatedHeaders.length} headers validated`
+                  : "POS schema not validated yet"
+              }
+            />
+            <div className="mt-4 flex flex-wrap gap-2">
+              {workspace.posSchema?.validatedHeaders?.length ? (
+                workspace.posSchema.validatedHeaders.map((header) => (
+                  <span
+                    key={`${workspace.accountId}:${workspace.locationId ?? "global"}:${workspace.module}:${workspace.vendor}:pos:${header}`}
+                    className="rounded-full border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] px-3 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--success)]"
+                  >
+                    {header}
+                  </span>
+                ))
+              ) : (
+                <div className="text-sm text-[var(--muted)]">
+                  No governed POS headers have been validated for this workspace yet.
+                </div>
+              )}
             </div>
           </div>
 

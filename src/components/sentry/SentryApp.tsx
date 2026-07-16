@@ -99,11 +99,30 @@ type PendingCertificationRequest = {
 
 type CertificationBlockerState = {
   blockers: string[];
+  description?: string;
+  eyebrow?: string;
   locationId: string;
   locationName: string;
+  nextStepDetail?: string;
   primaryAction: LocationWorkflowState["primaryAction"];
   primaryLabel: string;
   requirements: LocationWorkflowState["requirements"];
+  uploadArtifactKey?: string;
+  uploadModuleTarget?: "M01" | "M02";
+  uploadVendorName?: string;
+  uploadVendorKey?: string;
+};
+
+type GovernanceWorkspaceConflictPayload = {
+  action?: "upload_agreement" | "upload_source";
+  artifactKey?: string;
+  ctaLabel?: string;
+  error?: string;
+  locationId?: string;
+  locationName?: string;
+  moduleId?: "M01" | "M02";
+  vendor?: string;
+  workspace?: PersistedWorkspaceRecord;
 };
 
 const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
@@ -256,6 +275,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     accountId: string;
     id: string;
     name: string;
+    preferredArtifactKey?: string;
+    preferredModule?: "M01" | "M02";
+    preferredVendorKey?: string;
+    preferredVendorName?: string;
   } | null>(null);
   const [uploadFeedback, setUploadFeedback] = useState<UploadReceipt | null>(null);
   const [supportMode, setSupportMode] = useState<SupportModeState>({
@@ -1037,7 +1060,15 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     setShowAddLocation(true);
   }
 
-  function handleOpenLocationUploads(locationId: string) {
+  function handleOpenLocationUploads(
+    locationId: string,
+    options?: {
+      artifactKey?: string;
+      moduleId?: "M01" | "M02";
+      vendorKey?: string;
+      vendorName?: string;
+    },
+  ) {
     const location = visibleLocations.find((item) => item.id === locationId);
     if (!location) {
       return;
@@ -1047,6 +1078,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       accountId: location.accountId,
       id: location.id,
       name: location.name,
+      preferredArtifactKey: options?.artifactKey,
+      preferredModule: options?.moduleId,
+      preferredVendorKey: options?.vendorKey,
+      preferredVendorName: options?.vendorName,
     });
     startTransition(() => setActiveViewOverride("uploads"));
   }
@@ -1551,6 +1586,72 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     return processArtifactFileUpload(target, file, vendor);
   }
 
+  async function handleWorkspaceGovernedArtifactUpload(
+    workspace: SchemaWorkspace,
+    artifactKind: "source" | "agreement",
+    file: File,
+  ): Promise<UploadReceipt | null> {
+    if (!workspace.locationId) {
+      showToast("This workspace is not attached to a location yet.");
+      return null;
+    }
+
+    const targetLocation = runtimeLocationState.find((item) => item.id === workspace.locationId) ?? null;
+    const scopedAccountId = targetLocation?.accountId ?? workspace.accountId;
+    if (!targetLocation || !scopedAccountId) {
+      showToast("The governed workspace location could not be resolved.");
+      return null;
+    }
+
+    const artifactKey =
+      artifactKind === "source"
+        ? workspace.module === "M01"
+          ? "m01-processor"
+          : "m02-settlement"
+        : workspace.module === "M01"
+          ? "m01-agreement"
+          : "m02-agreement";
+
+    const uploadModule =
+      resolveUploadModulesForAccount(scopedAccountId).find((item) => item.id === workspace.module) ??
+      buildScopedUploadModules(uploadState, scopedAccountId).find((item) => item.id === workspace.module) ??
+      buildScopedUploadModules(uploadModules, scopedAccountId).find((item) => item.id === workspace.module) ??
+      null;
+
+    const artifact =
+      uploadModule?.artifacts.find(
+        (item) =>
+          item.key === artifactKey ||
+          item.key.startsWith(artifactKey) ||
+          artifactKey.startsWith(item.key),
+      ) ??
+      resolveArtifactTemplate(uploadState, scopedAccountId, workspace.module, artifactKey) ??
+      resolveArtifactTemplate(uploadModules, scopedAccountId, workspace.module, artifactKey) ??
+      null;
+
+    if (!uploadModule || !artifact) {
+      showToast("The governed upload slot could not be resolved for this workspace.");
+      return null;
+    }
+
+    return processArtifactFileUpload(
+      {
+        accountId: uploadModule.accountId,
+        artifact,
+        locationId: targetLocation.id,
+        locationName: targetLocation.name,
+        moduleId: workspace.module,
+        vendorKey: resolveVendorKey(workspace.module, workspace.vendor),
+        vendorName: workspace.vendor,
+      },
+      file,
+      {
+        key: resolveVendorKey(workspace.module, workspace.vendor),
+        name: workspace.vendor,
+      },
+    );
+  }
+
   async function persistWorkspace(workspace: SchemaWorkspace, action: "draft" | "seal") {
     try {
       const response = await fetch("/api/v1/governance/workspaces", {
@@ -1565,10 +1666,47 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       });
 
       const payload = (await response.json().catch(() => null)) as
-        | { error?: string; workspace?: PersistedWorkspaceRecord }
+        | GovernanceWorkspaceConflictPayload
         | null;
 
       if (!response.ok || !payload?.workspace) {
+        if (
+          response.status === 409 &&
+          payload?.locationId &&
+          payload.locationName &&
+          payload.moduleId &&
+          payload.error
+        ) {
+          const documentLabel =
+            payload.action === "upload_agreement"
+              ? payload.moduleId === "M01"
+                ? `signed ${payload.vendor ?? ""} merchant agreement PDF`.trim()
+                : `signed ${payload.vendor ?? ""} DSP agreement PDF`.trim()
+              : payload.moduleId === "M01"
+                ? `${payload.vendor ?? "selected"} processor statement source file`
+                : `${payload.vendor ?? "selected"} settlement source file`;
+          const workflow = workflowByLocation[payload.locationId];
+          setCertificationBlocker({
+            blockers: [payload.error],
+            description:
+              "This workspace cannot be sealed yet. Open DIY Access, upload the missing governed document from the POS Source Schema or Contract Config workflow, then return here and click Seal Contract Config again.",
+            eyebrow: "Workspace Sealing Blocked",
+            locationId: payload.locationId,
+            locationName: payload.locationName,
+            nextStepDetail: `Next step: open DIY Access for ${payload.locationName}, switch to ${payload.moduleId}, then upload the ${documentLabel} directly in Schema Editor.`,
+            primaryAction: "diy",
+            primaryLabel: "Open DIY Access",
+            requirements: workflow?.requirements ?? [],
+            uploadArtifactKey: payload.artifactKey,
+            uploadModuleTarget: payload.moduleId,
+            uploadVendorKey:
+              payload.vendor && payload.moduleId
+                ? resolveVendorKey(payload.moduleId, payload.vendor)
+                : undefined,
+            uploadVendorName: payload.vendor,
+          });
+          return null;
+        }
         showToast(payload?.error ?? "Unable to save the governance workspace.");
         return null;
       }
@@ -2398,11 +2536,15 @@ function handleCompleteOnboarding(locationId: string) {
           accounts={wgsAccountState}
           activeView={activeView}
           activeUploadLocationId={activeUploadLocation?.id ?? visibleLocations[0]?.id ?? null}
+          activeUploadArtifactHint={activeUploadLocation?.preferredArtifactKey ?? null}
+          activeUploadModuleHint={activeUploadLocation?.preferredModule ?? null}
           activeUploadModules={activeUploadModules}
           activeUploadLocationName={activeUploadLocation?.name ?? visibleLocations[0]?.name ?? null}
           activeSupportAccountId={getScopedAccountId()}
           activeSupportAccountName={getScopedAccountName()}
           activeUploadSourceConfig={activeUploadSourceConfig}
+          activeUploadVendorKeyHint={activeUploadLocation?.preferredVendorKey ?? null}
+          activeUploadVendorNameHint={activeUploadLocation?.preferredVendorName ?? null}
           diyLocationSourceConfigs={diyLocationSourceConfigs}
           approvals={wgsApprovalState}
           averageTrust={averageTrust}
@@ -2515,13 +2657,48 @@ function handleCompleteOnboarding(locationId: string) {
       ) : null}
 
       {editingWorkspace ? (
+        (() => {
+          const vendorKey = resolveVendorKey(editingWorkspace.module, editingWorkspace.vendor);
+          const sourceArtifactKey = editingWorkspace.module === "M01" ? "m01-processor" : "m02-settlement";
+          const agreementArtifactKey = editingWorkspace.module === "M01" ? "m01-agreement" : "m02-agreement";
+          const sourceIntake =
+            editingWorkspace.locationId
+              ? artifactIntakeState[
+                  getArtifactStateKey(
+                    editingWorkspace.accountId,
+                    editingWorkspace.locationId,
+                    editingWorkspace.module,
+                    sourceArtifactKey,
+                    vendorKey,
+                  )
+                ] ?? null
+              : null;
+          const agreementIntake =
+            editingWorkspace.locationId
+              ? artifactIntakeState[
+                  getArtifactStateKey(
+                    editingWorkspace.accountId,
+                    editingWorkspace.locationId,
+                    editingWorkspace.module,
+                    agreementArtifactKey,
+                    vendorKey,
+                  )
+                ] ?? null
+              : null;
+
+          return (
         <SchemaEditorModal
           workspace={editingWorkspace}
           onClose={() => setEditingWorkspace(null)}
           onSave={handleSaveWorkspace}
           onSeal={handleSealWorkspace}
+          onUploadGovernedArtifact={handleWorkspaceGovernedArtifactUpload}
+          governedSourceIntake={sourceIntake}
+          governedAgreementIntake={agreementIntake}
           role={effectiveSession?.role ?? "Viewer"}
         />
+          );
+        })()
       ) : null}
 
       {editingWgsUser || creatingWgsUser ? (
@@ -2617,11 +2794,21 @@ function handleCompleteOnboarding(locationId: string) {
       {certificationBlocker ? (
         <WorkflowBlockerModal
           blockers={certificationBlocker.blockers}
+          description={certificationBlocker.description}
+          eyebrow={certificationBlocker.eyebrow}
           locationName={certificationBlocker.locationName}
+          nextStepDetail={certificationBlocker.nextStepDetail}
           onClose={() => setCertificationBlocker(null)}
           onOpenDiy={handleOpenDiy}
           onOpenOnboarding={() => handleOpenOnboarding(certificationBlocker.locationId)}
-          onOpenUploads={() => handleOpenLocationUploads(certificationBlocker.locationId)}
+          onOpenUploads={() =>
+            handleOpenLocationUploads(certificationBlocker.locationId, {
+              artifactKey: certificationBlocker.uploadArtifactKey,
+              moduleId: certificationBlocker.uploadModuleTarget,
+              vendorKey: certificationBlocker.uploadVendorKey,
+              vendorName: certificationBlocker.uploadVendorName,
+            })
+          }
           primaryAction={certificationBlocker.primaryAction}
           primaryLabel={certificationBlocker.primaryLabel}
           requirements={certificationBlocker.requirements}

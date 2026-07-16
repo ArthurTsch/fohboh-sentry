@@ -66,6 +66,53 @@ export type CaarDimension = {
   weight: string;
 };
 
+export type CaarProvenanceKind = "direct_upload" | "sealed_config" | "rule_engine" | "synthetic";
+
+export type CaarFieldAudit = {
+  field: string;
+  provenance: CaarProvenanceKind;
+  supported: boolean;
+  trace: string;
+  value: string;
+};
+
+export type CaarEvidenceTrace = {
+  artifactKey: string;
+  fileName: string | null;
+  label: string;
+  matchPct: number | null;
+  notes: string[];
+  pageCount: number | null;
+  provenance: CaarProvenanceKind;
+  rows: number | null;
+  schemaOk: boolean;
+  sha256: string | null;
+  status: "missing" | "provided" | "review";
+  trace: string;
+  uploadedAt: string | null;
+  vendor: string | null;
+};
+
+export type CaarRuleCitationSummary = {
+  firedCount: number;
+  ruleId: string;
+  ruleVersion: string;
+  sampleEvidenceCount: number;
+  varianceDisplay: string;
+};
+
+export type CaarTraceability = {
+  certCompletedAt: string | null;
+  certRunId: number | null;
+  courtAdmissible: boolean | null;
+  evidence: CaarEvidenceTrace[];
+  fieldAudit: CaarFieldAudit[];
+  module: "M01" | "M02" | null;
+  ruleCitations: CaarRuleCitationSummary[];
+  ruleSetVersion: string | null;
+  sealedAt: string | null;
+};
+
 export type CaarRecord = {
   accountId: string;
   id: string;
@@ -79,6 +126,7 @@ export type CaarRecord = {
   narrative: string;
   findings: string[];
   dimensions: CaarDimension[];
+  traceability?: CaarTraceability;
 };
 
 export type LogRecord = {
@@ -327,6 +375,15 @@ export type ContractInputDefinition = {
   help: string;
 };
 
+export type PosSchemaGovernance = {
+  extractedAt?: string;
+  extractedHeaders: string[];
+  manualHeaders: string[];
+  sourceFileName?: string;
+  status: "missing" | "draft" | "validated";
+  validatedHeaders: string[];
+};
+
 export type SchemaWorkspace = {
   accountId: string;
   module: "M01" | "M02";
@@ -337,6 +394,7 @@ export type SchemaWorkspace = {
   status?: "draft" | "sealed";
   fields: SchemaField[];
   contract: ContractField[];
+  posSchema?: PosSchemaGovernance;
   vault: {
     state?: "draft" | "sealed";
     version: string;

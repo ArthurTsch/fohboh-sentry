@@ -37,12 +37,16 @@ import { WgsAdminView } from "./views/WgsAdminView";
 export function SentryViewRouter({
   accounts,
   activeView,
+  activeUploadArtifactHint,
   activeUploadLocationId,
+  activeUploadModuleHint,
   activeUploadModules,
   activeUploadLocationName,
   activeSupportAccountId,
   activeSupportAccountName,
   activeUploadSourceConfig,
+  activeUploadVendorKeyHint,
+  activeUploadVendorNameHint,
   diyLocationSourceConfigs,
   approvals,
   averageTrust,
@@ -101,12 +105,16 @@ export function SentryViewRouter({
 }: {
   accounts: WgsAccount[];
   activeView: ViewId;
+  activeUploadArtifactHint?: string | null;
   activeUploadLocationId: string | null;
+  activeUploadModuleHint?: "M01" | "M02" | null;
   activeUploadModules: Array<"M01" | "M02">;
   activeUploadLocationName: string | null;
   activeSupportAccountId: string | null;
   activeSupportAccountName: string;
   activeUploadSourceConfig: LocationSourceConfig | null;
+  activeUploadVendorKeyHint?: string | null;
+  activeUploadVendorNameHint?: string | null;
   diyLocationSourceConfigs: Record<string, LocationSourceConfig>;
   approvals: WgsApproval[];
   averageTrust: number;
@@ -279,10 +287,14 @@ export function SentryViewRouter({
   if (activeView === "uploads") {
     return (
       <UploadCenterView
+        activeArtifactHint={activeUploadArtifactHint}
         activeLocationId={activeUploadLocationId}
+        activeModuleHint={activeUploadModuleHint}
         activeLocationModules={activeUploadModules}
         activeLocationName={activeUploadLocationName}
         activeSourceConfig={activeUploadSourceConfig}
+        activeVendorKeyHint={activeUploadVendorKeyHint}
+        activeVendorNameHint={activeUploadVendorNameHint}
         canManageSources={role === "Admin" || role === "SuperAdmin" || role === "WGS Manager"}
         contractState={artifactContractState}
         intakeState={artifactIntakeState}

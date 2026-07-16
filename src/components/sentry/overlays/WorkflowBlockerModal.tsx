@@ -2,7 +2,10 @@ import type { LocationWorkflowAction, WorkflowRequirementStatus } from "../types
 
 export function WorkflowBlockerModal({
   blockers,
+  description,
+  eyebrow,
   locationName,
+  nextStepDetail,
   onClose,
   onOpenDiy,
   onOpenOnboarding,
@@ -12,7 +15,10 @@ export function WorkflowBlockerModal({
   requirements,
 }: {
   blockers: string[];
+  description?: string;
+  eyebrow?: string;
   locationName: string;
+  nextStepDetail?: string;
   onClose: () => void;
   onOpenDiy: () => void;
   onOpenOnboarding: () => void;
@@ -21,22 +27,33 @@ export function WorkflowBlockerModal({
   primaryLabel: string;
   requirements: WorkflowRequirementStatus[];
 }) {
+  const primaryIsUploadAction = primaryAction === "uploads";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-4xl rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div className="border-b border-[var(--border)] px-6 py-5">
           <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
-            Certification Blocked
+            {eyebrow ?? "Certification Blocked"}
           </div>
           <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
             {locationName}
           </div>
           <div className="mt-1 text-sm text-[var(--muted)]">
-            Complete the missing governed setup below before running the next certification cycle.
+            {description ?? "Complete the missing governed setup below before running the next certification cycle."}
           </div>
         </div>
 
         <div className="space-y-4 px-6 py-6">
+          {nextStepDetail ? (
+            <div className="rounded-2xl border border-[rgba(0,0,0,0.08)] bg-[var(--surface)] px-4 py-4">
+              <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
+                What To Do Next
+              </div>
+              <div className="mt-2 text-sm leading-6 text-[var(--text)]">{nextStepDetail}</div>
+            </div>
+          ) : null}
+
           <div className="grid gap-3 md:grid-cols-3">
             {requirements.map((requirement) => (
               <div
@@ -90,16 +107,18 @@ export function WorkflowBlockerModal({
           >
             {primaryLabel}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              onOpenUploads();
-              onClose();
-            }}
-            className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
-          >
-            Open Upload Data
-          </button>
+          {!primaryIsUploadAction ? (
+            <button
+              type="button"
+              onClick={() => {
+                onOpenUploads();
+                onClose();
+              }}
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+            >
+              Open Upload Data
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => {

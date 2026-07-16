@@ -36,6 +36,7 @@ export async function validateUploadArtifact({
   artifactKey,
   buffer,
   contentType,
+  expectedHeadersOverride,
   fileName,
   vendorKey,
   vendorName,
@@ -43,6 +44,7 @@ export async function validateUploadArtifact({
   artifactKey: string;
   buffer: Buffer;
   contentType: string;
+  expectedHeadersOverride?: string[] | null;
   fileName: string;
   vendorKey?: string | null;
   vendorName?: string | null;
@@ -90,7 +92,10 @@ export async function validateUploadArtifact({
     .filter(Boolean);
   const rows = Math.max(csvLines.length - 1, 0);
   const dataRows = csvLines.slice(1).map((line) => line.split(",").map((cell) => cell.trim()));
-  const expectedHeaders = getExpectedHeaders(artifactKey, vendorKey);
+  const expectedHeaders =
+    expectedHeadersOverride && expectedHeadersOverride.length > 0
+      ? expectedHeadersOverride
+      : getExpectedHeaders(artifactKey, vendorKey);
   const normalizedExpectedHeaders = expectedHeaders.map(normalizeHeader);
   const matchedColumns = normalizedExpectedHeaders.filter((header) => headers.includes(header));
   const unmatchedHeaders = normalizedExpectedHeaders.filter((header) => !headers.includes(header));

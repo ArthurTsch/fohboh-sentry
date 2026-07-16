@@ -296,7 +296,7 @@ function findProcessorTotalBlock(lines: string[]) {
     | undefined;
 
   for (let index = 0; index < lines.length; index += 1) {
-    if (!/^total\b/i.test(lines[index])) continue;
+    if (!/^total(?=\s|\d|\$)/i.test(lines[index])) continue;
 
     const inlineCurrencyValues = extractCurrencyValuesFromLine(lines[index]);
     const nearbyCurrencyValues = lines

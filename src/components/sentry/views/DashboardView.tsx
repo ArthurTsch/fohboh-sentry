@@ -205,16 +205,18 @@ export function DashboardView({
           <div className="flex h-full flex-col gap-3">
             {logs.slice(0, 4).map((entry) => (
               <div key={entry.hash} className="rounded-2xl border border-[var(--border)] bg-white p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
                     <div className="text-sm font-medium">{entry.action}</div>
                     <div className="mt-1 text-xs text-[var(--muted)]">
                       {entry.location} / {entry.ts}
                     </div>
                   </div>
-                  <Badge tone={entry.immutable ? "success" : "neutral"}>
-                    {entry.immutable ? "Immutable" : "Draft"}
-                  </Badge>
+                  <div className="self-start sm:shrink-0">
+                    <Badge tone={entry.immutable ? "success" : "neutral"}>
+                      {entry.immutable ? "Immutable" : "Draft"}
+                    </Badge>
+                  </div>
                 </div>
               </div>
             ))}

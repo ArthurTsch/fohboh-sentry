@@ -126,7 +126,7 @@ const m01Artifacts = [
     format: "CSV",
     source: "Restaurant POS / operating system",
     purpose:
-      "Restaurant-side comparison file used for cross-system reconciliation against the processor statement.",
+      "Restaurant-side comparison file used for cross-system reconciliation against the processor statement. The governed workspace now supports a sealed POS source-schema step where a representative sample export is uploaded, headers are extracted or entered manually, and the validated header set is sealed for recurring upload validation.",
   },
   {
     doc: "Signed Merchant Agreement",
@@ -164,7 +164,7 @@ const m02Artifacts = [
     format: "CSV",
     source: "Restaurant POS / operating system",
     purpose:
-      "Restaurant-side channel summary used to reconcile marketplace sales and commission base against the DSP settlement source.",
+      "Restaurant-side channel summary used to reconcile marketplace sales and commission base against the DSP settlement source. The governed workspace now supports a sealed POS source-schema step where a representative sample export is uploaded, headers are extracted or entered manually, and the validated header set is sealed for recurring upload validation.",
   },
   {
     doc: "Signed DSP Agreement",
@@ -186,6 +186,7 @@ const nonDocumentInputs = [
   "Selected active modules per location: M01, M02, or both. Certification now runs per selected module even when both are enabled.",
   "Selected active source vendors per location: for example Heartland or Toast for M01, DoorDash or Uber Eats for M02.",
   "Schema Registry mappings: exact native source columns bound to canonical engine fields.",
+  "POS source schema governance: a representative POS CSV can be uploaded to extract headers, corrected manually, validated, and sealed as the recurring Upload Data expectation.",
   "Contract Config values: governed legal terms used by the deterministic engine.",
   "Location ownership, team access, and certification scope resolution.",
 ];

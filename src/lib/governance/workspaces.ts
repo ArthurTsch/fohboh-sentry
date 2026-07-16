@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import type { ContractField, SchemaField, SchemaWorkspace } from "@/components/sentry/types";
+import type { ContractField, PosSchemaGovernance, SchemaField, SchemaWorkspace } from "@/components/sentry/types";
 
 type SchemaRecordShape = {
   fields: unknown;
@@ -67,6 +67,7 @@ export function workspaceToSchemaPayload(workspace: SchemaWorkspace) {
     fields: workspace.fields,
     locationId: workspace.locationId ?? null,
     locationName: workspace.locationName ?? null,
+    posSchema: workspace.posSchema ?? createEmptyPosSchemaGovernance(),
     status: workspace.status ?? "draft",
   };
 }
@@ -106,6 +107,7 @@ export function normalizeWorkspaceFromRecords({
   const contractPayload = extractObject(contractRecord?.terms);
   const fields = Array.isArray(schemaPayload?.fields) ? (schemaPayload.fields as SchemaField[]) : null;
   const contract = Array.isArray(contractPayload?.contract) ? (contractPayload.contract as ContractField[]) : null;
+  const posSchema = normalizePosSchemaGovernance(schemaPayload?.posSchema);
 
   if (!fields || !contract) {
     return null;
@@ -124,6 +126,7 @@ export function normalizeWorkspaceFromRecords({
     locationId,
     locationName,
     module,
+    posSchema,
     status,
     vendor,
     vault: {
@@ -155,6 +158,42 @@ function extractCurrency(value: string) {
 
 function extractObject(value: unknown) {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function normalizeStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => String(entry).trim()).filter(Boolean);
+}
+
+function normalizePosSchemaGovernance(value: unknown): PosSchemaGovernance {
+  const source = extractObject(value);
+
+  return {
+    extractedAt:
+      source && typeof source.extractedAt === "string" && source.extractedAt.trim().length > 0
+        ? source.extractedAt
+        : undefined,
+    extractedHeaders: normalizeStringArray(source?.extractedHeaders),
+    manualHeaders: normalizeStringArray(source?.manualHeaders),
+    sourceFileName:
+      source && typeof source.sourceFileName === "string" && source.sourceFileName.trim().length > 0
+        ? source.sourceFileName
+        : undefined,
+    status:
+      source?.status === "validated" || source?.status === "draft" || source?.status === "missing"
+        ? source.status
+        : "missing",
+    validatedHeaders: normalizeStringArray(source?.validatedHeaders),
+  };
+}
+
+function createEmptyPosSchemaGovernance(): PosSchemaGovernance {
+  return {
+    extractedHeaders: [],
+    manualHeaders: [],
+    status: "missing",
+    validatedHeaders: [],
+  };
 }
 
 function stableStringify(value: unknown): string {
