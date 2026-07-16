@@ -222,6 +222,15 @@ function buildCanonicalPayload({
       },
     ],
     composite_trust_score: certification.trustScore,
+    composite_trust_gates: certification.overallTrustGates,
+    cross_module: {
+      aggregate_variance: certification.crossModule.aggregateVariance,
+      conflict: certification.crossModule.conflict,
+      findings: certification.crossModule.findings,
+      module_weight_imbalance: certification.crossModule.moduleWeightImbalance,
+      reviewed_fee_weights: certification.crossModule.reviewedFeeWeights,
+      total_recovery_eligible: certification.crossModule.totalRecoveryEligible,
+    },
     court_admissible: certification.ready,
     customer: {
       id: customerId,
@@ -273,10 +282,26 @@ function buildCanonicalPayload({
       status: "COMPLETE",
     },
     loop_b: {
-      items: record.dimensions.map(
-        (dimension) => `${dimension.name}: ${dimension.score} (${dimension.weight})`,
-      ),
-      status: certification.ready ? "COMPLETE" : "PARTIAL",
+      baseline_hash: certification.loopB.baselineHash,
+      findings: certification.loopB.findings.map((finding) => ({
+        affected_periods: finding.affectedPeriods,
+        caar_eligible: finding.caarEligible,
+        confidence_score: finding.confidenceScore,
+        detail: finding.detail,
+        impacts_certification: finding.impactsCertification,
+        module: finding.moduleId,
+        pattern_code: finding.patternCode,
+        rule_id: finding.ruleId,
+      })),
+      items:
+        certification.loopB.findings.length > 0
+          ? certification.loopB.findings.map(
+              (finding) =>
+                `${finding.ruleId} | ${finding.patternCode} | confidence=${finding.confidenceScore} | ${finding.detail}`,
+            )
+          : ["No pattern findings promoted from the active 13-week historical window."],
+      status: certification.loopB.status,
+      window_size: certification.loopB.windowSize,
     },
     module: runRecords[0]?.module ?? "M01",
     module_label: moduleLabel,
@@ -308,12 +333,26 @@ function buildCanonicalPayload({
     rule_citations: ruleCitations,
     schema_version: "1.0",
     sealed_at: toIsoMinute(sealedAt),
+    system_health: {
+      detail: certification.overallSystemHealth.detail,
+      flags: certification.overallSystemHealth.flags,
+      master_system_healthy: certification.overallSystemHealth.masterSystemHealthy,
+      penalty_points: certification.overallSystemHealth.penaltyPoints,
+    },
     vault: {
       contract_config_version: Math.max(...runRecords.map((run) => run.id), 0),
       schema_registry_versions: runRecords.map((run) => ({
         vendor: run.module,
         version: Math.max(...run.schemaRegistryIds, 0),
       })),
+    },
+    workflow: {
+      authenticated: certification.workflow.authenticated,
+      authorized: certification.workflow.authorized,
+      dispute_eligible: certification.workflow.disputeEligible,
+      manual_review_required: certification.workflow.manualReviewRequired,
+      notifications: certification.workflow.notifications,
+      state: certification.workflow.state,
     },
   };
 }
@@ -785,6 +824,33 @@ export async function persistGeneratedCaar(
     tx,
     type: "caar_pdf",
   });
+
+  if (certification.loopB.findings.length > 0) {
+    await tx.loop_b_findings_v2.createMany({
+      data: certification.loopB.findings.map((finding) => ({
+        affected_periods: toJsonValue(finding.affectedPeriods),
+        caar_eligible: finding.caarEligible,
+        caar_id: caar.id,
+        confidence_bps: Math.round(finding.confidenceScore * 10000),
+        detail: finding.detail,
+        impacts_certification: finding.impactsCertification,
+        location_id: locationId,
+        metadata: toJsonValue({
+          module: finding.moduleId,
+          patternCode: finding.patternCode,
+        }),
+        module: finding.moduleId,
+        pattern_code: finding.patternCode,
+        rule_id: finding.ruleId,
+        status:
+          finding.caarEligible
+            ? "caar_eligible"
+            : finding.impactsCertification
+              ? "review"
+              : "observed",
+      })),
+    });
+  }
 
   await tx.audit_log_v2.create({
     data: {

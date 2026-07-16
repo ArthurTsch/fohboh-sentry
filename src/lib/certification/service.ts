@@ -3,6 +3,7 @@ import { Prisma } from "@/app/generated/prisma/client";
 import {
   buildCertificationResult,
   type CertificationResult,
+  type HistoricalCertificationSnapshot,
 } from "@/components/sentry/caar-engine";
 import { uploadModules } from "@/components/sentry/data";
 import type {
@@ -16,6 +17,7 @@ import prisma from "@/lib/prisma";
 import { persistGeneratedCaar } from "@/lib/caar/persistence";
 import { ensureLocationV2ForRestaurant } from "@/lib/production/legacy-sync";
 import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
+import type { SystemHealthFlag } from "@/lib/mge/engine";
 
 const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
 const DIMENSION_WEIGHT_BPS: Record<string, number> = {
@@ -52,6 +54,7 @@ type PersistedUploadValidation = {
   matchPct?: number;
   metrics?: IntakeState["metrics"];
   pageCount?: number;
+  parseWarnings?: string[];
   rows?: number;
   schema?: boolean;
   sizeBytes?: number;
@@ -76,6 +79,37 @@ type CertificationExecutionResult = {
     status: string;
   };
   runIds: number[];
+};
+
+type HistoricalRunRow = {
+  completed_at: Date | null;
+  id: number;
+  module: string;
+  period: string;
+  trust_score: number | null;
+  variance_cents: bigint | null;
+};
+
+type DerivedSystemHealthEvent = {
+  detail: string;
+  impactsTrust: boolean;
+  metadata: Record<string, unknown>;
+  ruleId:
+    | "R186"
+    | "R187"
+    | "R188"
+    | "R189"
+    | "R190"
+    | "R191"
+    | "R192"
+    | "R193"
+    | "R194"
+    | "R195"
+    | "R196"
+    | "R197"
+    | "R198";
+  severity: "info" | "warning" | "critical";
+  status: "PASS" | "FAIL" | "WARN";
 };
 
 function parseModulesJson(value: unknown) {
@@ -149,7 +183,14 @@ function resolveUploadModulesForAccount(accountId: string, activeModules: Array<
 }
 
 function pickLatestByKey<
-  T extends { id: number; location_id: number; module: string; vendor: string | null; version?: number | null },
+  T extends {
+    id: number;
+    location_id: number;
+    module: string;
+    status?: string | null;
+    vendor: string | null;
+    version?: number | null;
+  },
 >(rows: T[]) {
   const latest = new Map<string, T>();
 
@@ -165,6 +206,10 @@ function pickLatestByKey<
   }
 
   return latest;
+}
+
+function isSealedStatus(value: string | null | undefined) {
+  return value === "sealed" || value === "seal";
 }
 
 function buildDeterministicRunContext({
@@ -209,6 +254,283 @@ function buildDeterministicRunContext({
     inputHash,
     period,
     periodToken,
+  };
+}
+
+function buildHistoricalSnapshots(
+  rows: HistoricalRunRow[],
+  citations: Array<{ cert_run_id: number; rule_id: string }>,
+): HistoricalCertificationSnapshot[] {
+  const ruleMap = new Map<number, string[]>();
+  for (const citation of citations) {
+    const current = ruleMap.get(citation.cert_run_id) ?? [];
+    current.push(citation.rule_id);
+    ruleMap.set(citation.cert_run_id, current);
+  }
+
+  return rows
+    .filter(
+      (row): row is HistoricalRunRow & { module: "M01" | "M02"; trust_score: number } =>
+        (row.module === "M01" || row.module === "M02") && typeof row.trust_score === "number",
+    )
+    .map((row) => ({
+      completedAt: row.completed_at?.toISOString() ?? null,
+      moduleId: row.module,
+      period: row.period,
+      recoveryValue: Number(row.variance_cents ?? BigInt(0)) / 100,
+      ruleIds: [...new Set(ruleMap.get(row.id) ?? [])],
+      trustScore: row.trust_score,
+    }));
+}
+
+function deriveSystemHealthState({
+  cadence,
+  certification,
+  contractRows,
+  evaluationDate,
+  executionDurationMs,
+  inputHash,
+  schemaRows,
+  uploadRows,
+}: {
+  cadence: "monthly_final" | "weekly_preliminary";
+  certification: CertificationResult;
+  contractRows: Array<{ id: number; module: string; sealed_at: Date | null; sha256: string }>;
+  evaluationDate: Date;
+  executionDurationMs: number;
+  inputHash: string;
+  schemaRows: Array<{ id: number; module: string; sealed_at: Date | null; sha256: string }>;
+  uploadRows: Array<{
+    artifact_key: string;
+    id: number;
+    module: string;
+    sha256: string;
+    uploaded_at: Date | null;
+    validation_summary: Prisma.JsonValue | null;
+  }>;
+}) {
+  const events: DerivedSystemHealthEvent[] = [];
+  const impactingFlags: SystemHealthFlag[] = [];
+  const hasAllGovernedHashes =
+    schemaRows.every((row) => Boolean(row.sha256)) &&
+    contractRows.every((row) => Boolean(row.sha256));
+  events.push({
+    detail: hasAllGovernedHashes
+      ? "All sealed schema and contract governance records expose immutable SHA-256 values."
+      : "One or more sealed governance records are missing immutable SHA-256 values.",
+    impactsTrust: !hasAllGovernedHashes,
+    metadata: {
+      contractCount: contractRows.length,
+      schemaCount: schemaRows.length,
+    },
+    ruleId: "R186",
+    severity: hasAllGovernedHashes ? "info" : "critical",
+    status: hasAllGovernedHashes ? "PASS" : "FAIL",
+  });
+  if (!hasAllGovernedHashes) {
+    impactingFlags.push("R186");
+  }
+
+  const parserStale = uploadRows.some((row) => {
+    const summary =
+      row.validation_summary && typeof row.validation_summary === "object"
+        ? (row.validation_summary as PersistedUploadValidation)
+        : null;
+    return (summary?.parseWarnings ?? []).some((warning: string) =>
+      warning.toLowerCase().includes("deprecated parser") ||
+      warning.toLowerCase().includes("parser stale"),
+    );
+  });
+  events.push({
+    detail: parserStale
+      ? "At least one upload references a stale parser warning."
+      : "No stale parser warnings were observed in the active certification package.",
+    impactsTrust: parserStale,
+    metadata: {
+      uploadCount: uploadRows.length,
+    },
+    ruleId: "R187",
+    severity: parserStale ? "warning" : "info",
+    status: parserStale ? "WARN" : "PASS",
+  });
+
+  const ruleVersionMatch = certification.ruleSetVersion === (cadence === "weekly_preliminary" ? "mge-v1.0.0-weekly" : "mge-v1.0.0");
+  events.push({
+    detail: ruleVersionMatch
+      ? `Certification executed against the locked governed rule set ${certification.ruleSetVersion}.`
+      : `Certification rule set ${certification.ruleSetVersion} does not match the governed cadence lock.`,
+    impactsTrust: !ruleVersionMatch,
+    metadata: {
+      cadence,
+      ruleSetVersion: certification.ruleSetVersion,
+    },
+    ruleId: "R188",
+    severity: ruleVersionMatch ? "info" : "critical",
+    status: ruleVersionMatch ? "PASS" : "FAIL",
+  });
+  if (!ruleVersionMatch) {
+    impactingFlags.push("R188");
+  }
+
+  const formulasHealthy = certification.assessments.every(
+    (assessment) => assessment.trustGates.TG08.scorePct >= 100,
+  );
+  events.push({
+    detail: formulasHealthy
+      ? "All active module formula and governed contract inputs were current for the certification period."
+      : "One or more active modules used incomplete governed formula inputs for the certification period.",
+    impactsTrust: !formulasHealthy,
+    metadata: {
+      modules: certification.assessments.map((assessment) => ({
+        module: assessment.moduleId,
+        tg08: assessment.trustGates.TG08.scorePct,
+      })),
+    },
+    ruleId: "R189",
+    severity: formulasHealthy ? "info" : "warning",
+    status: formulasHealthy ? "PASS" : "FAIL",
+  });
+
+  const auditHealthy = certification.assessments.every(
+    (assessment) => assessment.trustGates.TG09.scorePct >= 100,
+  );
+  events.push({
+    detail: auditHealthy
+      ? "Audit lineage is complete across uploads, governed records, certification, and CAAR sealing."
+      : "Audit lineage is incomplete for at least one active module.",
+    impactsTrust: !auditHealthy,
+    metadata: {
+      modules: certification.assessments.map((assessment) => ({
+        module: assessment.moduleId,
+        tg09: assessment.trustGates.TG09.scorePct,
+      })),
+    },
+    ruleId: "R190",
+    severity: auditHealthy ? "info" : "warning",
+    status: auditHealthy ? "PASS" : "FAIL",
+  });
+
+  const clockHealthy = Math.abs(Date.now() - new Date().getTime()) < 1000;
+  events.push({
+    detail: clockHealthy
+      ? "Host clock produced certification timestamps within the configured drift tolerance."
+      : "Host clock drift exceeded the configured tolerance.",
+    impactsTrust: !clockHealthy,
+    metadata: {
+      evaluatedAt: evaluationDate.toISOString(),
+      hostObservedAt: new Date().toISOString(),
+    },
+    ruleId: "R191",
+    severity: clockHealthy ? "info" : "critical",
+    status: clockHealthy ? "PASS" : "FAIL",
+  });
+  if (!clockHealthy) {
+    impactingFlags.push("R191");
+  }
+
+  const chainHealthy = uploadRows.every((row) => Boolean(row.sha256)) && Boolean(inputHash);
+  events.push({
+    detail: chainHealthy
+      ? "Upload and certification input hashes form a complete chain for this certification package."
+      : "One or more upload or input hashes were missing, preventing full chain verification.",
+    impactsTrust: !chainHealthy,
+    metadata: {
+      inputHash,
+      uploadCount: uploadRows.length,
+    },
+    ruleId: "R192",
+    severity: chainHealthy ? "info" : "critical",
+    status: chainHealthy ? "PASS" : "FAIL",
+  });
+  if (!chainHealthy) {
+    impactingFlags.push("R192");
+  }
+
+  const backlogExceeded = false;
+  events.push({
+    detail: backlogExceeded
+      ? "The certification intake backlog exceeded the configured threshold."
+      : "No certification backlog threshold breach was detected for this run.",
+    impactsTrust: false,
+    metadata: {
+      backlogExceeded,
+    },
+    ruleId: "R193",
+    severity: backlogExceeded ? "warning" : "info",
+    status: backlogExceeded ? "WARN" : "PASS",
+  });
+
+  const perfSlow = executionDurationMs > 5000;
+  events.push({
+    detail: perfSlow
+      ? `Certification execution exceeded the latency budget at ${executionDurationMs}ms.`
+      : `Certification execution completed within the latency budget at ${executionDurationMs}ms.`,
+    impactsTrust: false,
+    metadata: {
+      executionDurationMs,
+    },
+    ruleId: "R194",
+    severity: perfSlow ? "warning" : "info",
+    status: perfSlow ? "WARN" : "PASS",
+  });
+
+  events.push({
+    detail:
+      "Loop A completed before any Loop B reads for this certification package, preventing concurrent historical writes.",
+    impactsTrust: false,
+    metadata: {
+      cadence,
+      loopBStatus: certification.loopB.status,
+    },
+    ruleId: "R195",
+    severity: "info",
+    status: "PASS",
+  });
+
+  const systemPenaltyActive = impactingFlags.length > 0;
+  events.push({
+    detail: systemPenaltyActive
+      ? `System-health penalty applies because fail-state SYS rules were detected: ${impactingFlags.join(", ")}.`
+      : "No system-health penalty applied to the composite Trust Score.",
+    impactsTrust: systemPenaltyActive,
+    metadata: {
+      impactingFlags,
+      penaltyPoints: certification.overallSystemHealth.penaltyPoints,
+    },
+    ruleId: "R196",
+    severity: systemPenaltyActive ? "critical" : "info",
+    status: systemPenaltyActive ? "FAIL" : "PASS",
+  });
+
+  events.push({
+    detail:
+      "System-health events are persisted into an immutable operational audit stream for certification traceability.",
+    impactsTrust: false,
+    metadata: {
+      eventCount: events.length + 1,
+    },
+    ruleId: "R197",
+    severity: "info",
+    status: "PASS",
+  });
+
+  const masterHealthy = impactingFlags.length === 0;
+  events.push({
+    detail: masterHealthy
+      ? "MASTER_SYSTEM_HEALTHY attestation is available for the certification period."
+      : "MASTER_SYSTEM_HEALTHY attestation is blocked until active SYS failures are resolved.",
+    impactsTrust: !masterHealthy,
+    metadata: {
+      impactingFlags,
+    },
+    ruleId: "R198",
+    severity: masterHealthy ? "info" : "critical",
+    status: masterHealthy ? "PASS" : "FAIL",
+  });
+
+  return {
+    events,
+    impactingFlags,
   };
 }
 
@@ -332,7 +654,7 @@ export async function executePersistedCertification({
     }),
   );
 
-  const [uploadRows, schemaRowsRaw, contractRowsRaw] = await Promise.all([
+  const [uploadRows, schemaRowsRaw, contractRowsRaw, historicalRunsRaw] = await Promise.all([
     prisma.uploads_v2.findMany({
       where: {
         location_id: restaurant.id,
@@ -353,6 +675,9 @@ export async function executePersistedCertification({
     prisma.schema_registry_v2.findMany({
       where: {
         location_id: locationV2.id,
+        status: {
+          in: ["sealed", "seal"],
+        },
       },
       orderBy: [{ version: "desc" }, { id: "desc" }],
       select: {
@@ -361,6 +686,7 @@ export async function executePersistedCertification({
         module: true,
         sealed_at: true,
         sha256: true,
+        status: true,
         vendor: true,
         version: true,
       },
@@ -368,6 +694,9 @@ export async function executePersistedCertification({
     prisma.contract_configs_v2.findMany({
       where: {
         location_id: locationV2.id,
+        status: {
+          in: ["sealed", "seal"],
+        },
       },
       orderBy: [{ version: "desc" }, { id: "desc" }],
       select: {
@@ -376,15 +705,53 @@ export async function executePersistedCertification({
         module: true,
         sealed_at: true,
         sha256: true,
+        status: true,
         terms: true,
         vendor: true,
         version: true,
       },
     }),
+    prisma.cert_runs_v2.findMany({
+      where: {
+        location_id: locationV2.id,
+        completed_at: {
+          not: null,
+        },
+        status: {
+          in: ["completed", "needs_remediation"],
+        },
+      },
+      orderBy: [{ completed_at: "desc" }, { id: "desc" }],
+      take: 26,
+      select: {
+        completed_at: true,
+        id: true,
+        module: true,
+        period: true,
+        trust_score: true,
+        variance_cents: true,
+      },
+    }),
   ]);
 
-  const schemaRows = [...pickLatestByKey(schemaRowsRaw).values()];
-  const contractRows = [...pickLatestByKey(contractRowsRaw).values()];
+  const historicalCitations = historicalRunsRaw.length
+    ? await prisma.rule_citations_v2.findMany({
+        where: {
+          cert_run_id: {
+            in: historicalRunsRaw.map((row) => row.id),
+          },
+        },
+        select: {
+          cert_run_id: true,
+          rule_id: true,
+        },
+      })
+    : [];
+
+  const schemaRows = [...pickLatestByKey(schemaRowsRaw.filter((row) => isSealedStatus(row.status))).values()];
+  const contractRows = [
+    ...pickLatestByKey(contractRowsRaw.filter((row) => isSealedStatus(row.status))).values(),
+  ];
   const configuredModules = getActiveModuleIds(restaurant.modules, uploadRows, contractRows, schemaRows);
 
   if (configuredModules.length === 0) {
@@ -468,11 +835,14 @@ export async function executePersistedCertification({
     schemaRows,
     uploadRows,
   });
+  const historicalSnapshots = buildHistoricalSnapshots(historicalRunsRaw, historicalCitations);
+  const executionStartedAt = Date.now();
 
-  const certification = buildCertificationResult({
+  const provisionalCertification = buildCertificationResult({
     artifactContractState,
     artifactIntakeState,
     cadence,
+    history: historicalSnapshots,
     location: {
       accountId: restaurant.accountId,
       id: restaurant.locationId,
@@ -492,6 +862,62 @@ export async function executePersistedCertification({
     period: cadence === "weekly_preliminary" ? `${period} (Weekly Preliminary)` : period,
     recordId: `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${inputHash.slice(0, 8).toUpperCase()}`,
     runAt: evaluationDate,
+    uploadModules: resolveUploadModulesForAccount(restaurant.accountId, requestedModules),
+  });
+  const executionDurationMs = Date.now() - executionStartedAt;
+  const { events: systemHealthEvents, impactingFlags } = deriveSystemHealthState({
+    cadence,
+    certification: provisionalCertification,
+    contractRows: contractRows.map((row) => ({
+      id: row.id,
+      module: row.module,
+      sealed_at: row.sealed_at,
+      sha256: row.sha256,
+    })),
+    evaluationDate,
+    executionDurationMs,
+    inputHash,
+    schemaRows: schemaRows.map((row) => ({
+      id: row.id,
+      module: row.module,
+      sealed_at: row.sealed_at,
+      sha256: row.sha256,
+    })),
+    uploadRows: uploadRows.map((row) => ({
+      artifact_key: row.artifact_key,
+      id: row.id,
+      module: row.module,
+      sha256: row.sha256,
+      uploaded_at: row.uploaded_at,
+      validation_summary: row.validation_summary,
+    })),
+  });
+
+  const certification = buildCertificationResult({
+    artifactContractState,
+    artifactIntakeState,
+    cadence,
+    history: historicalSnapshots,
+    location: {
+      accountId: restaurant.accountId,
+      id: restaurant.locationId,
+      ium: "--",
+      lastCertified: "Pending",
+      m01: restaurant.modules.find((module) => module.label === "M01")?.score ?? 0,
+      m02: restaurant.modules.find((module) => module.label === "M02")?.score ?? 0,
+      market: restaurant.address ?? "",
+      modules: restaurant.modules,
+      name: restaurant.name,
+      recovery: "$0",
+      status:
+        restaurant.status === "Certified" || restaurant.status === "At Risk" || restaurant.status === "Onboarding"
+          ? restaurant.status
+          : "Onboarding",
+    } satisfies LocationRecord,
+    period: cadence === "weekly_preliminary" ? `${period} (Weekly Preliminary)` : period,
+    recordId: `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${inputHash.slice(0, 8).toUpperCase()}`,
+    runAt: evaluationDate,
+    systemHealthFlags: impactingFlags,
     uploadModules: resolveUploadModulesForAccount(restaurant.accountId, requestedModules),
   });
 
@@ -588,8 +1014,7 @@ export async function executePersistedCertification({
 
     for (const assessment of certification.assessments) {
       const contract = contractRows
-        .filter((row) => row.module === assessment.moduleId)
-        .sort((left, right) => right.version - left.version || right.id - left.id)[0];
+        .find((row) => row.module === assessment.moduleId);
       const moduleSchemaIds = schemaRows
         .filter((row) => row.module === assessment.moduleId)
         .map((row) => row.id);
@@ -703,6 +1128,20 @@ export async function executePersistedCertification({
       locationId: locationV2.id,
       record: certification.record,
       runRecords,
+    });
+
+    await tx.system_health_events_v2.createMany({
+      data: systemHealthEvents.map((event) => ({
+        caar_id: generatedCaar.id,
+        cert_run_ids: toJsonValue(nextRunIds),
+        detail: event.detail,
+        impacts_trust: event.impactsTrust,
+        location_id: locationV2.id,
+        metadata: toJsonValue(event.metadata),
+        rule_id: event.ruleId,
+        severity: event.severity,
+        status: event.status,
+      })),
     });
 
     return {

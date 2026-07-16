@@ -19,7 +19,7 @@ type ContractRecordShape = {
 
 export function computeWorkspaceHash(payload: unknown) {
   return createHash("sha256")
-    .update(JSON.stringify(payload))
+    .update(stableStringify(payload))
     .digest("hex");
 }
 
@@ -155,6 +155,24 @@ function extractCurrency(value: string) {
 
 function extractObject(value: unknown) {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, entryValue]) => entryValue !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right));
+
+  return `{${entries
+    .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableStringify(entryValue)}`)
+    .join(",")}}`;
 }
 
 function formatVaultDate(value: Date) {

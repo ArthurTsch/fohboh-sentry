@@ -9,9 +9,13 @@ import type {
 import {
   getRuleSetVersion,
   runDeterministicModuleEngine,
+  type CertificationZone,
   type FindingClass,
   type Mq6Score,
   type RuleCitation,
+  type SystemHealthResult,
+  type TrustGateName,
+  type TrustGateScore,
 } from "@/lib/mge/engine";
 
 export type CertificationStep = {
@@ -22,6 +26,7 @@ export type CertificationStep = {
 
 export type ModuleAssessment = {
   artifactCoverage: number;
+  certificationZone: CertificationZone;
   dimensions: Record<
     | "Auditability"
     | "Cross-System Reconciliation"
@@ -38,14 +43,79 @@ export type ModuleAssessment = {
   note: string;
   ready: boolean;
   recoveryValue: number;
+  reviewedFeeVolume: number;
   ruleCitations: RuleCitation[];
   score: number;
+  systemHealth: SystemHealthResult;
+  trustGates: Record<TrustGateName, TrustGateScore>;
+};
+
+export type HistoricalCertificationSnapshot = {
+  completedAt: string | null;
+  moduleId: "M01" | "M02";
+  period: string;
+  recoveryValue: number;
+  ruleIds: string[];
+  trustScore: number;
+};
+
+export type LoopBFinding = {
+  affectedPeriods: string[];
+  caarEligible: boolean;
+  confidenceScore: number;
+  detail: string;
+  impactsCertification: boolean;
+  moduleId: "M01" | "M02" | "XMOD";
+  patternCode: string;
+  ruleId:
+    | "R154"
+    | "R155"
+    | "R157"
+    | "R159"
+    | "R160"
+    | "R161"
+    | "R162"
+    | "R163"
+    | "R165";
+};
+
+export type LoopBResult = {
+  auditRequired: boolean;
+  baselineHash: string | null;
+  findings: LoopBFinding[];
+  status: "not_applicable" | "clear" | "review" | "re_certify_required" | "caar_eligible_pattern";
+  windowSize: number;
+};
+
+export type CrossModuleSummary = {
+  aggregateVariance: number;
+  conflict: boolean;
+  findings: string[];
+  moduleWeightImbalance: boolean;
+  reviewedFeeWeights: Array<{
+    moduleId: "M01" | "M02";
+    pct: number;
+  }>;
+  totalRecoveryEligible: number;
+};
+
+export type WorkflowGovernanceSummary = {
+  authenticated: boolean;
+  authorized: boolean;
+  disputeEligible: boolean;
+  manualReviewRequired: boolean;
+  notifications: string[];
+  state: "draft" | "certified" | "needs_remediation" | "in_review";
 };
 
 export type CertificationResult = {
   assessments: ModuleAssessment[];
   amountValue: number;
   cadence: "monthly_final" | "weekly_preliminary";
+  crossModule: CrossModuleSummary;
+  loopB: LoopBResult;
+  overallSystemHealth: SystemHealthResult;
+  overallTrustGates: Record<TrustGateName, TrustGateScore>;
   ready: boolean;
   record: CaarRecord;
   ruleSetVersion: string;
@@ -54,6 +124,7 @@ export type CertificationResult = {
   trustScore: number;
   updatedModules: LocationModuleState[];
   updatedRecovery: string;
+  workflow: WorkflowGovernanceSummary;
 };
 
 type ContractState = Record<string, Record<string, string>>;
@@ -101,23 +172,55 @@ const MONTH_NAMES = [
   "December",
 ];
 
+const GATE_ORDER: TrustGateName[] = [
+  "TG01",
+  "TG02",
+  "TG03",
+  "TG04",
+  "TG05",
+  "TG06",
+  "TG07",
+  "TG08",
+  "TG09",
+  "TG10",
+  "TG11",
+];
+
+const GATE_WEIGHTS: Record<TrustGateName, number> = {
+  TG01: 8,
+  TG02: 6,
+  TG03: 5,
+  TG04: 12,
+  TG05: 7,
+  TG06: 8,
+  TG07: 25,
+  TG08: 9,
+  TG09: 8,
+  TG10: 6,
+  TG11: 6,
+};
+
 export function buildCertificationResult({
   artifactContractState,
   artifactIntakeState,
   cadence = "monthly_final",
+  history = [],
   location,
   period,
   recordId,
   runAt,
+  systemHealthFlags = [],
   uploadModules,
 }: {
   artifactContractState: ContractState;
   artifactIntakeState: Record<string, IntakeState>;
   cadence?: "monthly_final" | "weekly_preliminary";
+  history?: HistoricalCertificationSnapshot[];
   location: LocationRecord;
   period?: string;
   recordId?: string;
   runAt?: Date;
+  systemHealthFlags?: Array<"R186" | "R188" | "R191" | "R192">;
   uploadModules: UploadModule[];
 }): CertificationResult {
   const evaluationDate = runAt ?? new Date();
@@ -132,6 +235,7 @@ export function buildCertificationResult({
         evaluationDate,
         locationId: location.id,
         moduleId,
+        systemHealthFlags,
         uploadModules,
       }),
     )
@@ -150,19 +254,24 @@ export function buildCertificationResult({
     ),
     weight: DIMENSION_LABELS[name],
   }));
+  const overallTrustGates = buildOverallTrustGates(activeModules, location.modules);
+  const overallSystemHealth = buildOverallSystemHealth(activeModules);
   const trustScore = clamp(
-    round(
-      overallDimensions.reduce(
-        (sum, dimension) => sum + dimension.score * DIMENSION_WEIGHTS[dimension.name],
-        0,
-      ),
-    ),
+    computeOverallTrustScore(overallTrustGates) - overallSystemHealth.penaltyPoints,
     0,
     100,
   );
+  const crossModule = buildCrossModuleSummary(activeModules);
+  const loopB = buildLoopBResult({
+    cadence,
+    currentModules: activeModules,
+    history,
+    trustScore,
+  });
   const ready =
     cadence === "monthly_final" &&
     activeModules.every((module) => module.ready) &&
+    overallSystemHealth.masterSystemHealthy &&
     trustScore >= 85;
   const amountValue = Math.max(
     0,
@@ -202,11 +311,21 @@ export function buildCertificationResult({
       ? "Weekly preliminary run completed. Final bank-reconciliation evidence is deferred until the monthly final."
       : "Evidence package still has unresolved authenticity, completeness, or reconciliation gaps.";
   upsertEvidenceModule(updatedModules, evidenceScore, evidenceNote);
+  const workflow = buildWorkflowGovernanceSummary({
+    activeModules,
+    crossModule,
+    loopB,
+    ready,
+  });
 
   return {
     assessments: activeModules,
     amountValue,
     cadence,
+    crossModule,
+    loopB,
+    overallSystemHealth,
+    overallTrustGates,
     ready,
     record,
     ruleSetVersion,
@@ -215,6 +334,7 @@ export function buildCertificationResult({
     trustScore,
     updatedModules,
     updatedRecovery: formatCurrency(amountValue),
+    workflow,
   };
 }
 
@@ -441,6 +561,7 @@ function assessModule({
   evaluationDate,
   locationId,
   moduleId,
+  systemHealthFlags,
   uploadModules,
 }: {
   accountId: string;
@@ -450,6 +571,7 @@ function assessModule({
   evaluationDate: Date;
   locationId: string;
   moduleId: "M01" | "M02";
+  systemHealthFlags: Array<"R186" | "R188" | "R191" | "R192">;
   uploadModules: UploadModule[];
 }): ModuleAssessment | null {
   const uploadModule = uploadModules.find(
@@ -497,10 +619,12 @@ function assessModule({
     cadence,
     evaluationDate,
     moduleId,
+    systemHealthFlags,
   });
 
   return {
     artifactCoverage: result.artifactCoverage,
+    certificationZone: result.certificationZone,
     dimensions: result.dimensions,
     findingClass: result.findingClass,
     findings: result.findings,
@@ -509,8 +633,11 @@ function assessModule({
     note: buildModuleNote(moduleId, result.score, result.findings, result.ruleCitations.length),
     ready: result.ready,
     recoveryValue: result.recoveryValue,
+    reviewedFeeVolume: result.reviewedFeeVolume,
     ruleCitations: result.ruleCitations,
     score: result.score,
+    systemHealth: result.systemHealth,
+    trustGates: result.trustGates,
   };
 }
 
@@ -706,6 +833,7 @@ function buildModuleNote(
 function emptyModule(moduleId: "M01" | "M02"): ModuleAssessment {
   return {
     artifactCoverage: 0,
+    certificationZone: "UNVERIFIED",
     dimensions: {
       Auditability: 0,
       "Cross-System Reconciliation": 0,
@@ -744,13 +872,390 @@ function emptyModule(moduleId: "M01" | "M02"): ModuleAssessment {
     note: `${moduleId} has no certification artifacts yet.`,
     ready: false,
     recoveryValue: 0,
+    reviewedFeeVolume: 0,
     ruleCitations: [],
     score: 0,
+    systemHealth: {
+      detail: "System health was not evaluated because no governed certification package exists yet.",
+      flags: [],
+      healthy: true,
+      masterSystemHealthy: true,
+      penaltyPoints: 0,
+    },
+    trustGates: Object.fromEntries(
+      GATE_ORDER.map((gate) => [
+        gate,
+        {
+          badge: "FAIL",
+          canonicalRuleIds: gate === "TG11" ? ["R135"] : [],
+          detail: "No certification package exists yet.",
+          scorePct: 0,
+        },
+      ]),
+    ) as Record<TrustGateName, TrustGateScore>,
   };
 }
 
 function estimateExhibitCount(modules: ModuleAssessment[]) {
   return modules.reduce((sum, module) => sum + Math.max(module.ruleCitations.length, 2), 0);
+}
+
+function buildOverallSystemHealth(modules: ModuleAssessment[]) {
+  const flags = dedupe(modules.flatMap((module) => module.systemHealth.flags)) as SystemHealthResult["flags"];
+  const penaltyPoints = Math.max(
+    0,
+    ...modules.map((module) => module.systemHealth.penaltyPoints),
+  );
+  return {
+    detail:
+      flags.length === 0
+        ? "All active modules passed the certification-period system-health checks."
+        : `System-health degradation was detected across the active certification package: ${flags.join(", ")}.`,
+    flags,
+    healthy: flags.length === 0,
+    masterSystemHealthy: flags.length === 0,
+    penaltyPoints,
+  } satisfies SystemHealthResult;
+}
+
+function buildCrossModuleSummary(modules: ModuleAssessment[]): CrossModuleSummary {
+  const reviewedFeeTotal = Math.max(
+    1,
+    modules.reduce((sum, module) => sum + Math.max(module.reviewedFeeVolume, 0), 0),
+  );
+  const reviewedFeeWeights = modules.map((module) => ({
+    moduleId: module.moduleId,
+    pct: round((Math.max(module.reviewedFeeVolume, 0) / reviewedFeeTotal) * 100),
+  }));
+  const moduleWeightImbalance = reviewedFeeWeights.some((entry) => entry.pct > 80);
+  const aggregateVariance = round(
+    modules.reduce((sum, module) => sum + Math.max(module.recoveryValue, 0), 0),
+  );
+  const totalRecoveryEligible = aggregateVariance;
+  const findings: string[] = [];
+  const m01 = modules.find((module) => module.moduleId === "M01");
+  const m02 = modules.find((module) => module.moduleId === "M02");
+  if (moduleWeightImbalance) {
+    findings.push(
+      "Cross-module reviewed-fee weighting is imbalanced because one module contributes more than 80% of the reviewed base.",
+    );
+  }
+  let conflict = false;
+  if (m01 && m02) {
+    if (
+      m01.recoveryValue > 0 &&
+      m02.recoveryValue < 0
+    ) {
+      conflict = true;
+      findings.push(
+        "Cross-module conflict detected: active module recovery directions disagree and require manual reconciliation before aggregation.",
+      );
+    }
+    const orderCountDelta = Math.abs(
+      (m01.dimensions["Cross-System Reconciliation"] ?? 0) -
+        (m02.dimensions["Cross-System Reconciliation"] ?? 0),
+    );
+    if (orderCountDelta >= 50) {
+      findings.push(
+        "Cross-module order / channel reconciliation shows materially different confidence between active modules.",
+      );
+    }
+  }
+
+  return {
+    aggregateVariance,
+    conflict,
+    findings,
+    moduleWeightImbalance,
+    reviewedFeeWeights,
+    totalRecoveryEligible,
+  };
+}
+
+function buildLoopBResult({
+  cadence,
+  currentModules,
+  history,
+  trustScore,
+}: {
+  cadence: "monthly_final" | "weekly_preliminary";
+  currentModules: ModuleAssessment[];
+  history: HistoricalCertificationSnapshot[];
+  trustScore: number;
+}): LoopBResult {
+  if (cadence !== "monthly_final") {
+    return {
+      auditRequired: false,
+      baselineHash: null,
+      findings: [],
+      status: "not_applicable",
+      windowSize: 0,
+    };
+  }
+
+  const relevantHistory = history
+    .slice()
+    .sort((left, right) =>
+      (left.completedAt ?? "").localeCompare(right.completedAt ?? ""),
+    )
+    .slice(-13);
+
+  const findings: LoopBFinding[] = [];
+
+  for (const module of currentModules) {
+    const moduleHistory = relevantHistory.filter((entry) => entry.moduleId === module.moduleId);
+    const windowSize = moduleHistory.length;
+    if (windowSize === 0) {
+      continue;
+    }
+
+    const recoverySeries = [...moduleHistory.map((entry) => entry.recoveryValue), module.recoveryValue];
+    if (
+      recoverySeries.length >= 4 &&
+      recoverySeries
+        .slice(-4)
+        .every((value, index, values) => index === 0 || value >= values[index - 1])
+    ) {
+      const occurrenceCount = 4;
+      const consistencyFactor = 1;
+      const confidenceScore = round(
+        Math.min(1, (occurrenceCount * consistencyFactor) / Math.max(windowSize, 1)),
+      );
+      findings.push({
+        affectedPeriods: moduleHistory.slice(-3).map((entry) => entry.period),
+        caarEligible: confidenceScore >= 0.85 && trustScore >= 85,
+        confidenceScore,
+        detail:
+          "Certified variance has increased monotonically across at least four consecutive periods and may indicate a stable recoverable pattern.",
+        impactsCertification: confidenceScore >= 0.75,
+        moduleId: module.moduleId,
+        patternCode: "VARIANCE_TREND_ASCENDING",
+        ruleId: confidenceScore >= 0.85 && trustScore >= 85 ? "R163" : "R154",
+      });
+    }
+
+    const previousRuleIds = moduleHistory.flatMap((entry) => entry.ruleIds);
+    const recurringRuleId = module.ruleCitations
+      .map((citation) => citation.ruleId)
+      .find((ruleId) => previousRuleIds.filter((entry) => entry === ruleId).length >= 2);
+    if (recurringRuleId) {
+      const occurrenceCount =
+        previousRuleIds.filter((entry) => entry === recurringRuleId).length + 1;
+      const confidenceScore = round(
+        Math.min(1, occurrenceCount / Math.max(windowSize + 1, 1)),
+      );
+      findings.push({
+        affectedPeriods: moduleHistory
+          .filter((entry) => entry.ruleIds.includes(recurringRuleId))
+          .map((entry) => entry.period),
+        caarEligible: confidenceScore >= 0.85 && trustScore >= 85,
+        confidenceScore,
+        detail: `Rule ${recurringRuleId} recurred across multiple periods for the same module, suggesting a vendor-systemic error signature.`,
+        impactsCertification: confidenceScore >= 0.75,
+        moduleId: module.moduleId,
+        patternCode: "VENDOR_SYSTEMIC_PATTERN",
+        ruleId: confidenceScore >= 0.85 && trustScore >= 85 ? "R163" : "R157",
+      });
+    }
+
+    const priorAverage =
+      moduleHistory.reduce((sum, entry) => sum + entry.recoveryValue, 0) /
+      Math.max(moduleHistory.length, 1);
+    if (module.recoveryValue > priorAverage * 1.5 && moduleHistory.length >= 3) {
+      const confidenceScore = round(
+        Math.min(1, 0.5 + moduleHistory.length / 10),
+      );
+      findings.push({
+        affectedPeriods: moduleHistory.slice(-3).map((entry) => entry.period),
+        caarEligible: false,
+        confidenceScore,
+        detail:
+          "Current-period recoverable variance materially exceeds the recent certified baseline and should trigger supplemental review of prior periods.",
+        impactsCertification: true,
+        moduleId: module.moduleId,
+        patternCode: "RE_CERTIFY_REQUIRED",
+        ruleId: "R159",
+      });
+    }
+  }
+
+  if (currentModules.length >= 2) {
+    const allPositive = currentModules.every((module) => module.recoveryValue > 0);
+    if (allPositive && trustScore >= 85) {
+      findings.push({
+        affectedPeriods: relevantHistory.slice(-3).map((entry) => entry.period),
+        caarEligible: true,
+        confidenceScore: 0.85,
+        detail:
+          "Multiple active modules exhibit concurrent recoverable patterns, creating a cross-module executive-tier pattern finding.",
+        impactsCertification: true,
+        moduleId: "XMOD",
+        patternCode: "CROSS_MODULE_PATTERN",
+        ruleId: "R162",
+      });
+    }
+  }
+
+  const baselineHash =
+    relevantHistory.length > 0
+      ? dedupe(
+          relevantHistory.map(
+            (entry) => `${entry.moduleId}:${entry.period}:${entry.trustScore}:${entry.recoveryValue}`,
+          ),
+        ).join("|")
+      : null;
+  const hasCaarEligiblePattern = findings.some((finding) => finding.caarEligible);
+  const requiresRecertification = findings.some(
+    (finding) => finding.ruleId === "R159" || finding.impactsCertification,
+  );
+
+  return {
+    auditRequired: findings.length > 0,
+    baselineHash,
+    findings,
+    status: hasCaarEligiblePattern
+      ? "caar_eligible_pattern"
+      : requiresRecertification
+        ? "re_certify_required"
+        : findings.length > 0
+          ? "review"
+          : "clear",
+    windowSize: relevantHistory.length,
+  };
+}
+
+function buildWorkflowGovernanceSummary({
+  activeModules,
+  crossModule,
+  loopB,
+  ready,
+}: {
+  activeModules: ModuleAssessment[];
+  crossModule: CrossModuleSummary;
+  loopB: LoopBResult;
+  ready: boolean;
+}): WorkflowGovernanceSummary {
+  const manualReviewRequired =
+    crossModule.conflict ||
+    loopB.status === "re_certify_required" ||
+    activeModules.some((module) => module.certificationZone !== "CERTIFIED");
+  const notifications = [
+    ...(crossModule.moduleWeightImbalance
+      ? ["Cross-module weight imbalance should be reviewed by WGS."]
+      : []),
+    ...(loopB.findings.length > 0
+      ? [`Loop B produced ${loopB.findings.length} historical pattern finding(s).`]
+      : []),
+  ];
+
+  return {
+    authenticated: true,
+    authorized: true,
+    disputeEligible: ready,
+    manualReviewRequired,
+    notifications,
+    state: ready
+      ? "certified"
+      : manualReviewRequired
+        ? "in_review"
+        : "needs_remediation",
+  };
+}
+
+function buildOverallTrustGates(
+  modules: ModuleAssessment[],
+  configuredModules: LocationModuleState[],
+) {
+  const activeConfiguredModules = configuredModules.filter(
+    (module) => module.label === "M01" || module.label === "M02",
+  ).length;
+  const reviewedFeeTotal = Math.max(
+    1,
+    modules.reduce((sum, module) => sum + Math.max(module.reviewedFeeVolume, 0), 0),
+  );
+
+  const gates = Object.fromEntries(
+    GATE_ORDER.map((gate) => {
+      if (gate === "TG07") {
+        const weightedTg07 = round(
+          modules.reduce(
+            (sum, module) =>
+              sum + module.trustGates.TG07.scorePct * (Math.max(module.reviewedFeeVolume, 0) / reviewedFeeTotal),
+            0,
+          ),
+        );
+        return [
+          gate,
+          {
+            badge: weightedTg07 >= 85 ? "PASS" : weightedTg07 >= 60 ? "PARTIAL" : "FAIL",
+            canonicalRuleIds: ["R168", "R169", "R170"],
+            detail:
+              modules.length > 1
+                ? "Cross-module TG07 roll-up uses reviewed-fee weighting across active modules."
+                : "Single active module; TG07 carries through directly.",
+            scorePct: weightedTg07,
+          } satisfies TrustGateScore,
+        ];
+      }
+
+      const average = round(
+        modules.reduce((sum, module) => sum + module.trustGates[gate].scorePct, 0) / Math.max(modules.length, 1),
+      );
+
+      if (gate === "TG01" && activeConfiguredModules > modules.length && modules.length > 0) {
+        const coverageRatio = modules.length / activeConfiguredModules;
+        const penalized = round(average * coverageRatio);
+        return [
+          gate,
+          {
+            badge: penalized >= 85 ? "PASS" : penalized >= 60 ? "PARTIAL" : "FAIL",
+            canonicalRuleIds: ["R171"],
+            detail:
+              "Module coverage completeness penalty applied because fewer modules produced a certification record than were configured for this location.",
+            scorePct: penalized,
+          } satisfies TrustGateScore,
+        ];
+      }
+
+      return [
+        gate,
+        {
+          badge: average >= 85 ? "PASS" : average >= 60 ? "PARTIAL" : "FAIL",
+          canonicalRuleIds: dedupe(modules.flatMap((module) => module.trustGates[gate].canonicalRuleIds)),
+          detail:
+            modules.length > 1
+              ? `Location-level ${gate} is averaged across active module certifications.`
+              : modules[0]?.trustGates[gate].detail ?? "No module gate detail is available.",
+          scorePct: average,
+        } satisfies TrustGateScore,
+      ];
+    }),
+  ) as Record<TrustGateName, TrustGateScore>;
+
+  const preTg11 = round(
+    GATE_ORDER.filter((gate) => gate !== "TG11").reduce(
+      (sum, gate) => sum + gates[gate].scorePct * (GATE_WEIGHTS[gate] / 100),
+      0,
+    ),
+  );
+
+  gates.TG11 = {
+    badge: preTg11 >= 85 ? "PASS" : "FAIL",
+    canonicalRuleIds: ["R135", "R146"],
+    detail:
+      preTg11 >= 85
+        ? "Composite trust-gate score cleared the CAAR eligibility threshold."
+        : "Composite trust-gate score remains below the CAAR eligibility threshold.",
+    scorePct: preTg11 >= 85 ? 100 : 0,
+  };
+
+  return gates;
+}
+
+function computeOverallTrustScore(gates: Record<TrustGateName, TrustGateScore>) {
+  return round(
+    GATE_ORDER.reduce((sum, gate) => sum + gates[gate].scorePct * (GATE_WEIGHTS[gate] / 100), 0),
+  );
 }
 
 function dedupe(values: string[]) {

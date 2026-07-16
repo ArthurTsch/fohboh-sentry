@@ -49,6 +49,43 @@ export type Mq6Score = {
   scorePct: number;
 };
 
+export type TrustGateName =
+  | "TG01"
+  | "TG02"
+  | "TG03"
+  | "TG04"
+  | "TG05"
+  | "TG06"
+  | "TG07"
+  | "TG08"
+  | "TG09"
+  | "TG10"
+  | "TG11";
+
+export type TrustGateScore = {
+  badge: "PASS" | "PARTIAL" | "FAIL";
+  canonicalRuleIds: string[];
+  detail: string;
+  scorePct: number;
+};
+
+export type CertificationZone =
+  | "UNVERIFIED"
+  | "PROVISIONAL"
+  | "CONDITIONAL"
+  | "VALIDATED"
+  | "CERTIFIED";
+
+export type SystemHealthFlag = "R186" | "R188" | "R191" | "R192";
+
+export type SystemHealthResult = {
+  detail: string;
+  flags: SystemHealthFlag[];
+  healthy: boolean;
+  masterSystemHealthy: boolean;
+  penaltyPoints: number;
+};
+
 export type RuleCitation = {
   firedCount: number;
   ruleId: string;
@@ -81,18 +118,23 @@ export type ModuleEngineInput = {
   cadence: Cadence;
   evaluationDate: Date;
   moduleId: ModuleId;
+  systemHealthFlags?: SystemHealthFlag[];
 };
 
 export type ModuleEngineResult = {
   artifactCoverage: number;
+  certificationZone: CertificationZone;
   dimensions: Record<Mq6DimensionName, number>;
   findingClass: FindingClass;
   findings: string[];
   mq6: Record<string, Mq6Score>;
   ready: boolean;
   recoveryValue: number;
+  reviewedFeeVolume: number;
   ruleCitations: RuleCitation[];
   score: number;
+  systemHealth: SystemHealthResult;
+  trustGates: Record<TrustGateName, TrustGateScore>;
 };
 
 type RuleContext = {
@@ -121,6 +163,20 @@ const MQ6_WEIGHTS: Record<Mq6DimensionName, number> = {
   "Data Freshness": 0.1,
   "Rule Integrity": 0.15,
   "Source Authenticity": 0.2,
+};
+
+const TG_WEIGHTS: Record<TrustGateName, number> = {
+  TG01: 8,
+  TG02: 6,
+  TG03: 5,
+  TG04: 12,
+  TG05: 7,
+  TG06: 8,
+  TG07: 25,
+  TG08: 9,
+  TG09: 8,
+  TG10: 6,
+  TG11: 6,
 };
 
 const RULE_VERSION = "mge-v1.0.0";
@@ -842,33 +898,42 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
     "Source Authenticity": sourceAuthenticity.scorePct,
   };
 
-  const score = roundInteger(
-    (dimensions["Data Completeness"] * MQ6_WEIGHTS["Data Completeness"]) +
-      (dimensions["Data Freshness"] * MQ6_WEIGHTS["Data Freshness"]) +
-      (dimensions["Source Authenticity"] * MQ6_WEIGHTS["Source Authenticity"]) +
-      (dimensions["Cross-System Reconciliation"] * MQ6_WEIGHTS["Cross-System Reconciliation"]) +
-      (dimensions["Rule Integrity"] * MQ6_WEIGHTS["Rule Integrity"]) +
-      (dimensions["Auditability"] * MQ6_WEIGHTS["Auditability"]),
-  );
-
   const recoveryValue = roundCurrency(
     input.moduleId === "M01"
       ? computeM01Recovery(statement?.metrics, contract)
       : computeM02Recovery(statement?.metrics, pos?.metrics, contract),
   );
   const ruleCitations = runLoopA(context, recoveryValue);
+  const reviewedFeeVolume = computeReviewedFeeVolume(context);
+  const trustGates = computeTrustGateScores({
+    cadence: input.cadence,
+    context,
+    dimensions,
+    reviewedFeeVolume,
+    ruleCitations,
+  });
+  const systemHealth = computeSystemHealth(input.systemHealthFlags ?? []);
+  const { score, certificationZone } = computeTrustScoreFromTrustGates(trustGates, systemHealth);
   const findingClass = classifyFindingClass(ruleCitations, context);
-  const findings = buildOperationalFindings(context, dimensions, ruleCitations, score);
+  const findings = buildOperationalFindings(
+    context,
+    dimensions,
+    ruleCitations,
+    score,
+    trustGates,
+    systemHealth,
+  );
   const ready =
     input.cadence === "monthly_final" &&
-    score >= 85 &&
+    certificationZone === "CERTIFIED" &&
     ruleIntegrity.scorePct >= 100 &&
-    dataCompleteness.scorePct >= 80 &&
-    sourceAuthenticity.scorePct >= 80 &&
-    crossSystemReconciliation.scorePct >= 85;
+    trustGates.TG10.scorePct >= 100 &&
+    trustGates.TG11.scorePct >= 100 &&
+    systemHealth.masterSystemHealthy;
 
   return {
     artifactCoverage: dataCompleteness.scorePct,
+    certificationZone,
     dimensions,
     findingClass,
     findings,
@@ -882,8 +947,11 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
     },
     ready,
     recoveryValue,
+    reviewedFeeVolume,
     ruleCitations,
     score: clamp(score, 0, 100),
+    systemHealth,
+    trustGates,
   };
 }
 
@@ -902,6 +970,376 @@ function runLoopA(context: RuleContext, recoveryValue: number) {
   }
 
   return citations;
+}
+
+function computeReviewedFeeVolume(context: RuleContext) {
+  if (context.moduleId === "M01") {
+    return Math.max(
+      numberValue(context.statement?.metrics?.basisAmount),
+      numberValue(context.pos?.metrics?.basisAmount),
+      numberValue(context.statement?.metrics?.feeAmount),
+    );
+  }
+
+  if (context.moduleId === "M02") {
+    return Math.max(
+      resolveM02ContractBase(context.statement?.metrics, context.pos?.metrics, context.contract),
+      computeActualM02Commission(context.statement?.metrics ?? {}),
+    );
+  }
+
+  return Math.max(
+    numberValue(context.statement?.metrics?.basisAmount),
+    numberValue(context.pos?.metrics?.basisAmount),
+    numberValue(context.statement?.metrics?.feeAmount),
+  );
+}
+
+function computeTrustGateScores({
+  cadence,
+  context,
+  dimensions,
+  reviewedFeeVolume,
+  ruleCitations,
+}: {
+  cadence: Cadence;
+  context: RuleContext;
+  dimensions: Record<Mq6DimensionName, number>;
+  reviewedFeeVolume: number;
+  ruleCitations: RuleCitation[];
+}) {
+  const duplicateCitationIds = new Set(["DSP-DUP-01", "MFR-CBK-05"]);
+  const duplicateFiredCount = ruleCitations
+    .filter((citation) => duplicateCitationIds.has(citation.ruleId))
+    .reduce((sum, citation) => sum + citation.firedCount, 0);
+  const totalTransactions =
+    Math.max(
+      1,
+      numberValue(context.statement?.metrics?.transactionCount) ||
+        numberValue(context.statement?.metrics?.orderCount) ||
+        numberValue(context.pos?.metrics?.transactionCount) ||
+        numberValue(context.pos?.metrics?.orderCount),
+    );
+  const duplicateRatePct = (duplicateFiredCount / totalTransactions) * 100;
+  const variancePct = reviewedFeeVolume > 0
+    ? (Math.abs(ruleCitations.reduce((sum, citation) => sum + citation.varianceCents, 0)) / 100 / reviewedFeeVolume) * 100
+    : 0;
+  const posBasis = numberValue(context.pos?.metrics?.basisAmount);
+  const statementBasis = numberValue(context.statement?.metrics?.basisAmount);
+  const reconciliationGapPct =
+    statementBasis > 0 && posBasis > 0
+      ? relativeDelta(statementBasis, posBasis) * 100
+      : null;
+  const contractEffectiveDate = parseDateValue(context.contract?.effective_date);
+  const contractAgeDays =
+    contractEffectiveDate === null
+      ? null
+      : Math.floor((context.evaluationDate.getTime() - contractEffectiveDate.getTime()) / (1000 * 60 * 60 * 24));
+  const statementPresent = Boolean(context.statement?.uploaded);
+  const posPresent = Boolean(context.pos?.uploaded);
+  const agreementPresent = Boolean(context.agreement?.uploaded);
+  const bankPresent = cadence === "weekly_preliminary" ? true : Boolean(context.bank?.uploaded);
+  const coreSourcePackagePresent = statementPresent && posPresent && agreementPresent;
+  const coreStructuredPackageReady =
+    artifactSatisfiesCompleteness(context, context.statement ?? null) &&
+    artifactSatisfiesCompleteness(context, context.pos ?? null) &&
+    agreementPresent;
+  const allRequiredArtifactsPresent = coreSourcePackagePresent && bankPresent;
+  const allRequiredArtifactsGoverned =
+    artifactSatisfiesCompleteness(context, context.statement ?? null) &&
+    artifactSatisfiesCompleteness(context, context.pos ?? null) &&
+    (cadence === "weekly_preliminary" || artifactSatisfiesCompleteness(context, context.bank ?? null)) &&
+    Boolean(agreementPresent && context.agreement?.hash) &&
+    Boolean(context.contract && contractFieldCount(context.contract) >= 3);
+
+  const tg01 = buildTrustGateScore(
+    "TG01",
+    dimensions["Data Completeness"] >= 90
+      ? 100
+      : posPresent
+        ? Math.min(89, dimensions["Data Completeness"])
+        : Math.min(50, dimensions["Data Completeness"]),
+    dimensions["Data Completeness"] >= 90
+      ? "Required data fields for the active module are at least 90% populated."
+      : posPresent
+        ? "Required data fields for the active module remain below the 90% completeness threshold."
+        : "POS transaction data is missing, so completeness is capped at the low-confidence band.",
+    ["R116", "R117"],
+  );
+
+  const tg02 = buildTrustGateScore(
+    "TG02",
+    dimensions["Source Authenticity"] >= 100
+      ? 100
+      : dimensions["Source Authenticity"] >= 67 && coreSourcePackagePresent
+        ? 60
+        : 0,
+    dimensions["Source Authenticity"] >= 100
+      ? "Authenticated source files carry intact integrity hashes for the active certification package."
+      : dimensions["Source Authenticity"] >= 67 && coreSourcePackagePresent
+        ? "The source package exists but provenance or integrity evidence remains partial because one release-critical artifact is still missing."
+        : "Source authenticity failed because one or more required source artifacts are missing.",
+    ["R118", "R119"],
+  );
+
+  const tg03 = buildTrustGateScore(
+    "TG03",
+    !context.contract || contractFieldCount(context.contract) < 3
+      ? 0
+      : contractAgeDays !== null && contractAgeDays > 180
+        ? 50
+        : 100,
+    !context.contract || contractFieldCount(context.contract) < 3
+      ? "No governed vendor profile / contract terms are available for the certification period."
+      : contractAgeDays !== null && contractAgeDays > 180
+        ? "Vendor profile is present but older than the 180-day currency window."
+        : "Vendor profile and contract terms are current for the certification period.",
+    ["R120", "R121"],
+  );
+
+  const tg04Score =
+    dimensions["Cross-System Reconciliation"] <= 0 || reconciliationGapPct === null
+      ? 0
+      : reconciliationGapPct <= 1
+        ? 100
+        : reconciliationGapPct > 5
+          ? 0
+          : roundInteger(100 - ((reconciliationGapPct - 1) / 4) * 100);
+  const tg04 = buildTrustGateScore(
+    "TG04",
+    tg04Score,
+    dimensions["Cross-System Reconciliation"] <= 0 || reconciliationGapPct === null
+      ? "POS and source evidence could not be reconciled for the active period."
+      : reconciliationGapPct <= 1
+        ? "POS-to-source reconciliation is within the ±1% tolerance band."
+        : reconciliationGapPct > 5
+          ? "POS-to-source reconciliation gap exceeds 5% and fails the trust gate."
+          : "POS-to-source reconciliation remains in the partial band between 1% and 5%.",
+    ["R122", "R123"],
+  );
+
+  const tg05 = buildTrustGateScore(
+    "TG05",
+    duplicateFiredCount === 0 ? 100 : clamp(roundInteger(100 - duplicateRatePct * 100), 0, 99),
+    duplicateFiredCount === 0
+      ? "No duplicate transactions were detected in the certification period."
+      : `${duplicateFiredCount} duplicate or duplicate-like transaction events were detected in the certification period.`,
+    ["R124", "R125"],
+  );
+
+  const tg06 = buildTrustGateScore(
+    "TG06",
+    cadence === "weekly_preliminary"
+      ? Math.max(75, dimensions["Data Freshness"])
+      : coreStructuredPackageReady
+        ? 75
+      : allRequiredArtifactsPresent
+        ? Math.max(80, dimensions["Data Freshness"])
+        : 40,
+    cadence === "weekly_preliminary"
+      ? "Weekly preliminary coverage is accepted without the final bank evidence gate."
+      : coreStructuredPackageReady
+        ? "Core source artifacts cover the active period, but monthly-final release is still awaiting the bank tie-out package."
+      : allRequiredArtifactsPresent
+        ? "Required certification artifacts cover the active period without a visible evidence gap."
+        : "One or more required period artifacts are missing, so coverage remains incomplete.",
+    ["R126", "R127"],
+  );
+
+  const tg07Score =
+    reviewedFeeVolume <= 0 || dimensions["Rule Integrity"] < 60
+      ? 0
+      : variancePct < 0.5
+        ? 100
+        : variancePct <= 3
+          ? clamp(
+              roundInteger(
+                99 - ((variancePct - 0.5) / 2.5) * 14,
+              ),
+              85,
+              99,
+            )
+          : variancePct <= 5
+            ? clamp(
+                roundInteger(
+                  84 - ((variancePct - 3) / 2) * 16,
+                ),
+                68,
+                84,
+              )
+            : clamp(roundInteger(68 - (variancePct - 5) * 4), 0, 68);
+  const tg07 = buildTrustGateScore(
+    "TG07",
+    tg07Score,
+    reviewedFeeVolume <= 0
+      ? "Fee legitimacy could not be evaluated because no reviewed fee volume was available."
+      : dimensions["Rule Integrity"] < 60
+        ? "Fee legitimacy could not be certified because the source package did not preserve the governed rule inputs needed for deterministic review."
+      : variancePct < 0.5
+        ? "Certified variance is below 0.5% of total fees reviewed."
+        : variancePct <= 3
+          ? `Certified variance is ${roundCurrency(variancePct)}% of total fees reviewed, which lands in the documented partial band.`
+          : variancePct <= 5
+            ? `Certified variance is ${roundCurrency(variancePct)}% of total fees reviewed, creating an elevated fee-variance condition.`
+            : `Certified variance is ${roundCurrency(variancePct)}% of total fees reviewed and remains materially above the final release band.`,
+    ["R128", "R129", "R130"],
+  );
+
+  const tg08 = buildTrustGateScore(
+    "TG08",
+    allRequiredArtifactsGoverned
+      ? 100
+      : context.contract
+        ? 50
+        : 0,
+    allRequiredArtifactsGoverned
+      ? "The governed KPI formula inputs remained current for the full certification period."
+      : context.contract
+        ? "Governed formula inputs exist, but a split-period or incomplete governed state remains possible."
+        : "No governed contract formula was available for the active certification period.",
+    ["R131", "R132"],
+  );
+
+  const tg09 = buildTrustGateScore(
+    "TG09",
+    dimensions["Auditability"] >= 100
+      ? 100
+      : dimensions["Auditability"] >= 67
+        ? 67
+        : 0,
+    dimensions["Auditability"] >= 100
+      ? "Audit trail lineage is complete across upload provenance, governed config, and certification state."
+      : dimensions["Auditability"] >= 67
+        ? "Audit lineage is partial and still missing one or more processing events."
+        : "Audit lineage is incomplete for the active certification package.",
+    ["R133"],
+  );
+
+  const tg10 = buildTrustGateScore(
+    "TG10",
+    tg08.scorePct >= 100 && tg09.scorePct >= 100
+      ? 100
+      : tg08.scorePct >= 50 && tg09.scorePct >= 100
+        ? 50
+        : 0,
+    tg08.scorePct >= 100 && tg09.scorePct >= 100
+      ? "The governed package is internally consistent and ready for deterministic narrative sealing."
+      : tg08.scorePct >= 50 && tg09.scorePct >= 100
+        ? "Narrative readiness is partially established, but sealing is still blocked by incomplete governed evidence."
+      : "Narrative hash readiness is blocked until governed formula and audit-lineage gates are both fully satisfied.",
+    ["R134"],
+  );
+
+  const tg11 = buildTrustGateScore(
+    "TG11",
+    0,
+    "CAAR eligibility is computed after TG01-TG10 and the system-health pass.",
+    ["R135"],
+  );
+
+  const trustGates = {
+    TG01: tg01,
+    TG02: tg02,
+    TG03: tg03,
+    TG04: tg04,
+    TG05: tg05,
+    TG06: tg06,
+    TG07: tg07,
+    TG08: tg08,
+    TG09: tg09,
+    TG10: tg10,
+    TG11: tg11,
+  } satisfies Record<TrustGateName, TrustGateScore>;
+
+  const preTg11 = computeTrustGateWeightedScore(trustGates, false);
+  trustGates.TG11 = buildTrustGateScore(
+    "TG11",
+    preTg11 >= 85 ? 100 : 0,
+    preTg11 >= 85
+      ? "Composite Trust Gate score cleared the documented 85-point CAAR threshold."
+      : "Composite Trust Gate score remains below the documented 85-point CAAR threshold.",
+    ["R135", "R146"],
+  );
+
+  return trustGates;
+}
+
+function computeSystemHealth(flags: SystemHealthFlag[]): SystemHealthResult {
+  if (flags.includes("R188")) {
+    return {
+      detail: "Rule registry version drift was detected. Certification must halt until the governed rule set is realigned.",
+      flags,
+      healthy: false,
+      masterSystemHealthy: false,
+      penaltyPoints: 100,
+    };
+  }
+
+  const penaltyPoints = flags.reduce((sum, flag) => {
+    if (flag === "R186" || flag === "R192") return sum + 5;
+    if (flag === "R191") return sum + 3;
+    return sum;
+  }, 0);
+
+  return {
+    detail:
+      flags.length === 0
+        ? "System health checks passed for the active deterministic certification run."
+        : `System health degradation detected via ${flags.join(", ")}; penalty applied after trust-gate scoring.`,
+    flags,
+    healthy: flags.length === 0,
+    masterSystemHealthy: flags.length === 0,
+    penaltyPoints,
+  };
+}
+
+function computeTrustScoreFromTrustGates(
+  trustGates: Record<TrustGateName, TrustGateScore>,
+  systemHealth: SystemHealthResult,
+) {
+  const baseScore = computeTrustGateWeightedScore(trustGates, true);
+  const finalScore = clamp(roundInteger(baseScore - systemHealth.penaltyPoints), 0, 100);
+  return {
+    certificationZone: getCertificationZone(finalScore),
+    score: finalScore,
+  };
+}
+
+function computeTrustGateWeightedScore(
+  trustGates: Record<TrustGateName, TrustGateScore>,
+  includeTg11: boolean,
+) {
+  return roundInteger(
+    (Object.entries(TG_WEIGHTS) as Array<[TrustGateName, number]>).reduce((sum, [gate, weight]) => {
+      if (!includeTg11 && gate === "TG11") {
+        return sum;
+      }
+      return sum + trustGates[gate].scorePct * (weight / 100);
+    }, 0),
+  );
+}
+
+function buildTrustGateScore(
+  gate: TrustGateName,
+  scorePct: number,
+  detail: string,
+  canonicalRuleIds: string[],
+): TrustGateScore {
+  void gate;
+  return {
+    badge: scorePct >= 85 ? "PASS" : scorePct >= 60 ? "PARTIAL" : "FAIL",
+    canonicalRuleIds,
+    detail,
+    scorePct: clamp(roundInteger(scorePct), 0, 100),
+  };
+}
+
+function getCertificationZone(score: number): CertificationZone {
+  if (score < 40) return "UNVERIFIED";
+  if (score < 60) return "PROVISIONAL";
+  if (score < 80) return "CONDITIONAL";
+  if (score < 85) return "VALIDATED";
+  return "CERTIFIED";
 }
 
 function scoreDataCompleteness(context: RuleContext): Mq6Score {
@@ -1091,6 +1529,8 @@ function buildOperationalFindings(
   dimensions: Record<Mq6DimensionName, number>,
   ruleCitations: RuleCitation[],
   score: number,
+  trustGates: Record<TrustGateName, TrustGateScore>,
+  systemHealth: SystemHealthResult,
 ) {
   const findings: string[] = [];
 
@@ -1112,8 +1552,17 @@ function buildOperationalFindings(
   if (dimensions["Cross-System Reconciliation"] < 85) {
     findings.push("Cross-system reconciliation remains below the final release gate.");
   }
+  if (trustGates.TG07.scorePct < 85) {
+    findings.push("Fee legitimacy remains below the documented TG07 release threshold.");
+  }
+  if (trustGates.TG10.scorePct < 100) {
+    findings.push("Narrative hash readiness remains blocked by incomplete governed or audit-lineage controls.");
+  }
   if (dimensions["Rule Integrity"] < 100) {
     findings.push("Rule integrity is degraded because governed inputs are incomplete.");
+  }
+  if (!systemHealth.masterSystemHealthy) {
+    findings.push(systemHealth.detail);
   }
   for (const citation of ruleCitations) {
     findings.push(`${citation.ruleId} fired with ${formatCurrency(centsToDollars(citation.varianceCents))} in attributed variance.`);
@@ -1222,7 +1671,13 @@ function isRequiredArtifact(context: RuleContext, artifact: ModuleArtifactState)
     artifact.key.includes("contract");
 }
 
-function artifactSatisfiesCompleteness(context: RuleContext, artifact: ModuleArtifactState) {
+function artifactSatisfiesCompleteness(
+  context: RuleContext,
+  artifact: ModuleArtifactState | null,
+) {
+  if (!artifact) {
+    return false;
+  }
   if (artifact.type === "Manual Entry") {
     return Boolean(artifact.contractValues && contractFieldCount(artifact.contractValues) >= 3);
   }
@@ -1353,6 +1808,12 @@ function numberValue(value: number | string | undefined | null) {
   const cleaned = value.replace(/[^0-9.-]/g, "");
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function parseDateValue(value: string | undefined | null) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function roundCurrency(value: number) {

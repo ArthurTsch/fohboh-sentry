@@ -23,7 +23,7 @@ export function WorkflowBlockerModal({
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-2xl rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
+      <div className="w-full max-w-4xl rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div className="border-b border-[var(--border)] px-6 py-5">
           <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
             Certification Blocked
@@ -43,10 +43,10 @@ export function WorkflowBlockerModal({
                 key={`${locationName}:requirement:${requirement.key}`}
                 className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <div className="font-medium text-[var(--text)]">{requirement.label}</div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="pr-2 font-medium text-[var(--text)]">{requirement.label}</div>
                   <span
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
+                    className={`inline-flex w-fit shrink-0 self-start rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
                       requirement.status === "complete"
                         ? "border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] text-[var(--success)]"
                         : requirement.status === "action_required"

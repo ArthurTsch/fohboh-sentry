@@ -165,9 +165,11 @@ model schema_registry_v2 {
   fields      Json
   status      String    @default("sealed") @db.VarChar(20)
   sample_headers Json?
+  source_upload_id Int?
   sealed_by   Int
   sealed_at   DateTime? @default(now()) @db.Timestamptz(6)
   sha256      String    @db.Char(64)
+  prev_sha256 String?   @db.Char(64)
 
   @@unique([location_id, module, vendor, version], map: "uq_schema_registry_v2_location_module_vendor_version")
   @@index([location_id, module, vendor, version], map: "idx_schema_registry_v2_location_module_vendor_version")
@@ -305,6 +307,48 @@ model mq6_scores_v2 {
   @@unique([cert_run_id, dimension], map: "uq_mq6_scores_v2_cert_run_dimension")
   @@index([cert_run_id], map: "idx_mq6_scores_v2_cert_run_id")
   @@map("mq6_scores_v2")
+}
+
+model loop_b_findings_v2 {
+  id               Int       @id @default(autoincrement())
+  location_id      Int
+  caar_id          Int?
+  module           String    @db.VarChar(10)
+  rule_id          String    @db.VarChar(20)
+  pattern_code     String    @db.VarChar(100)
+  confidence_bps   Int
+  status           String    @db.VarChar(30)
+  caar_eligible    Boolean   @default(false)
+  impacts_certification Boolean @default(false)
+  affected_periods Json
+  detail           String
+  metadata         Json?
+  created_at       DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([location_id, created_at], map: "idx_loop_b_findings_v2_location_created_at")
+  @@index([caar_id], map: "idx_loop_b_findings_v2_caar_id")
+  @@index([rule_id], map: "idx_loop_b_findings_v2_rule_id")
+  @@map("loop_b_findings_v2")
+}
+
+model system_health_events_v2 {
+  id             Int       @id @default(autoincrement())
+  location_id    Int
+  caar_id        Int?
+  cert_run_ids   Json?
+  rule_id        String    @db.VarChar(20)
+  status         String    @db.VarChar(20)
+  severity       String    @db.VarChar(20)
+  impacts_trust  Boolean   @default(false)
+  detail         String
+  metadata       Json?
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  resolved_at    DateTime? @db.Timestamptz(6)
+
+  @@index([location_id, created_at], map: "idx_system_health_events_v2_location_created_at")
+  @@index([caar_id], map: "idx_system_health_events_v2_caar_id")
+  @@index([rule_id], map: "idx_system_health_events_v2_rule_id")
+  @@map("system_health_events_v2")
 }
 
 model audit_log_v2 {

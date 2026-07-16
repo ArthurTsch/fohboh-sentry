@@ -22,6 +22,8 @@ export const SUPERADMIN_TABLES = [
   { name: "caar_artifacts_v2", label: "CAAR Artifacts", description: "Persisted exhibits and derived CAAR artifacts.", allowDelete: true },
   { name: "rule_citations_v2", label: "Rule Citations", description: "Rule-level findings produced during certification.", allowDelete: true },
   { name: "mq6_scores_v2", label: "MQ6 Scores", description: "Dimension-level Trust Score evidence per run.", allowDelete: true },
+  { name: "loop_b_findings_v2", label: "Loop B Findings", description: "Persisted historical pattern-analysis findings promoted from the 13-week Loop B window.", allowDelete: true },
+  { name: "system_health_events_v2", label: "System Health Events", description: "Persisted R186-R198 self-diagnostic and certification-period health events.", allowDelete: true },
   { name: "billing_accounts_v2", label: "Billing Accounts", description: "Account-level subscription and CAAR transaction fee configuration.", allowDelete: true },
   { name: "payment_methods_v2", label: "Payment Methods", description: "Future tokenized card and ACH method references for account billing.", allowDelete: true },
   { name: "billing_statements_v2", label: "Billing Statements", description: "Monthly billing statements for subscription and certified CAAR transaction fees.", allowDelete: true },

@@ -39,6 +39,14 @@ function getAuthErrorResponse(error: unknown) {
   return null;
 }
 
+function getGovernanceValidationErrorResponse(error: unknown) {
+  if (!(error instanceof Error)) return null;
+  if (error.message.startsWith("Seal blocked: ")) {
+    return NextResponse.json({ error: error.message }, { status: 409 });
+  }
+  return null;
+}
+
 function isMissingGovernanceSchema(error: unknown) {
   return (
     typeof error === "object" &&
@@ -86,6 +94,14 @@ function normalizeVendorKey(value: string) {
 
 function isSealedStatus(value: string | null | undefined) {
   return value === "sealed" || value === "seal";
+}
+
+function getSourceArtifactKey(module: "M01" | "M02") {
+  return module === "M01" ? "m01-processor" : "m02-settlement";
+}
+
+function getAgreementArtifactKey(module: "M01" | "M02") {
+  return module === "M01" ? "m01-agreement" : "m02-agreement";
 }
 
 function buildExpectedGovernancePairs(
@@ -227,12 +243,15 @@ async function getScopedRestaurants(session: SessionState) {
   }));
 }
 
-function pickLatestByKey<T extends { version: number }>(rows: T[], keyBuilder: (row: T) => string) {
+function pickLatestByKey<T extends { id: number; version: number }>(
+  rows: T[],
+  keyBuilder: (row: T) => string,
+) {
   const result = new Map<string, T>();
   for (const row of rows) {
     const key = keyBuilder(row);
     const existing = result.get(key);
-    if (!existing || row.version > existing.version) {
+    if (!existing || row.version > existing.version || (row.version === existing.version && row.id > existing.id)) {
       result.set(key, row);
     }
   }
@@ -372,6 +391,10 @@ export async function GET(request: Request) {
     if (authResponse) {
       return withRequestHeaders(authResponse, requestContext);
     }
+    const validationResponse = getGovernanceValidationErrorResponse(error);
+    if (validationResponse) {
+      return withRequestHeaders(validationResponse, requestContext);
+    }
 
     if (isMissingGovernanceSchema(error)) {
       return withRequestHeaders(NextResponse.json(
@@ -480,6 +503,18 @@ export async function POST(request: Request) {
     };
     const persistedStatus = action === "seal" ? "sealed" : "draft";
 
+    if (
+      action === "seal" &&
+      normalizedWorkspace.fields.some(
+        (field) => field.required && field.confidence !== "Verified",
+      )
+    ) {
+      return withRequestHeaders(NextResponse.json(
+        { error: "All required schema fields must be verified before the workspace can be sealed." },
+        { status: 409 },
+      ), requestContext);
+    }
+
     const persisted = await prisma.$transaction(async (tx) => {
       const location = await ensureLocationV2ForRestaurant(tx, {
         accountId: restaurant.accountId,
@@ -488,7 +523,7 @@ export async function POST(request: Request) {
         name: restaurant.name,
       });
 
-      const [latestSchema, latestContract, stateRow] = await Promise.all([
+      const [latestSchema, latestContract, latestSourceUpload, latestAgreementUpload, stateRow] = await Promise.all([
         tx.schema_registry_v2.findFirst({
           where: {
             location_id: location.id,
@@ -527,6 +562,33 @@ export async function POST(request: Request) {
             version: true,
           },
         }),
+        tx.uploads_v2.findFirst({
+          where: {
+            artifact_key: getSourceArtifactKey(normalizedWorkspace.module),
+            location_id: restaurant.id,
+            module: normalizedWorkspace.module,
+            superseded_by: null,
+            vendor: normalizedWorkspace.vendor,
+          },
+          orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
+          select: {
+            id: true,
+            validation_summary: true,
+          },
+        }),
+        tx.uploads_v2.findFirst({
+          where: {
+            artifact_key: getAgreementArtifactKey(normalizedWorkspace.module),
+            location_id: restaurant.id,
+            module: normalizedWorkspace.module,
+            superseded_by: null,
+            vendor: normalizedWorkspace.vendor,
+          },
+          orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
+          select: {
+            id: true,
+          },
+        }),
         tx.restaurant_sentry_state.findUnique({
           where: {
             restaurant_id: restaurant.id,
@@ -549,6 +611,54 @@ export async function POST(request: Request) {
         }),
       ]);
 
+      const latestSealedSchema = latestSchema && isSealedStatus(latestSchema.status) ? latestSchema : await tx.schema_registry_v2.findFirst({
+        where: {
+          location_id: location.id,
+          module: normalizedWorkspace.module,
+          status: {
+            in: ["sealed", "seal"],
+          },
+          vendor: normalizedWorkspace.vendor,
+        },
+        orderBy: [{ version: "desc" }, { id: "desc" }],
+        select: {
+          fields: true,
+          id: true,
+          location_id: true,
+          module: true,
+          sealed_at: true,
+          sha256: true,
+          status: true,
+          vendor: true,
+          version: true,
+        },
+      });
+      const latestSealedContract =
+        latestContract && isSealedStatus(latestContract.status)
+          ? latestContract
+          : await tx.contract_configs_v2.findFirst({
+              where: {
+                location_id: location.id,
+                module: normalizedWorkspace.module,
+                status: {
+                  in: ["sealed", "seal"],
+                },
+                vendor: normalizedWorkspace.vendor,
+              },
+              orderBy: [{ version: "desc" }, { id: "desc" }],
+              select: {
+                id: true,
+                location_id: true,
+                module: true,
+                sealed_at: true,
+                sha256: true,
+                status: true,
+                terms: true,
+                vendor: true,
+                version: true,
+              },
+            });
+
       const nextSchemaVersion = (latestSchema?.version ?? 0) + 1;
       const nextContractVersion = (latestContract?.version ?? 0) + 1;
       const schemaPayload = {
@@ -562,21 +672,35 @@ export async function POST(request: Request) {
       const now = new Date();
       const mutableSchemaRecord = latestSchema?.status === "draft" ? latestSchema : null;
       const mutableContractRecord = latestContract?.status === "draft" ? latestContract : null;
+      const schemaHash = computeWorkspaceHash(schemaPayload);
+      const contractHash = computeWorkspaceHash(contractPayload);
+      const sampleHeaders = normalizedWorkspace.fields.map((field) => field.source).filter(Boolean);
+
+      if (action === "seal" && !latestSourceUpload) {
+        throw new Error(
+          `Seal blocked: upload the governed source file first (${getSourceArtifactKey(normalizedWorkspace.module)}).`,
+        );
+      }
+      if (action === "seal" && !latestAgreementUpload) {
+        throw new Error(
+          `Seal blocked: upload the signed agreement first (${getAgreementArtifactKey(normalizedWorkspace.module)}).`,
+        );
+      }
 
       const [schemaRecord, contractRecord] = await Promise.all([
-        mutableSchemaRecord
+        action === "draft" && mutableSchemaRecord
           ? tx.schema_registry_v2.update({
               where: {
                 id: mutableSchemaRecord.id,
               },
               data: {
                 fields: toJsonValue(schemaPayload),
-                sample_headers: toJsonValue(
-                  normalizedWorkspace.fields.map((field) => field.source).filter(Boolean),
-                ),
-                sealed_at: now,
+                prev_sha256: latestSealedSchema?.sha256 ?? null,
+                sample_headers: sampleHeaders.length > 0 ? toJsonValue(sampleHeaders) : Prisma.JsonNull,
+                sealed_at: null,
                 sealed_by: managerId,
-                sha256: computeWorkspaceHash(schemaPayload),
+                sha256: schemaHash,
+                source_upload_id: latestSourceUpload?.id ?? null,
                 status: persistedStatus,
               },
               select: {
@@ -596,12 +720,12 @@ export async function POST(request: Request) {
                 fields: toJsonValue(schemaPayload),
                 location_id: location.id,
                 module: normalizedWorkspace.module,
-                sample_headers: toJsonValue(
-                  normalizedWorkspace.fields.map((field) => field.source).filter(Boolean),
-                ),
-                sealed_at: now,
+                prev_sha256: latestSealedSchema?.sha256 ?? null,
+                sample_headers: sampleHeaders.length > 0 ? toJsonValue(sampleHeaders) : Prisma.JsonNull,
+                sealed_at: action === "seal" ? now : null,
                 sealed_by: managerId,
-                sha256: computeWorkspaceHash(schemaPayload),
+                sha256: schemaHash,
+                source_upload_id: action === "seal" ? latestSourceUpload?.id ?? null : latestSourceUpload?.id ?? null,
                 status: persistedStatus,
                 vendor: normalizedWorkspace.vendor,
                 version: nextSchemaVersion,
@@ -618,15 +742,17 @@ export async function POST(request: Request) {
                 version: true,
               },
             }),
-        mutableContractRecord
+        action === "draft" && mutableContractRecord
           ? tx.contract_configs_v2.update({
               where: {
                 id: mutableContractRecord.id,
               },
               data: {
-                sealed_at: now,
+                prev_sha256: latestSealedContract?.sha256 ?? null,
+                sealed_at: null,
                 sealed_by: managerId,
-                sha256: computeWorkspaceHash(contractPayload),
+                sha256: contractHash,
+                source_upload_id: latestAgreementUpload?.id ?? null,
                 status: persistedStatus,
                 terms: toJsonValue(contractPayload),
               },
@@ -646,11 +772,11 @@ export async function POST(request: Request) {
               data: {
                 location_id: location.id,
                 module: normalizedWorkspace.module,
-                prev_sha256: latestContract?.sha256 ?? null,
-                sealed_at: now,
+                prev_sha256: latestSealedContract?.sha256 ?? null,
+                sealed_at: action === "seal" ? now : null,
                 sealed_by: managerId,
-                sha256: computeWorkspaceHash(contractPayload),
-                source_upload_id: null,
+                sha256: contractHash,
+                source_upload_id: latestAgreementUpload?.id ?? null,
                 status: persistedStatus,
                 terms: toJsonValue(contractPayload),
                 vendor: normalizedWorkspace.vendor,
