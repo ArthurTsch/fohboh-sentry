@@ -58,6 +58,33 @@ export async function POST(request: Request) {
     const existingMembership = await getActiveMembership(session.managerId);
 
     await prisma.$transaction(async (tx) => {
+      await tx.customers.upsert({
+        where: {
+          account_id: accountId,
+        },
+        create: {
+          account_id: accountId,
+          name: accountId,
+          plan: "wgs",
+        },
+        update: {
+          deleted_at: null,
+          updated_at: new Date(),
+        },
+      });
+
+      await tx.billing_accounts_v2.upsert({
+        where: {
+          account_id: accountId,
+        },
+        create: {
+          account_id: accountId,
+        },
+        update: {
+          updated_at: new Date(),
+        },
+      });
+
       if (existingMembership) {
         await tx.$executeRaw(Prisma.sql`
           UPDATE public.account_memberships_v2

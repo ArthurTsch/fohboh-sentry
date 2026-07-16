@@ -9,6 +9,8 @@ type Metrics = {
   depositAmount?: number;
   deliveryFeeAmount?: number;
   deliveryOrderCount?: number;
+  duplicateOrderCount?: number;
+  duplicateTransactionCount?: number;
   errorChargeAmount?: number;
   feeAmount?: number;
   interchangeFeeAmount?: number;
@@ -25,6 +27,7 @@ type Metrics = {
   payoutAmount?: number;
   refundCount?: number;
   serviceFeeAmount?: number;
+  settlementLagDaysAvg?: number;
   taxRemittedAmount?: number;
   tipAmount?: number;
   transactionCount?: number;
@@ -535,6 +538,247 @@ const M01_RULES: DeterministicRule[] = [
       });
     },
   },
+  {
+    id: "R060",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      if (!statement || residualVariance <= 1) return null;
+      const duplicateTransactionCount = numberValue(statement.duplicateTransactionCount);
+      const feeAmount = numberValue(statement.feeAmount);
+      const transactionCount = Math.max(1, numberValue(statement.transactionCount));
+      if (duplicateTransactionCount <= 0 || feeAmount <= 0) return null;
+      const averageFee = feeAmount / transactionCount;
+      const variance = Math.min(roundCurrency(averageFee * duplicateTransactionCount), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R060", Math.round(duplicateTransactionCount), variance, {
+        average_fee: roundCurrency(averageFee),
+        duplicate_transaction_count: duplicateTransactionCount,
+        transaction_count: transactionCount,
+      });
+    },
+  },
+  {
+    id: "R064",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const contract = context.contract;
+      if (!statement || !contract || residualVariance <= 1) return null;
+      const rateTable = getM01RateTable(contract);
+      const expectedVisaCredit = computeCardBrandFee(
+        numberValue(statement.visaCreditAmount),
+        rateTable.visa_credit.ratePct,
+        rateTable.visa_credit.fixedCents,
+      );
+      const expectedMcCredit = computeCardBrandFee(
+        numberValue(statement.mcCreditAmount),
+        rateTable.mastercard_credit.ratePct,
+        rateTable.mastercard_credit.fixedCents,
+      );
+      const observedVisaCredit = numberValue(statement.visaCreditFeeAmount);
+      const observedMcCredit = numberValue(statement.mcCreditFeeAmount);
+      const totalExcess = Math.max(0, observedVisaCredit - expectedVisaCredit) + Math.max(0, observedMcCredit - expectedMcCredit);
+      if (totalExcess <= 1) return null;
+      const variance = Math.min(roundCurrency(totalExcess), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R064", 1, variance, {
+        expected_mc_credit_fee: expectedMcCredit,
+        expected_visa_credit_fee: expectedVisaCredit,
+        observed_mc_credit_fee: observedMcCredit,
+        observed_visa_credit_fee: observedVisaCredit,
+      });
+    },
+  },
+  {
+    id: "R086",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      if (!statement || residualVariance <= 1) return null;
+      const errorChargeAmount = numberValue(statement.errorChargeAmount);
+      if (errorChargeAmount <= 1) return null;
+      const variance = Math.min(roundCurrency(errorChargeAmount), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R086", 1, variance, {
+        error_charge_amount: errorChargeAmount,
+        note: "Processor-side error or reversal charge persisted in governed source evidence.",
+      });
+    },
+  },
+  {
+    id: "R063",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const lagDays = numberValue(context.statement?.metrics?.settlementLagDaysAvg);
+      const payoutAmount = numberValue(context.statement?.metrics?.payoutAmount);
+      if (lagDays <= 2 || payoutAmount <= 0 || residualVariance <= 1) return null;
+      const variance = Math.min(roundCurrency(payoutAmount * Math.min((lagDays - 2) * 0.0025, 0.05)), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R063", 1, variance, {
+        average_settlement_lag_days: lagDays,
+        payout_amount: payoutAmount,
+      });
+    },
+  },
+  {
+    id: "R068",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const contract = context.contract;
+      if (!statement || !contract || residualVariance <= 1) return null;
+      const monthlyFee = numberValue(contract.monthly_fee);
+      const feeAmount = numberValue(statement.feeAmount);
+      const basisAmount = numberValue(statement.basisAmount);
+      if (monthlyFee <= 0 || feeAmount <= monthlyFee || basisAmount > 5000) return null;
+      const variance = Math.min(roundCurrency(Math.max(0, feeAmount - monthlyFee) * 0.15), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R068", 1, variance, {
+        basis_amount: basisAmount,
+        contracted_monthly_minimum: monthlyFee,
+        observed_fee_amount: feeAmount,
+      });
+    },
+  },
+  {
+    id: "R070",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) =>
+      evaluateVolumeTierRule(context, residualVariance, "R070", 0.1, 0.3),
+  },
+  {
+    id: "R072",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const refundCount = numberValue(statement?.refundCount);
+      const feeAmount = numberValue(statement?.feeAmount);
+      const transactionCount = Math.max(1, numberValue(statement?.transactionCount));
+      if (!statement || refundCount <= 0 || feeAmount <= 0 || residualVariance <= 1) return null;
+      const averageFee = feeAmount / transactionCount;
+      const variance = Math.min(roundCurrency(averageFee * refundCount), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R072", Math.round(refundCount), variance, {
+        average_fee: roundCurrency(averageFee),
+        refund_count: refundCount,
+      });
+    },
+  },
+  {
+    id: "R073",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const chargebackCount = numberValue(context.statement?.metrics?.chargebackCount);
+      const chargebackFee = numberValue(context.contract?.chargeback_fee);
+      if (chargebackCount <= 0 || chargebackFee <= 0 || residualVariance <= 1) return null;
+      const variance = Math.min(roundCurrency(chargebackCount * chargebackFee), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R073", Math.round(chargebackCount), variance, {
+        chargeback_count: chargebackCount,
+        chargeback_fee: chargebackFee,
+      });
+    },
+  },
+  {
+    id: "R075",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const contract = context.contract;
+      if (!statement || !contract || residualVariance <= 1) return null;
+      const monthlyFee = numberValue(contract.monthly_fee);
+      const serviceFeePool = numberValue(statement.serviceFeeAmount) + numberValue(statement.otherFeeAmount);
+      if (serviceFeePool <= monthlyFee || monthlyFee < 0) return null;
+      const variance = Math.min(roundCurrency(Math.max(0, serviceFeePool - monthlyFee)), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R075", 1, variance, {
+        contracted_monthly_fee: monthlyFee,
+        service_fee_pool: roundCurrency(serviceFeePool),
+      });
+    },
+  },
+  {
+    id: "R078",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const contract = context.contract;
+      if (!statement || !contract || residualVariance <= 1) return null;
+      const basisAmount = numberValue(statement.basisAmount);
+      const markupBps = numberValue(contract.markup_bps);
+      const feeAmount = numberValue(statement.feeAmount);
+      const txnFee = numberValue(contract.txn_fee);
+      const monthlyFee = numberValue(contract.monthly_fee);
+      const transactionCount = Math.max(0, roundCurrency(numberValue(statement.transactionCount)));
+      if (basisAmount <= 0 || markupBps <= 0 || feeAmount <= 0) return null;
+      const observedRateBps =
+        ((feeAmount - transactionCount * txnFee - monthlyFee) / Math.max(basisAmount, 1)) * 10000;
+      const excessRateBps = observedRateBps - markupBps;
+      if (excessRateBps <= 0) return null;
+      const variance = Math.min(roundCurrency((basisAmount * excessRateBps) / 10000), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R078", 1, variance, {
+        contracted_markup_bps: markupBps,
+        excess_rate_bps: roundCurrency(excessRateBps),
+        observed_rate_bps: roundCurrency(observedRateBps),
+      });
+    },
+  },
+  {
+    id: "R083",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const contract = context.contract;
+      if (!statement || !contract || residualVariance <= 1) return null;
+      const actualFees = numberValue(statement.feeAmount);
+      const expectedTotal = computeExpectedM01Fees(statement, contract);
+      const unexplained = roundCurrency(actualFees - expectedTotal);
+      if (unexplained <= 1) return null;
+      const variance = Math.min(unexplained, residualVariance);
+      return buildCitation("R083", 1, variance, {
+        actual_fee_amount: actualFees,
+        expected_fee_amount: expectedTotal,
+        unexplained_fee_delta: variance,
+      });
+    },
+  },
+  {
+    id: "R085",
+    module: "M01",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const contract = context.contract;
+      if (!statement || !contract || residualVariance <= 1) return null;
+      const basisAmount = numberValue(statement.basisAmount);
+      const feeAmount = numberValue(statement.feeAmount);
+      const contractRateBps = numberValue(contract.markup_bps);
+      if (basisAmount <= 0 || feeAmount <= 0 || contractRateBps <= 0) return null;
+      const observedRateBps = (feeAmount / basisAmount) * 10000;
+      const deltaBps = observedRateBps - contractRateBps;
+      if (deltaBps <= 15) return null;
+      const variance = Math.min(roundCurrency((basisAmount * deltaBps) / 10000), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R085", 1, variance, {
+        contracted_rate_bps: contractRateBps,
+        observed_rate_bps: roundCurrency(observedRateBps),
+        rate_delta_bps: roundCurrency(deltaBps),
+      });
+    },
+  },
 ];
 
 const M02_RULES: DeterministicRule[] = [
@@ -856,6 +1100,193 @@ const M02_RULES: DeterministicRule[] = [
       });
     },
   },
+  {
+    id: "R023",
+    module: "M02",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      if (!statement || residualVariance <= 1) return null;
+      const duplicateOrderCount = numberValue(statement.duplicateOrderCount);
+      const actualCommission = computeActualM02Commission(statement);
+      const orderCount = Math.max(1, numberValue(statement.orderCount) || numberValue(statement.transactionCount));
+      if (duplicateOrderCount <= 0 || actualCommission <= 0) return null;
+      const averageCommission = actualCommission / orderCount;
+      const variance = Math.min(roundCurrency(averageCommission * duplicateOrderCount), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R023", Math.round(duplicateOrderCount), variance, {
+        average_commission: roundCurrency(averageCommission),
+        duplicate_order_count: duplicateOrderCount,
+        order_count: orderCount,
+      });
+    },
+  },
+  {
+    id: "R024",
+    module: "M02",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const pos = context.pos?.metrics;
+      if (!statement || !pos || residualVariance <= 1) return null;
+      const statementOrders = Math.max(
+        0,
+        numberValue(statement.orderCount) || numberValue(statement.transactionCount),
+      );
+      const posOrders = Math.max(
+        0,
+        numberValue(pos.orderCount) || numberValue(pos.transactionCount),
+      );
+      const duplicateOrderCount = numberValue(statement.duplicateOrderCount);
+      const orderDelta = Math.max(0, Math.abs(statementOrders - posOrders) - duplicateOrderCount);
+      const actualCommission = computeActualM02Commission(statement);
+      if (statementOrders <= 0 || posOrders <= 0 || orderDelta < 3 || actualCommission <= 0) return null;
+      const averageCommission = actualCommission / Math.max(statementOrders, 1);
+      const variance = Math.min(roundCurrency(averageCommission * orderDelta), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R024", Math.round(orderDelta), variance, {
+        order_count_delta: orderDelta,
+        pos_order_count: posOrders,
+        statement_order_count: statementOrders,
+      });
+    },
+  },
+  {
+    id: "R034",
+    module: "M02",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      if (!statement || residualVariance <= 1) return null;
+      const errorChargeAmount = numberValue(statement.errorChargeAmount);
+      const basisAmount = numberValue(statement.basisAmount);
+      if (errorChargeAmount <= 1) return null;
+      const errorRatePct = basisAmount > 0 ? (errorChargeAmount / basisAmount) * 100 : 0;
+      const variance = Math.min(roundCurrency(errorChargeAmount), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R034", 1, variance, {
+        basis_amount: basisAmount,
+        error_charge_amount: errorChargeAmount,
+        error_rate_pct: roundCurrency(errorRatePct),
+      });
+    },
+  },
+  {
+    id: "R038",
+    module: "M02",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const contract = context.contract;
+      if (!statement || !contract || residualVariance <= 1) return null;
+      const marketingFeeAmount = numberValue(statement.marketingFeeAmount);
+      const promoOrderCount = numberValue(statement.promoOrderCount);
+      const basisAmount = numberValue(statement.basisAmount);
+      const marketingFeePct = numberValue(contract.marketing_fee_pct);
+      if (marketingFeeAmount <= 1) return null;
+      const expectedMarketingFee = marketingFeePct > 0 && basisAmount > 0
+        ? roundCurrency(basisAmount * (marketingFeePct / 100))
+        : 0;
+      const unsupportedFee = promoOrderCount <= 0 ? marketingFeeAmount : 0;
+      const excessFee = Math.max(0, marketingFeeAmount - expectedMarketingFee);
+      const variance = Math.min(roundCurrency(Math.max(unsupportedFee, excessFee)), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R038", Math.max(1, Math.round(promoOrderCount)), variance, {
+        expected_marketing_fee: expectedMarketingFee,
+        marketing_fee_amount: marketingFeeAmount,
+        promo_order_count: promoOrderCount,
+      });
+    },
+  },
+  {
+    id: "R025",
+    module: "M02",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const lagDays = numberValue(context.statement?.metrics?.settlementLagDaysAvg);
+      const payoutAmount = numberValue(context.statement?.metrics?.payoutAmount);
+      if (lagDays <= 3 || payoutAmount <= 0 || residualVariance <= 1) return null;
+      const variance = Math.min(roundCurrency(payoutAmount * Math.min((lagDays - 3) * 0.002, 0.04)), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R025", 1, variance, {
+        average_settlement_lag_days: lagDays,
+        payout_amount: payoutAmount,
+      });
+    },
+  },
+  {
+    id: "R035",
+    module: "M02",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const contract = context.contract;
+      if (!statement || !contract || residualVariance <= 1) return null;
+      const actualCommission = computeActualM02Commission(statement);
+      const basisAmount = resolveM02ContractBase(statement, context.pos?.metrics, contract);
+      const expectedRate = computeExpectedM02Rate(contract);
+      if (actualCommission <= 0 || basisAmount <= 0 || expectedRate <= 0) return null;
+      const observedRate = (actualCommission / basisAmount) * 100;
+      const maxAllowedRate = expectedRate + 1.5;
+      if (observedRate <= maxAllowedRate) return null;
+      const variance = Math.min(
+        roundCurrency(basisAmount * ((observedRate - maxAllowedRate) / 100)),
+        residualVariance,
+      );
+      if (variance <= 1) return null;
+      return buildCitation("R035", 1, variance, {
+        contracted_rate_pct: expectedRate,
+        max_allowed_rate_pct: maxAllowedRate,
+        observed_rate_pct: roundCurrency(observedRate),
+      });
+    },
+  },
+  {
+    id: "R036",
+    module: "M02",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statementBasis = numberValue(context.statement?.metrics?.basisAmount);
+      const posBasis = numberValue(context.pos?.metrics?.basisAmount);
+      const actualCommission = computeActualM02Commission(context.statement?.metrics ?? {});
+      if (statementBasis <= 0 || posBasis <= 0 || actualCommission <= 0 || residualVariance <= 1) return null;
+      const deltaPct = relativeDelta(statementBasis, posBasis);
+      if (deltaPct <= 0.1) return null;
+      const variance = Math.min(roundCurrency(actualCommission * Math.min(deltaPct, 0.5)), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R036", 1, variance, {
+        cross_platform_delta_pct: roundCurrency(deltaPct * 100),
+        pos_basis_amount: posBasis,
+        settlement_basis_amount: statementBasis,
+      });
+    },
+  },
+  {
+    id: "R041",
+    module: "M02",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const statement = context.statement?.metrics;
+      const contract = context.contract;
+      if (!statement || !contract || residualVariance <= 1) return null;
+      const memberOrders = numberValue(statement.memberOrderCount);
+      const orderCount = Math.max(1, numberValue(statement.orderCount));
+      const rateDelivery = numberValue(contract.rate_delivery);
+      const rateMember = numberValue(contract.rate_member);
+      const basisAmount = numberValue(statement.basisAmount);
+      if (memberOrders <= 0 || rateDelivery <= 0 || rateMember <= 0 || rateDelivery <= rateMember || basisAmount <= 0) {
+        return null;
+      }
+      const memberBasis = basisAmount * (memberOrders / orderCount);
+      const variance = Math.min(roundCurrency(memberBasis * ((rateDelivery - rateMember) / 100)), residualVariance);
+      if (variance <= 1) return null;
+      return buildCitation("R041", Math.round(memberOrders), variance, {
+        delivery_rate_pct: rateDelivery,
+        member_rate_pct: rateMember,
+        subscription_order_count: memberOrders,
+      });
+    },
+  },
 ];
 
 export function getRuleSetVersion(cadence: Cadence) {
@@ -903,16 +1334,36 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
       ? computeM01Recovery(statement?.metrics, contract)
       : computeM02Recovery(statement?.metrics, pos?.metrics, contract),
   );
-  const ruleCitations = runLoopA(context, recoveryValue);
+  const loopARuleCitations = runLoopA(context, recoveryValue);
   const reviewedFeeVolume = computeReviewedFeeVolume(context);
   const trustGates = computeTrustGateScores({
     cadence: input.cadence,
     context,
     dimensions,
     reviewedFeeVolume,
-    ruleCitations,
+    ruleCitations: loopARuleCitations,
   });
   const systemHealth = computeSystemHealth(input.systemHealthFlags ?? []);
+  const governanceRuleCitations = buildCanonicalGovernanceCitations({
+    context,
+    dimensions,
+    recoveryValue,
+    systemHealth,
+    trustGates,
+    varianceCents: loopARuleCitations.reduce((sum, citation) => sum + citation.varianceCents, 0),
+  });
+  const ingestionRuleCitations = buildCanonicalIngestionCitations(context);
+  const trustGateRuleCitations = buildCanonicalTrustGateCitations({
+    context,
+    dimensions,
+    trustGates,
+  });
+  const ruleCitations = [
+    ...loopARuleCitations,
+    ...governanceRuleCitations,
+    ...ingestionRuleCitations,
+    ...trustGateRuleCitations,
+  ];
   const { score, certificationZone } = computeTrustScoreFromTrustGates(trustGates, systemHealth);
   const findingClass = classifyFindingClass(ruleCitations, context);
   const findings = buildOperationalFindings(
@@ -970,6 +1421,442 @@ function runLoopA(context: RuleContext, recoveryValue: number) {
   }
 
   return citations;
+}
+
+function buildCanonicalGovernanceCitations({
+  context,
+  dimensions,
+  recoveryValue,
+  systemHealth,
+  trustGates,
+  varianceCents,
+}: {
+  context: RuleContext;
+  dimensions: Record<Mq6DimensionName, number>;
+  recoveryValue: number;
+  systemHealth: SystemHealthResult;
+  trustGates: Record<TrustGateName, TrustGateScore>;
+  varianceCents: number;
+}) {
+  const citations: RuleCitation[] = [];
+  const hasContract = Boolean(context.contract && contractFieldCount(context.contract) >= 3);
+  const hasStatement = Boolean(context.statement?.uploaded && context.statement.hash);
+  const hasPos = Boolean(context.pos?.uploaded && context.pos.hash);
+  const hasAgreement = Boolean(context.agreement?.uploaded && context.agreement.hash);
+  const hasBank = context.cadence === "weekly_preliminary"
+    ? true
+    : Boolean(context.bank?.uploaded && context.bank.hash);
+  const periodComplete = hasStatement && hasPos && hasAgreement && hasBank;
+  const auditComplete = dimensions.Auditability >= 100;
+  const gateReady = trustGates.TG07.scorePct >= 85 && trustGates.TG10.scorePct >= 100;
+  const systematicVariance = Math.abs(centsToDollars(varianceCents)) >= Math.max(50, recoveryValue * 0.2);
+
+  if (context.moduleId === "M01") {
+    if (numberValue(context.statement?.metrics?.errorChargeAmount) > 0) {
+      citations.push(buildNarrativeCitation("R087", {
+        detail: "Processor-side error charges remain present in governed source evidence.",
+        error_charge_amount: numberValue(context.statement?.metrics?.errorChargeAmount),
+      }));
+    }
+    if (recoveryValue < 250) {
+      citations.push(buildNarrativeCitation("R088", {
+        detail: "MFR recovery remains below the operational review threshold.",
+        recovery_value: recoveryValue,
+        threshold: 250,
+      }));
+    }
+    if (!hasContract) {
+      citations.push(buildNarrativeCitation("R090", {
+        detail: "Governed contract values are missing for this MFR workspace.",
+      }));
+    }
+    if (systematicVariance) {
+      citations.push(buildNarrativeCitation("R091", {
+        detail: "Observed MFR variance is systematic enough to require remediation before release.",
+        recovery_value: recoveryValue,
+        variance_cents: varianceCents,
+      }));
+    }
+    if (!periodComplete) {
+      citations.push(buildNarrativeCitation("R092", {
+        detail: "The current MFR evidence package is period-incomplete.",
+        has_agreement: hasAgreement,
+        has_bank: hasBank,
+        has_pos: hasPos,
+        has_statement: hasStatement,
+      }));
+    }
+    if (trustGates.TG07.scorePct < 85 || trustGates.TG10.scorePct < 100) {
+      citations.push(buildNarrativeCitation("R093", {
+        detail: "MFR trust-score contribution remains below the final release gate.",
+        tg07: trustGates.TG07.scorePct,
+        tg10: trustGates.TG10.scorePct,
+      }));
+    }
+    if (!auditComplete) {
+      citations.push(buildNarrativeCitation("R094", {
+        auditability_score: dimensions.Auditability,
+        detail: "Audit lineage is incomplete for this MFR certification set.",
+      }));
+    }
+    if (!gateReady || !systemHealth.masterSystemHealthy) {
+      citations.push(buildNarrativeCitation("R095", {
+        detail: "Final MFR narrative token set is not releasable because governance or health gates remain open.",
+        master_system_healthy: systemHealth.masterSystemHealthy,
+        tg07: trustGates.TG07.scorePct,
+        tg10: trustGates.TG10.scorePct,
+      }));
+    }
+  }
+
+  if (context.moduleId === "M02") {
+    if (recoveryValue < 250) {
+      citations.push(buildNarrativeCitation("R046", {
+        detail: "DFR recovery remains below the operational review threshold.",
+        recovery_value: recoveryValue,
+        threshold: 250,
+      }));
+    }
+    if (!periodComplete) {
+      citations.push(buildNarrativeCitation("R047", {
+        detail: "The current DFR evidence package is period-incomplete.",
+        has_agreement: hasAgreement,
+        has_bank: hasBank,
+        has_pos: hasPos,
+        has_statement: hasStatement,
+      }));
+    }
+    if (numberValue(context.statement?.metrics?.adjustmentAmount) > 0) {
+      citations.push(buildNarrativeCitation("R048", {
+        adjustment_amount: numberValue(context.statement?.metrics?.adjustmentAmount),
+        detail: "Settlement adjustments remain present and should be reviewed for prior-period carryover behavior.",
+      }));
+    }
+    if (systematicVariance) {
+      citations.push(buildNarrativeCitation("R049", {
+        detail: "Observed DFR variance is systematic enough to require remediation before release.",
+        recovery_value: recoveryValue,
+        variance_cents: varianceCents,
+      }));
+    }
+    if (trustGates.TG07.scorePct < 85 || trustGates.TG10.scorePct < 100) {
+      citations.push(buildNarrativeCitation("R051", {
+        detail: "DFR trust-score contribution remains below the final release gate.",
+        tg07: trustGates.TG07.scorePct,
+        tg10: trustGates.TG10.scorePct,
+      }));
+    }
+    if (!hasContract) {
+      citations.push(buildNarrativeCitation("R052", {
+        detail: "Governed contract values are missing for this DFR workspace.",
+      }));
+    }
+    if (!auditComplete) {
+      citations.push(buildNarrativeCitation("R054", {
+        auditability_score: dimensions.Auditability,
+        detail: "Audit lineage is incomplete for this DFR certification set.",
+      }));
+    }
+    if (!gateReady || !systemHealth.masterSystemHealthy) {
+      citations.push(buildNarrativeCitation("R055", {
+        detail: "Final DFR narrative token set is not releasable because governance or health gates remain open.",
+        master_system_healthy: systemHealth.masterSystemHealthy,
+        tg07: trustGates.TG07.scorePct,
+        tg10: trustGates.TG10.scorePct,
+      }));
+    }
+  }
+
+  if (!systemHealth.healthy) {
+    for (const flag of systemHealth.flags) {
+      citations.push(buildNarrativeCitation(flag, {
+        detail: systemHealth.detail,
+        penalty_points: systemHealth.penaltyPoints,
+      }));
+    }
+  }
+
+  return dedupeRuleCitations(citations);
+}
+
+function buildCanonicalIngestionCitations(context: RuleContext) {
+  const statement = context.statement;
+  const pos = context.pos;
+  const agreement = context.agreement;
+  const bank = context.bank;
+  const statementMetrics = statement?.metrics;
+  const posMetrics = pos?.metrics;
+  const duplicateTransactionCount = numberValue(statementMetrics?.duplicateTransactionCount);
+  const duplicateOrderCount = numberValue(statementMetrics?.duplicateOrderCount);
+  const basisAmount = numberValue(statementMetrics?.basisAmount) + numberValue(posMetrics?.basisAmount);
+  const hasNegativeSignals =
+    numberValue(statementMetrics?.adjustmentAmount) < 0 ||
+    numberValue(statementMetrics?.errorChargeAmount) < 0 ||
+    numberValue(statementMetrics?.payoutAmount) < 0 ||
+    numberValue(bank?.metrics?.depositAmount) < 0;
+  const hasDateRange =
+    numberValue(statementMetrics?.settlementLagDaysAvg) > 0 ||
+    numberValue(statement?.updatedAt ? 1 : 0) > 0;
+
+  const citations = [
+    buildNarrativeCitation("R001", {
+      detail: statement?.uploaded
+        ? "Governed source file receipt was recorded for the active module."
+        : "No governed source file has been received for the active module.",
+      uploaded: Boolean(statement?.uploaded),
+    }),
+    buildNarrativeCitation("R002", {
+      detail: "Vendor type classification was resolved from the governed artifact key and active module.",
+      artifact_key: statement?.key ?? null,
+      module: context.moduleId,
+    }),
+    buildNarrativeCitation("R003", {
+      detail: "Parser version selection used the current governed intake profile for the artifact type.",
+      artifact_type: statement?.type ?? null,
+      module: context.moduleId,
+    }),
+    buildNarrativeCitation("R004", {
+      detail: statement?.uploaded
+        ? "Source parse execution completed and produced governed metrics."
+        : "Source parse execution has not completed because the governed source file is missing.",
+      metrics_present: Boolean(statementMetrics),
+    }),
+    buildNarrativeCitation("R005", {
+      detail: statement?.uploaded && statement?.schema
+        ? "No parse failure blocked the governed source artifact."
+        : "Parse or structural intake failure remains on the governed source artifact.",
+      schema_ready: Boolean(statement?.schema),
+    }),
+    buildNarrativeCitation("R006", {
+      detail: statement?.schema && statement?.fields
+        ? "Canonical column mapping has been applied to the governed source artifact."
+        : "Canonical column mapping remains incomplete on the governed source artifact.",
+      governed_fields_ready: Boolean(statement?.fields),
+    }),
+    buildNarrativeCitation("R007", {
+      detail: statement?.schema
+        ? "No blocking unmapped source-column condition remains on the governed source artifact."
+        : "Unmapped or structurally incompatible source columns still block governance.",
+      schema_ready: Boolean(statement?.schema),
+    }),
+    buildNarrativeCitation("R008", {
+      detail: statement?.schema
+        ? "Canonical schema validation passed for the governed source artifact."
+        : "Canonical schema validation has not passed for the governed source artifact.",
+      schema_ready: Boolean(statement?.schema),
+    }),
+    buildNarrativeCitation("R009", {
+      detail: statement?.schema
+        ? "The active source artifact was not rejected by schema validation."
+        : "The active source artifact remains rejected or blocked by schema validation.",
+      schema_ready: Boolean(statement?.schema),
+    }),
+    buildNarrativeCitation("R010", {
+      detail:
+        duplicateTransactionCount > 0 || duplicateOrderCount > 0
+          ? "Duplicate events were detected during governed normalization."
+          : "No duplicate events were detected during governed normalization.",
+      duplicate_order_count: duplicateOrderCount,
+      duplicate_transaction_count: duplicateTransactionCount,
+    }),
+    buildNarrativeCitation("R011", {
+      detail: hasDateRange
+        ? "Date-range validation produced a usable governed certification window."
+        : "Date-range validation could not be confirmed from the active governed package.",
+      settlement_lag_days_avg: numberValue(statementMetrics?.settlementLagDaysAvg),
+    }),
+    buildNarrativeCitation("R012", {
+      detail: basisAmount > 0
+        ? "Null-amount rejection did not prevent normalization of the active governed package."
+        : "Amount-bearing governed fields are absent or unresolved in the active package.",
+      normalized_amount_basis: roundCurrency(basisAmount),
+    }),
+    buildNarrativeCitation("R013", {
+      detail: hasNegativeSignals
+        ? "Negative-value signals were preserved for review during normalization."
+        : "No negative-value normalization flags were surfaced from the governed package.",
+      negative_signal_detected: hasNegativeSignals,
+    }),
+    buildNarrativeCitation("R014", {
+      detail: context.contract && contractFieldCount(context.contract) >= 3
+        ? "Vendor profile lookup resolved governed contract values for this module."
+        : "Vendor profile lookup did not resolve a complete governed contract profile for this module.",
+      contract_fields: context.contract ? contractFieldCount(context.contract) : 0,
+    }),
+    buildNarrativeCitation("R015", {
+      detail:
+        statement?.uploaded && pos?.uploaded && agreement?.uploaded && (context.cadence === "weekly_preliminary" || bank?.uploaded)
+          ? "Normalization completed and the full active package advanced into deterministic certification."
+          : "Normalization is not yet complete because one or more governed artifacts are still missing.",
+      agreement_uploaded: Boolean(agreement?.uploaded),
+      bank_uploaded: Boolean(bank?.uploaded),
+      pos_uploaded: Boolean(pos?.uploaded),
+      source_uploaded: Boolean(statement?.uploaded),
+    }),
+  ];
+
+  return dedupeRuleCitations(citations);
+}
+
+function buildCanonicalTrustGateCitations({
+  context,
+  dimensions,
+  trustGates,
+}: {
+  context: RuleContext;
+  dimensions: Record<Mq6DimensionName, number>;
+  trustGates: Record<TrustGateName, TrustGateScore>;
+}) {
+  const duplicateDetected =
+    numberValue(context.statement?.metrics?.duplicateOrderCount) > 0 ||
+    numberValue(context.statement?.metrics?.duplicateTransactionCount) > 0;
+  const contractAgeDays = (() => {
+    const contractEffectiveDate = parseDateValue(context.contract?.effective_date);
+    return contractEffectiveDate === null
+      ? null
+      : Math.floor((context.evaluationDate.getTime() - contractEffectiveDate.getTime()) / (1000 * 60 * 60 * 24));
+  })();
+  const tg07VarianceCitations = new Set([
+    "MFR-BIL-15",
+    "R083",
+    "DSP-COM-04",
+    "DSP-VAR-11",
+    "R035",
+    "R049",
+    "R091",
+  ]);
+  const narrativeReady = trustGates.TG08.scorePct >= 100 && trustGates.TG09.scorePct >= 100;
+
+  const citations = [
+    buildNarrativeCitation("R116", {
+      detail: `TG01 data completeness resolved at ${trustGates.TG01.scorePct}.`,
+      tg01_score: trustGates.TG01.scorePct,
+    }),
+    buildNarrativeCitation("R117", {
+      detail: context.pos?.uploaded
+        ? "POS data presence is available for TG01."
+        : "POS data presence is missing and caps TG01.",
+      pos_uploaded: Boolean(context.pos?.uploaded),
+    }),
+    buildNarrativeCitation("R118", {
+      detail: `TG02 source authenticity resolved at ${trustGates.TG02.scorePct}.`,
+      tg02_score: trustGates.TG02.scorePct,
+    }),
+    buildNarrativeCitation("R119", {
+      detail:
+        context.statement?.hash && context.pos?.hash
+          ? "Required source files carry integrity hashes for the active package."
+          : "One or more required source files are missing integrity-hash proof.",
+      pos_hash: Boolean(context.pos?.hash),
+      source_hash: Boolean(context.statement?.hash),
+    }),
+    buildNarrativeCitation("R120", {
+      detail:
+        context.contract && contractFieldCount(context.contract) >= 3
+          ? "Vendor profile is present for the certification period."
+          : "Vendor profile is absent for the certification period.",
+      contract_fields: context.contract ? contractFieldCount(context.contract) : 0,
+    }),
+    buildNarrativeCitation("R121", {
+      detail:
+        contractAgeDays !== null && contractAgeDays <= 180
+          ? "Contract currency remains within the governed freshness window."
+          : "Contract currency is stale or not provable for the governed period.",
+      contract_age_days: contractAgeDays,
+    }),
+    buildNarrativeCitation("R122", {
+      detail: `TG04 POS reconciliation resolved at ${trustGates.TG04.scorePct}.`,
+      tg04_score: trustGates.TG04.scorePct,
+    }),
+    buildNarrativeCitation("R123", {
+      detail:
+        dimensions["Cross-System Reconciliation"] >= 85
+          ? "POS reconciliation cleared the release band."
+          : "POS reconciliation remains below the release band.",
+      reconciliation_score: dimensions["Cross-System Reconciliation"],
+    }),
+    buildNarrativeCitation("R124", {
+      detail: duplicateDetected
+        ? "Duplicate-absence control did not clear."
+        : "Duplicate-absence control cleared.",
+      duplicate_detected: duplicateDetected,
+    }),
+    buildNarrativeCitation("R125", {
+      detail: duplicateDetected
+        ? "Duplicate-detected penalty applied to TG05."
+        : "No duplicate-detected penalty applied to TG05.",
+      duplicate_order_count: numberValue(context.statement?.metrics?.duplicateOrderCount),
+      duplicate_transaction_count: numberValue(context.statement?.metrics?.duplicateTransactionCount),
+    }),
+    buildNarrativeCitation("R126", {
+      detail: `TG06 period coverage resolved at ${trustGates.TG06.scorePct}.`,
+      tg06_score: trustGates.TG06.scorePct,
+    }),
+    buildNarrativeCitation("R127", {
+      detail:
+        trustGates.TG06.scorePct >= 75
+          ? "No major period-gap penalty remains active."
+          : "A period-gap penalty remains active.",
+      tg06_score: trustGates.TG06.scorePct,
+    }),
+    buildNarrativeCitation("R128", {
+      detail: `TG07 fee-legitimacy score resolved at ${trustGates.TG07.scorePct}.`,
+      tg07_score: trustGates.TG07.scorePct,
+    }),
+    buildNarrativeCitation("R129", {
+      detail:
+        trustGates.TG07.scorePct >= 85
+          ? "Fee-variance grade cleared the final legitimacy band."
+          : "Fee-variance grade remains below the final legitimacy band.",
+      tg07_score: trustGates.TG07.scorePct,
+    }),
+    buildNarrativeCitation("R130", {
+      detail:
+        trustGates.TG07.scorePct < 85
+          ? "A high-variance fee condition remains active."
+          : "No high-variance fee condition remains active.",
+      high_variance_flag: trustGates.TG07.scorePct < 85,
+    }),
+    buildNarrativeCitation("R131", {
+      detail:
+        trustGates.TG08.scorePct >= 100
+          ? "KPI formula currency cleared the governed readiness gate."
+          : "KPI formula currency remains incomplete.",
+      tg08_score: trustGates.TG08.scorePct,
+    }),
+    buildNarrativeCitation("R132", {
+      detail:
+        trustGates.TG08.scorePct >= 100
+          ? "No mid-period formula change risk remains in the governed package."
+          : "A mid-period or incomplete formula risk remains in the governed package.",
+      tg08_score: trustGates.TG08.scorePct,
+    }),
+    buildNarrativeCitation("R133", {
+      detail:
+        trustGates.TG09.scorePct >= 100
+          ? "Audit-trail integrity cleared."
+          : "Audit-trail integrity remains incomplete.",
+      tg09_score: trustGates.TG09.scorePct,
+    }),
+    buildNarrativeCitation("R134", {
+      detail:
+        narrativeReady
+          ? "Narrative hash match readiness is fully established."
+          : "Narrative hash match readiness remains blocked.",
+      tg08_score: trustGates.TG08.scorePct,
+      tg09_score: trustGates.TG09.scorePct,
+    }),
+    buildNarrativeCitation("R135", {
+      detail:
+        trustGates.TG11.scorePct >= 100
+          ? "CAAR eligibility cleared the final trust-gate threshold."
+          : "CAAR eligibility remains blocked at the trust-gate layer.",
+      tg11_score: trustGates.TG11.scorePct,
+    }),
+  ];
+
+  void tg07VarianceCitations;
+  return dedupeRuleCitations(citations);
 }
 
 function computeReviewedFeeVolume(context: RuleContext) {
@@ -1658,6 +2545,26 @@ function buildCitation(
     sampleEvidence: [sampleEvidence],
     varianceCents: dollarsToCents(varianceDollars),
   };
+}
+
+function buildNarrativeCitation(ruleId: string, sampleEvidence: Record<string, unknown>): RuleCitation {
+  return {
+    firedCount: 1,
+    ruleId,
+    ruleVersion: RULE_VERSION,
+    sampleEvidence: [sampleEvidence],
+    varianceCents: 0,
+  };
+}
+
+function dedupeRuleCitations(citations: RuleCitation[]) {
+  const seen = new Set<string>();
+  return citations.filter((citation) => {
+    const key = `${citation.ruleId}:${JSON.stringify(citation.sampleEvidence[0] ?? {})}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function isRequiredArtifact(context: RuleContext, artifact: ModuleArtifactState) {

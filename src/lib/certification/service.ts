@@ -1003,6 +1003,7 @@ export async function executePersistedCertification({
     });
 
     const nextRunIds: number[] = [];
+    const persistedOverallRuleCitations = new Set<string>();
     const runRecords: Array<{
       assessment: (typeof certification.assessments)[number];
       id: number;
@@ -1099,6 +1100,36 @@ export async function executePersistedCertification({
             variance_cents: BigInt(citation.varianceCents),
           })),
         });
+      }
+
+      if (certification.overallRuleCitations.length > 0) {
+        const overallCitationRows = certification.overallRuleCitations
+          .filter((citation) => {
+            const key = `${run.id}:${citation.ruleId}`;
+            if (persistedOverallRuleCitations.has(key)) {
+              return false;
+            }
+            persistedOverallRuleCitations.add(key);
+            return true;
+          })
+          .map((citation) => ({
+            cert_run_id: run.id,
+            fired_count: citation.firedCount,
+            rule_id: citation.ruleId,
+            rule_version: citation.ruleVersion,
+            sample_evidence: toJsonValue({
+              module: "OVERALL",
+              samples: citation.sampleEvidence,
+              uploadIds: moduleUploadIds,
+            }),
+            variance_cents: BigInt(citation.varianceCents),
+          }));
+
+        if (overallCitationRows.length > 0) {
+          await tx.rule_citations_v2.createMany({
+            data: overallCitationRows,
+          });
+        }
       }
 
       await tx.audit_log_v2.create({

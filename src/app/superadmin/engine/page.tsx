@@ -7,6 +7,12 @@ import {
   getSearchParam,
   isAdminAuthorized,
 } from "@/app/admin/admin-ui";
+import {
+  getCanonicalCoverageSummary,
+  getCanonicalSectionCoverage,
+  getRuntimeRuleCrosswalk,
+  findCanonicalRule,
+} from "@/lib/mge/canonical-registry";
 
 export const metadata: Metadata = {
   ...adminMetadata,
@@ -540,6 +546,10 @@ const codeMap = [
   },
 ];
 
+const canonicalCoverageSummary = getCanonicalCoverageSummary();
+const canonicalSectionCoverage = getCanonicalSectionCoverage();
+const runtimeRuleCrosswalk = getRuntimeRuleCrosswalk();
+
 function resolveDocSectionId(value: string | undefined): DocSectionId {
   const validIds = new Set<DocSectionId>([
     "system-map",
@@ -593,10 +603,10 @@ export default async function SuperAdminEnginePage({
             </div>
 
             <div className="grid min-w-[300px] gap-3 sm:grid-cols-2">
-              <StatCard value="M01 + M02" label="Active certification modules" />
+              <StatCard value={`${canonicalCoverageSummary.canonicalRuleCount}`} label="Canonical rules in source registry" />
               <StatCard value="TG01-TG11" label="Composite trust-gate framework" />
-              <StatCard value="R186-R198" label="System-health rule family" />
-              <StatCard value="Loop A + Loop B" label="Current implemented certification layers" />
+              <StatCard value={`${canonicalCoverageSummary.implementedRuntimeRuleCount}`} label="Live deterministic fee rules" />
+              <StatCard value="Loop A + Loop B + SYS" label="Current implemented certification layers" />
             </div>
           </div>
         </section>
@@ -873,6 +883,68 @@ function DeterministicEngineSection() {
         </div>
       </div>
 
+      <div className="mt-6 grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+        <div className="rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="text-lg font-semibold text-[var(--text)]">Canonical Registry Status</div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <StatCard
+              value={`${canonicalCoverageSummary.canonicalRuleCount}`}
+              label="Canonical `R001-R198` rules"
+            />
+            <StatCard
+              value={`${canonicalCoverageSummary.implementedRuntimeRuleCount}`}
+              label="Live runtime fee rules"
+            />
+            <StatCard
+              value={`${canonicalCoverageSummary.implementedCanonicalRuleCount}`}
+              label="Canonical ids directly cross-walked"
+            />
+            <StatCard
+              value={`${canonicalCoverageSummary.partialSectionCount}/11`}
+              label="Sections partially implemented"
+            />
+          </div>
+          <div className="mt-4 rounded-2xl border border-[rgba(214,48,49,0.16)] bg-white p-4 text-sm leading-7 text-[var(--muted)]">
+            The production engine does not yet execute all canonical `R001-R198` rules one-by-one. What it does
+            have now is a governed runtime subset with explicit crosswalks into the canonical registry, so
+            SuperAdmin can see exactly where the current implementation is strong and where deeper rule expansion
+            is still required.
+          </div>
+        </div>
+
+        <div className="rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="text-lg font-semibold text-[var(--text)]">Section-by-Section Coverage</div>
+          <div className="mt-4 space-y-3">
+            {canonicalSectionCoverage.map((section) => (
+              <div key={section.sectionNumber} className="rounded-2xl border border-[var(--border)] bg-white p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-[var(--text)]">
+                      Section {section.sectionNumber}: {section.sectionTitle}
+                    </div>
+                    <div className="mt-2 text-sm leading-7 text-[var(--muted)]">
+                      {section.implementedScope}
+                    </div>
+                    <div className="mt-2 text-sm leading-7 text-[var(--muted)]">{section.notes}</div>
+                  </div>
+                  <span
+                    className={`rounded-full border px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] ${
+                      section.status === "implemented"
+                        ? "border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] text-[#00A152]"
+                        : section.status === "partially_implemented"
+                          ? "border-[rgba(212,131,10,0.24)] bg-[rgba(212,131,10,0.08)] text-[#A96800]"
+                          : "border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)] text-[var(--accent)]"
+                    }`}
+                  >
+                    {section.status.replaceAll("_", " ")}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className="mt-6 grid gap-4 xl:grid-cols-2">
         {advancedEngineBlocks.map((block) => (
           <details key={block.title} className="rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -898,6 +970,74 @@ function DeterministicEngineSection() {
           {systemHealthRules.map((group) => (
             <RuleFamilyCard key={group.title} group={group} />
           ))}
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="text-lg font-semibold text-[var(--text)]">Runtime-to-Canonical Rule Crosswalk</div>
+        <div className="mt-2 text-sm leading-7 text-[var(--muted)]">
+          These rows show how the current live `MFR-*` and `DSP-*` runtime rules map into the canonical
+          `R001-R198` architecture. This is a real crosswalk, not a claim that the app already executes every
+          canonical rule directly.
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full border-separate border-spacing-0 overflow-hidden rounded-[20px] border border-[var(--border)] bg-white text-sm">
+            <thead className="bg-[var(--surface)] text-left">
+              <tr>
+                <th className="px-4 py-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Runtime
+                </th>
+                <th className="px-4 py-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Module
+                </th>
+                <th className="px-4 py-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Canonical
+                </th>
+                <th className="px-4 py-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  What Current Runtime Covers
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {runtimeRuleCrosswalk.map((rule) => (
+                <tr key={rule.runtimeRuleId} className="align-top">
+                  <td className="border-t border-[var(--border)] px-4 py-4 font-[family-name:var(--font-mono)] text-[12px] font-bold text-[var(--accent)]">
+                    {rule.runtimeRuleId}
+                  </td>
+                  <td className="border-t border-[var(--border)] px-4 py-4 text-[var(--text)]">{rule.module}</td>
+                  <td className="border-t border-[var(--border)] px-4 py-4">
+                    <div className="flex flex-wrap gap-2">
+                      {rule.canonicalRuleIds.map((ruleId) => {
+                        const canonical = findCanonicalRule(ruleId);
+                        return (
+                          <span
+                            key={`${rule.runtimeRuleId}:${ruleId}`}
+                            className="rounded-full border border-[rgba(29,78,216,0.18)] bg-[rgba(29,78,216,0.06)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--info)]"
+                            title={canonical ? canonical.ruleName : ruleId}
+                          >
+                            {ruleId}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-2 space-y-1 text-xs leading-6 text-[var(--muted)]">
+                      {rule.canonicalRuleIds.map((ruleId) => {
+                        const canonical = findCanonicalRule(ruleId);
+                        return canonical ? (
+                          <div key={`${rule.runtimeRuleId}:${ruleId}:name`}>
+                            {ruleId}: {canonical.ruleName}
+                          </div>
+                        ) : null;
+                      })}
+                    </div>
+                  </td>
+                  <td className="border-t border-[var(--border)] px-4 py-4 text-sm leading-7 text-[var(--muted)]">
+                    {rule.note}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </section>

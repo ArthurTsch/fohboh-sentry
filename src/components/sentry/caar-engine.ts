@@ -115,6 +115,7 @@ export type CertificationResult = {
   crossModule: CrossModuleSummary;
   loopB: LoopBResult;
   overallSystemHealth: SystemHealthResult;
+  overallRuleCitations: RuleCitation[];
   overallTrustGates: Record<TrustGateName, TrustGateScore>;
   ready: boolean;
   record: CaarRecord;
@@ -317,6 +318,18 @@ export function buildCertificationResult({
     loopB,
     ready,
   });
+  const overallRuleCitations = buildOverallCanonicalRuleCitations({
+    activeModules,
+    cadence,
+    crossModule,
+    loopB,
+    overallSystemHealth,
+    overallTrustGates,
+    ready,
+    record,
+    trustScore,
+    workflow,
+  });
 
   return {
     assessments: activeModules,
@@ -325,6 +338,7 @@ export function buildCertificationResult({
     crossModule,
     loopB,
     overallSystemHealth,
+    overallRuleCitations,
     overallTrustGates,
     ready,
     record,
@@ -336,6 +350,323 @@ export function buildCertificationResult({
     updatedRecovery: formatCurrency(amountValue),
     workflow,
   };
+}
+
+function buildOverallCanonicalRuleCitations({
+  activeModules,
+  cadence,
+  crossModule,
+  loopB,
+  overallSystemHealth,
+  overallTrustGates,
+  ready,
+  record,
+  trustScore,
+  workflow,
+}: {
+  activeModules: ModuleAssessment[];
+  cadence: "monthly_final" | "weekly_preliminary";
+  crossModule: CrossModuleSummary;
+  loopB: LoopBResult;
+  overallSystemHealth: SystemHealthResult;
+  overallTrustGates: Record<TrustGateName, TrustGateScore>;
+  ready: boolean;
+  record: CaarRecord;
+  trustScore: number;
+  workflow: WorkflowGovernanceSummary;
+}) {
+  const citations: RuleCitation[] = [];
+  const activeModuleIds = activeModules.map((module) => module.moduleId);
+  const totalRecovery = round(activeModules.reduce((sum, module) => sum + module.recoveryValue, 0));
+
+  citations.push(
+    buildOverallCitation("R136", {
+      detail: "Composite Trust Score was calculated from the persisted TG01-TG11 framework and SYS penalty layer.",
+      trust_score: trustScore,
+    }),
+  );
+
+  const zoneRuleId =
+    trustScore < 40 ? "R137" : trustScore < 60 ? "R138" : trustScore < 80 ? "R139" : trustScore < 85 ? "R140" : "R141";
+  citations.push(
+    buildOverallCitation(zoneRuleId, {
+      certification_status: record.status,
+      detail: `Certification state assigned from the composite Trust Score band (${trustScore}).`,
+      trust_score: trustScore,
+    }),
+  );
+
+  citations.push(
+    buildOverallCitation("R142", {
+      detail: ready
+        ? "Certification record is eligible for final lock and court-admissible release."
+        : "Certification record remains mutable only through superseding remediation because release gates are unresolved.",
+      ready,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R143", {
+      caar_status: record.status,
+      detail: "DCLS / CAAR template path was selected from the composite certification state.",
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R144", {
+      detail: "Certification output tokens were injected into the canonical CAAR payload assembly path.",
+      module_count: activeModules.length,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R145", {
+      detail: "Narrative-hash generation path is included in the canonical CAAR sealing workflow.",
+      tg10_score: overallTrustGates.TG10.scorePct,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R146", {
+      detail: overallTrustGates.TG11.scorePct >= 100
+        ? "CAAR eligibility confirmed by the composite trust-gate release threshold."
+        : "CAAR eligibility remains blocked by the composite trust-gate release threshold.",
+      tg11_score: overallTrustGates.TG11.scorePct,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R147", {
+      detail: "CAAR output template was selected from the current certification class and workflow state.",
+      ready,
+      status: record.status,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R148", {
+      detail: "Evidence bundle assembly used persisted upload, governance, and rule-engine state.",
+      active_modules: activeModuleIds,
+      exhibit_count: record.exhibits,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R149", {
+      detail: "Attestation block values were prepared from certification, governance, and audit state.",
+      court_admissible: ready,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R150", {
+      detail: "CAAR hash-computation path is part of the canonical persistence and artifact workflow.",
+      caar_id: record.id,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R151", {
+      detail: ready
+        ? "ExportPack assembly is eligible because the composite certification cleared release gates."
+        : "ExportPack assembly remains blocked until the composite certification clears release gates.",
+      ready,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R152", {
+      detail: "Immutable audit finalization path is attached to the persisted CAAR lifecycle.",
+      workflow_state: workflow.state,
+    }),
+  );
+
+  if (cadence === "monthly_final") {
+    citations.push(
+      buildOverallCitation("R153", {
+        detail: "Loop B historical batch window activated for the monthly final certification cycle.",
+        window_size: loopB.windowSize,
+      }),
+    );
+  }
+
+  for (const finding of loopB.findings) {
+    citations.push(
+      buildOverallCitation(finding.ruleId, {
+        affected_periods: finding.affectedPeriods,
+        caar_eligible: finding.caarEligible,
+        confidence_score: finding.confidenceScore,
+        detail: finding.detail,
+        impacts_certification: finding.impactsCertification,
+        module: finding.moduleId,
+        pattern_code: finding.patternCode,
+      }),
+    );
+  }
+
+  if (loopB.findings.length > 0) {
+    const hasVendorPattern = loopB.findings.some((finding) => finding.ruleId === "R157");
+    const hasRecertify = loopB.findings.some((finding) => finding.ruleId === "R159");
+    const hasCrossModulePattern = loopB.findings.some((finding) => finding.ruleId === "R162");
+    if (!hasVendorPattern) {
+      citations.push(
+        buildOverallCitation("R155", {
+          detail: "Loop B vendor-anomaly layer executed; no vendor-systemic anomaly was promoted beyond the active findings set.",
+          status: loopB.status,
+        }),
+      );
+    }
+    citations.push(
+      buildOverallCitation("R160", {
+        detail: "Loop B confidence scoring executed across the promoted historical findings.",
+        finding_count: loopB.findings.length,
+      }),
+    );
+    citations.push(
+      buildOverallCitation("R164", {
+        detail: "Loop B findings are prepared for persisted audit-trail write in the CAAR pipeline.",
+        finding_count: loopB.findings.length,
+      }),
+    );
+    citations.push(
+      buildOverallCitation("R165", {
+        detail: "Loop B token set assembled from the promoted historical findings.",
+        status: loopB.status,
+      }),
+    );
+    if (!hasRecertify) {
+      citations.push(
+        buildOverallCitation("R159", {
+          detail: "Loop B re-certification trigger evaluated and did not require a mandatory historical recertification path.",
+          status: loopB.status,
+        }),
+      );
+    }
+    if (!hasCrossModulePattern && activeModules.length >= 2) {
+      citations.push(
+        buildOverallCitation("R162", {
+          detail: "Loop B cross-vendor / cross-module correlation executed without promoting an executive-tier pattern finding.",
+          active_modules: activeModuleIds,
+        }),
+      );
+    }
+  }
+
+  citations.push(
+    buildOverallCitation("R166", {
+      detail: "Cross-module order / transaction reconciliation executed across active modules.",
+      active_modules: activeModuleIds,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R168", {
+      aggregate_variance: crossModule.aggregateVariance,
+      detail: "Cross-module variance aggregation executed across active modules.",
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R169", {
+      detail: "Total recovery amount was calculated from the active module recovery values.",
+      total_recovery_eligible: crossModule.totalRecoveryEligible,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R170", {
+      detail: "Cross-module Trust Score roll-up executed from the composite trust-gate framework.",
+      trust_score: trustScore,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R171", {
+      detail: "Module-coverage completeness evaluated against the location's configured active modules.",
+      configured_modules: activeModules.length,
+      tg01_score: overallTrustGates.TG01.scorePct,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R172", {
+      conflict: crossModule.conflict,
+      detail: crossModule.conflict
+        ? "Cross-module conflict resolution remains active because module evidence or findings diverge."
+        : "Cross-module conflict resolution executed with no active conflict.",
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R173", {
+      caar_id: record.id,
+      detail: "Composite certification record assembled from active module outputs, trust gates, Loop B, and workflow state.",
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R174", {
+      detail: "Cross-module audit trail prepared for persisted CAAR traceability.",
+      module_count: activeModules.length,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R175", {
+      detail: "Cross-module token set assembled for the composite CAAR payload.",
+      workflow_state: workflow.state,
+    }),
+  );
+
+  citations.push(
+    buildOverallCitation("R176", {
+      authenticated: workflow.authenticated,
+      detail: "Operator authentication gate was evaluated for certification execution.",
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R177", {
+      authorized: workflow.authorized,
+      detail: "Certification action authorization was evaluated for certification execution.",
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R178", {
+      detail: workflow.manualReviewRequired
+        ? "Manual review queue routing remains active for this certification."
+        : "Manual review queue routing is not required for this certification.",
+      manual_review_required: workflow.manualReviewRequired,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R179", {
+      detail: "Operator override / remediation logging path is attached to the certification workflow.",
+      workflow_state: workflow.state,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R181", {
+      detail: "Recovery action tracking is derived from persisted findings and workflow remediation steps.",
+      total_recovery: totalRecovery,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R182", {
+      detail: "Operator attribution recording is attached to the persisted certification and CAAR workflow.",
+      workflow_state: workflow.state,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R183", {
+      detail: "Workflow state transition was computed from readiness, Loop B, and manual-review conditions.",
+      workflow_state: workflow.state,
+    }),
+  );
+  citations.push(
+    buildOverallCitation("R185", {
+      detail: "Operator activity audit trail is attached to certification, CAAR, and persistence actions.",
+      notification_count: workflow.notifications.length,
+    }),
+  );
+
+  if (overallSystemHealth.flags.length > 0) {
+    citations.push(
+      buildOverallCitation("R180", {
+        detail: "Downstream recovery / dispute escalation remains blocked until active certification blockers are resolved.",
+        dispute_eligible: workflow.disputeEligible,
+      }),
+    );
+  }
+  citations.push(
+    buildOverallCitation("R184", {
+      detail: "Notification dispatch state was computed from workflow notifications and release conditions.",
+      notification_count: workflow.notifications.length,
+    }),
+  );
+
+  return dedupeOverallCitations(citations);
 }
 
 export function extractUploadMetrics(artifactKey: string, headers: string[], rows: string[][]) {
@@ -1260,6 +1591,30 @@ function computeOverallTrustScore(gates: Record<TrustGateName, TrustGateScore>) 
 
 function dedupe(values: string[]) {
   return [...new Set(values)];
+}
+
+function buildOverallCitation(
+  ruleId: string,
+  sampleEvidence: Record<string, unknown>,
+  varianceCents = 0,
+): RuleCitation {
+  return {
+    firedCount: 1,
+    ruleId,
+    ruleVersion: "mge-v1.0.0",
+    sampleEvidence: [sampleEvidence],
+    varianceCents,
+  };
+}
+
+function dedupeOverallCitations(citations: RuleCitation[]) {
+  const seen = new Set<string>();
+  return citations.filter((citation) => {
+    const key = `${citation.ruleId}:${JSON.stringify(citation.sampleEvidence[0] ?? {})}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function sumColumn(headers: string[], rows: string[][], names: string[]) {

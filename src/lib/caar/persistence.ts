@@ -172,6 +172,16 @@ function buildCanonicalPayload({
       variance_cents: citation.varianceCents,
     })),
   );
+  const overallRuleCitations = certification.overallRuleCitations.map((citation) => ({
+    fired_count: citation.firedCount,
+    rule_id: citation.ruleId,
+    rule_version: citation.ruleVersion,
+    sample_evidence: citation.sampleEvidence.map((sample) => ({
+      ...sample,
+      scope: "overall_caar",
+    })),
+    variance_cents: citation.varianceCents,
+  }));
 
   return {
     attestation: {
@@ -330,7 +340,7 @@ function buildCanonicalPayload({
     ],
     recoverable_variance_cents: Math.round(certification.amountValue * 100),
     remediation_steps: remediationSteps,
-    rule_citations: ruleCitations,
+    rule_citations: [...ruleCitations, ...overallRuleCitations],
     schema_version: "1.0",
     sealed_at: toIsoMinute(sealedAt),
     system_health: {

@@ -3,12 +3,40 @@ import { getExpectedHeaders, getExpectedKind, normalizeHeader } from "./definiti
 import { extractPdfDocument, extractPdfMetrics } from "./pdf";
 
 type UploadMetrics = {
+  adjustmentAmount?: number;
   basisAmount?: number;
+  chargebackCount?: number;
+  commissionRateAppliedAvg?: number;
   depositAmount?: number;
+  deliveryFeeAmount?: number;
+  deliveryOrderCount?: number;
+  duplicateOrderCount?: number;
+  duplicateTransactionCount?: number;
+  errorChargeAmount?: number;
   feeAmount?: number;
+  interchangeFeeAmount?: number;
+  marketingFeeAmount?: number;
+  mcCreditAmount?: number;
+  mcCreditFeeAmount?: number;
+  mcDebitAmount?: number;
+  mcDebitFeeAmount?: number;
+  memberOrderCount?: number;
+  otherFeeAmount?: number;
   orderCount?: number;
   payoutAmount?: number;
+  pickupOrderCount?: number;
+  promoOrderCount?: number;
+  refundCount?: number;
+  serviceFeeAmount?: number;
+  settlementLagDaysAvg?: number;
+  taxRemittedAmount?: number;
+  tipAmount?: number;
   transactionCount?: number;
+  voidCount?: number;
+  visaCreditAmount?: number;
+  visaCreditFeeAmount?: number;
+  visaDebitAmount?: number;
+  visaDebitFeeAmount?: number;
 };
 
 export type PersistedUploadValidation = {
@@ -166,13 +194,46 @@ function estimatePdfPageCount(buffer: Buffer) {
 
 function extractUploadMetrics(artifactKey: string, headers: string[], rows: string[][]): UploadMetrics {
   const metrics: Required<UploadMetrics> = {
+    adjustmentAmount: 0,
     basisAmount: 0,
+    chargebackCount: 0,
+    commissionRateAppliedAvg: 0,
     depositAmount: 0,
+    deliveryFeeAmount: 0,
+    deliveryOrderCount: 0,
+    duplicateOrderCount: 0,
+    duplicateTransactionCount: 0,
+    errorChargeAmount: 0,
     feeAmount: 0,
+    interchangeFeeAmount: 0,
+    marketingFeeAmount: 0,
+    mcCreditAmount: 0,
+    mcCreditFeeAmount: 0,
+    mcDebitAmount: 0,
+    mcDebitFeeAmount: 0,
+    memberOrderCount: 0,
+    otherFeeAmount: 0,
     orderCount: 0,
     payoutAmount: 0,
+    pickupOrderCount: 0,
+    promoOrderCount: 0,
+    refundCount: 0,
+    serviceFeeAmount: 0,
+    settlementLagDaysAvg: 0,
+    taxRemittedAmount: 0,
+    tipAmount: 0,
     transactionCount: 0,
+    voidCount: 0,
+    visaCreditAmount: 0,
+    visaCreditFeeAmount: 0,
+    visaDebitAmount: 0,
+    visaDebitFeeAmount: 0,
   };
+  let commissionRateSampleCount = 0;
+  let settlementLagSampleCount = 0;
+  let settlementLagDaysTotal = 0;
+  const seenOrderIds = new Map<string, number>();
+  const seenTransactionIds = new Map<string, number>();
 
   for (const row of rows) {
     const valueFor = (...names: string[]) =>
@@ -212,6 +273,15 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "transaction_fees",
       "commission_variance",
     );
+    metrics.interchangeFeeAmount += read("interchange_fee", "interchange_amount");
+    metrics.serviceFeeAmount += read("service_fee", "processing_fees", "transaction_fees");
+    metrics.otherFeeAmount += read("other_merchant_fees", "assessment");
+    metrics.marketingFeeAmount += read("marketing_fee", "marketing_contribution");
+    metrics.taxRemittedAmount += read("tax_remitted", "tax");
+    metrics.tipAmount += read("tip");
+    metrics.adjustmentAmount += read("adjustment_amount", "adjustment");
+    metrics.errorChargeAmount += read("error_charge");
+    metrics.deliveryFeeAmount += read("delivery_fee", "consumer_fee");
     metrics.payoutAmount += read(
       "payout_amount",
       "net_payout",
@@ -225,6 +295,104 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "net_payout",
       "payout_amount",
     );
+
+    const commissionRateApplied = read("commission_rate_applied", "dd_commission_rate");
+    if (commissionRateApplied > 0) {
+      metrics.commissionRateAppliedAvg += commissionRateApplied;
+      commissionRateSampleCount += 1;
+    }
+
+    const orderTypeIndex = valueFor("order_type", "channel");
+    const orderType = orderTypeIndex >= 0 ? String(row[orderTypeIndex] ?? "").toLowerCase() : "";
+    if (orderType.includes("pickup")) metrics.pickupOrderCount += 1;
+    if (orderType.includes("delivery")) metrics.deliveryOrderCount += 1;
+    if (orderType.includes("dashpass") || orderType.includes("member") || orderType.includes("uber one")) {
+      metrics.memberOrderCount += 1;
+    }
+
+    if (read("marketing_fee", "marketing_contribution") > 0) {
+      metrics.promoOrderCount += 1;
+    }
+
+    const orderStatusIndex = valueFor("order_status", "trans_type", "description");
+    const orderStatus = orderStatusIndex >= 0 ? String(row[orderStatusIndex] ?? "").toLowerCase() : "";
+    if (orderStatus.includes("refund")) metrics.refundCount += 1;
+    if (orderStatus.includes("void")) metrics.voidCount += 1;
+
+    const disputeIndex = valueFor("dispute_id");
+    if (disputeIndex >= 0 && String(row[disputeIndex] ?? "").trim()) {
+      metrics.chargebackCount += 1;
+    }
+    const refundIdIndex = valueFor("refund_id");
+    if (refundIdIndex >= 0 && String(row[refundIdIndex] ?? "").trim()) {
+      metrics.refundCount += 1;
+    }
+
+    const orderIdIndex = valueFor("order_id");
+    if (orderIdIndex >= 0) {
+      const orderId = String(row[orderIdIndex] ?? "").trim();
+      if (orderId) {
+        seenOrderIds.set(orderId, (seenOrderIds.get(orderId) ?? 0) + 1);
+      }
+    }
+
+    const transactionIdIndex = valueFor("transaction_id", "trans_id", "txn_id");
+    if (transactionIdIndex >= 0) {
+      const transactionId = String(row[transactionIdIndex] ?? "").trim();
+      if (transactionId) {
+        seenTransactionIds.set(transactionId, (seenTransactionIds.get(transactionId) ?? 0) + 1);
+      }
+    }
+
+    const sourceDate = readDateValue(
+      row,
+      valueFor("date", "order_date", "trans_date", "txn_date", "transaction_date"),
+    );
+    const settlementDate = readDateValue(
+      row,
+      valueFor("settlement_date", "batch_date"),
+    );
+    if (sourceDate && settlementDate) {
+      const lagDays = Math.max(0, (settlementDate.getTime() - sourceDate.getTime()) / (1000 * 60 * 60 * 24));
+      settlementLagDaysTotal += lagDays;
+      settlementLagSampleCount += 1;
+    }
+
+    const cardTypeIndex = valueFor("card_type", "card_brand");
+    if (cardTypeIndex >= 0) {
+      const cardType = String(row[cardTypeIndex] ?? "").toLowerCase();
+      const amount = read("trans_amount", "amount", "txn_amount", "transaction_amount");
+      const fee = read("fee_amount", "fee", "disc_amount", "interchange_amount", "interchange_fee");
+      if (cardType.includes("visa") && cardType.includes("debit")) {
+        metrics.visaDebitAmount += amount;
+        metrics.visaDebitFeeAmount += fee;
+      } else if (cardType.includes("visa")) {
+        metrics.visaCreditAmount += amount;
+        metrics.visaCreditFeeAmount += fee;
+      } else if ((cardType.includes("master") || cardType.includes("mc")) && cardType.includes("debit")) {
+        metrics.mcDebitAmount += amount;
+        metrics.mcDebitFeeAmount += fee;
+      } else if (cardType.includes("master") || cardType.includes("mc")) {
+        metrics.mcCreditAmount += amount;
+        metrics.mcCreditFeeAmount += fee;
+      }
+    }
+  }
+
+  metrics.duplicateOrderCount = [...seenOrderIds.values()].reduce(
+    (sum, count) => sum + Math.max(0, count - 1),
+    0,
+  );
+  metrics.duplicateTransactionCount = [...seenTransactionIds.values()].reduce(
+    (sum, count) => sum + Math.max(0, count - 1),
+    0,
+  );
+
+  if (commissionRateSampleCount > 0) {
+    metrics.commissionRateAppliedAvg = round(metrics.commissionRateAppliedAvg / commissionRateSampleCount);
+  }
+  if (settlementLagSampleCount > 0) {
+    metrics.settlementLagDaysAvg = roundTo2(settlementLagDaysTotal / settlementLagSampleCount);
   }
 
   metrics.transactionCount =
@@ -245,6 +413,14 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
   return metrics;
 }
 
+function readDateValue(row: string[], index: number) {
+  if (index < 0) return null;
+  const raw = String(row[index] ?? "").trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function sumColumn(headers: string[], rows: string[][], names: string[]) {
   const normalizedNames = names.map(normalizeHeader);
   const index = headers.findIndex((header) => normalizedNames.includes(header));
@@ -262,4 +438,8 @@ function parseNumber(value: string | number | undefined | null) {
 
 function round(value: number) {
   return Math.round(value);
+}
+
+function roundTo2(value: number) {
+  return Math.round(value * 100) / 100;
 }

@@ -245,6 +245,8 @@ export type IntakeState = {
     depositAmount?: number;
     deliveryFeeAmount?: number;
     deliveryOrderCount?: number;
+    duplicateOrderCount?: number;
+    duplicateTransactionCount?: number;
     errorChargeAmount?: number;
     feeAmount?: number;
     interchangeFeeAmount?: number;
@@ -257,6 +259,7 @@ export type IntakeState = {
     payoutAmount?: number;
     refundCount?: number;
     serviceFeeAmount?: number;
+    settlementLagDaysAvg?: number;
     taxRemittedAmount?: number;
     tipAmount?: number;
     transactionCount?: number;
