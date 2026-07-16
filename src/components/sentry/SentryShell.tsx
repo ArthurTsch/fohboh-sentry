@@ -177,7 +177,6 @@ export function SentryShell({
   meta,
   navGroups,
   onExitSupportMode,
-  onOpenSupport,
   onRunPrimaryCertification,
   onSignOut,
   onViewChange,
@@ -190,7 +189,6 @@ export function SentryShell({
   meta: { eyebrow: string; sub: string; title: string };
   navGroups: { items: { icon: string; id: ViewId; label: string }[]; section: string }[];
   onExitSupportMode: () => void;
-  onOpenSupport: () => void;
   onRunPrimaryCertification: () => void;
   onSignOut: () => void;
   onViewChange: (view: ViewId) => void;
@@ -230,16 +228,6 @@ export function SentryShell({
                     onClick={() => onViewChange(item.id)}
                   />
                 ))}
-
-                {group.section === "Help" ? (
-                  <SidebarItem
-                    active={false}
-                    help={navHelp.support}
-                    icon="support"
-                    label="Contact Support"
-                    onClick={onOpenSupport}
-                  />
-                ) : null}
               </div>
             </div>
           ))}

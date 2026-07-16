@@ -21,6 +21,11 @@ export const viewMeta: Record<ViewId, { eyebrow: string; title: string; sub: str
     title: "Billing",
     sub: "Plan, payment methods, monthly statements, and certified CAAR transaction fees for this account.",
   },
+  support: {
+    eyebrow: "Help",
+    title: "Support Tickets",
+    sub: "Structured support intake and ticket tracking for certification, uploads, access, and account operations.",
+  },
   log: {
     eyebrow: "Account",
     title: "Activity Log",
@@ -98,6 +103,7 @@ export const navigation = [
   {
     section: "Help",
     items: [
+      { id: "support" as ViewId, label: "Support Tickets", icon: "support" },
       { id: "faq" as ViewId, label: "FAQ", icon: "faq" },
     ],
   },

@@ -13,7 +13,6 @@ import { navigation, viewMeta } from "./config";
 import {
   emptyAddLocationDraft,
   faqItems,
-  initialMessages,
   schemaWorkspaces,
   uploadModules,
   wgsM01Vendors,
@@ -31,7 +30,6 @@ import { CertificationRunModal } from "./overlays/CertificationRunModal";
 import { CaarReportModal } from "./overlays/CaarReportModal";
 import { RequestAccessModal } from "./overlays/RequestAccessModal";
 import { SchemaEditorModal } from "./overlays/SchemaEditorModal";
-import { SupportChat } from "./overlays/SupportChat";
 import { Toast } from "./overlays/Toast";
 import { UploadChecklistModal } from "./overlays/UploadChecklistModal";
 import { WorkflowBlockerModal } from "./overlays/WorkflowBlockerModal";
@@ -42,7 +40,6 @@ import { SentryViewRouter } from "./SentryViewRouter";
 import type {
   AddLocationDraft,
   CaarRecord,
-  ChatMessage,
   IntakeState,
   LocationRecord,
   LocationSourceConfig,
@@ -64,7 +61,6 @@ import type {
   WgsQueueItem,
   WgsUser,
 } from "./types";
-import { getSupportReply } from "./utils";
 import { resolveVendorKey, resolveVendorSelections } from "./vendor-catalog";
 import { LandingPage } from "./views/LandingPage";
 
@@ -199,7 +195,12 @@ type PersistedCertificationResponse = {
 };
 
 type PersistedWorkspaceRecord = SchemaWorkspace;
-type PersistedSupportTicket = WgsQueueItem;
+type PersistedSupportTicket = {
+  id: string;
+  priority: "High" | "Medium" | "Low";
+  status: "open" | "in_review" | "waiting_on_customer" | "resolved";
+  subject: string;
+};
 type PersistedAccessRequest = WgsApproval;
 type PersistedActivityLog = LogRecord;
 
@@ -214,9 +215,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   const [logFilter, setLogFilter] = useState<"all" | "immutable" | "editable">("all");
   const [faqQuery, setFaqQuery] = useState("");
   const [faqOpen, setFaqOpen] = useState<string | null>(faqItems[0]?.question ?? null);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatInput, setChatInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [toast, setToast] = useState<string | null>(null);
 
   const [caarState, setCaarState] = useState<CaarRecord[]>([]);
@@ -663,7 +661,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
-    const response = await fetch("/api/v1/support/tickets", {
+    const response = await fetch("/api/v1/support/tickets?queue=1", {
       cache: "no-store",
     });
 
@@ -671,11 +669,19 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
-    const payload = (await response.json()) as {
-      tickets?: PersistedSupportTicket[];
-    };
+    const payload = (await response.json()) as { tickets?: PersistedSupportTicket[] };
 
-    setWgsQueueState(payload.tickets ?? []);
+    setWgsQueueState(
+      (payload.tickets ?? [])
+        .filter((ticket) => ticket.status !== "resolved")
+        .map((ticket) => ({
+          account: "Portfolio",
+          age: "Now",
+          id: ticket.id,
+          issue: ticket.subject,
+          priority: ticket.priority,
+        })),
+    );
   }, [effectiveSession, persistenceHydrated]);
 
   const syncAccessRequests = useCallback(async function syncRequests(
@@ -967,8 +973,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     startTransition(() => {
       setSession(null);
       setSelectedCaar(null);
-      setChatOpen(false);
-      setMessages(initialMessages);
       setActiveViewOverride("dashboard");
       setShowAddLocation(false);
       setShowRequestAccess(false);
@@ -1086,19 +1090,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
 
   function handleExpandAll() {
     setExpandedLocations(visibleLocations.map((location) => location.id));
-  }
-
-  function sendChat(prompt?: string) {
-    const text = (prompt ?? chatInput).trim();
-    if (!text) return;
-
-    setMessages((current) => [
-      ...current,
-      { from: "user", text },
-      { from: "assistant", text: getSupportReply(text) },
-    ]);
-    setChatInput("");
-    setChatOpen(true);
   }
 
   async function handleAddLocation(draft: AddLocationDraft) {
@@ -2189,41 +2180,6 @@ function handleCompleteOnboarding(locationId: string) {
     showToast("Access request submitted for WGS review.");
   }
 
-  async function handleCreateSupportTicket(text: string) {
-    const message = text.trim();
-    if (!message) {
-      showToast("Add a support message before creating a ticket.");
-      return;
-    }
-    const accountName = getScopedAccountName();
-    const response = await fetch("/api/v1/support/tickets", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        accountId: getScopedAccountId(),
-        accountName,
-        issue: message,
-      }),
-    });
-
-    const payload = (await response.json().catch(() => null)) as
-      | { error?: string; ticket?: PersistedSupportTicket }
-      | null;
-
-    if (!response.ok) {
-      showToast(payload?.error ?? "Unable to create support ticket right now.");
-      return;
-    }
-
-    if (payload?.ticket && (effectiveSession?.role === "WGS Manager" || effectiveSession?.role === "SuperAdmin" || effectiveSession?.role === "Admin")) {
-      setWgsQueueState((current) => [payload.ticket!, ...current]);
-    }
-    void syncAuditLogs();
-    showToast("Support ticket added to the WGS queue.");
-  }
-
   function handleRunCertification(locationId: string) {
     const location = runtimeLocationState.find((item) => item.id === locationId);
     if (!location) return;
@@ -2405,7 +2361,6 @@ function handleCompleteOnboarding(locationId: string) {
         meta={meta}
         navGroups={navigation}
         onExitSupportMode={() => setSupportMode({ active: false, accountId: null, accountName: null })}
-        onOpenSupport={() => setChatOpen(true)}
         onRunPrimaryCertification={() => {
           const selectableLocations = visibleLocations.map((location) => ({
             id: location.id,
@@ -2445,6 +2400,8 @@ function handleCompleteOnboarding(locationId: string) {
           activeUploadLocationId={activeUploadLocation?.id ?? visibleLocations[0]?.id ?? null}
           activeUploadModules={activeUploadModules}
           activeUploadLocationName={activeUploadLocation?.name ?? visibleLocations[0]?.name ?? null}
+          activeSupportAccountId={getScopedAccountId()}
+          activeSupportAccountName={getScopedAccountName()}
           activeUploadSourceConfig={activeUploadSourceConfig}
           diyLocationSourceConfigs={diyLocationSourceConfigs}
           approvals={wgsApprovalState}
@@ -2484,6 +2441,11 @@ function handleCompleteOnboarding(locationId: string) {
           onOpenUploads={handleOpenLocationUploads}
           onOpenUser={setEditingWgsUser}
           onInitializeWorkspace={handleInitializeWorkspace}
+          onSupportTicketCreated={() => {
+            void syncSupportTickets();
+            void syncAuditLogs();
+            showToast("Support ticket submitted.");
+          }}
           onQueryChange={setFaqQuery}
           onResolveQueue={handleResolveQueue}
           onRunCertification={handleRunCertification}
@@ -2505,17 +2467,6 @@ function handleCompleteOnboarding(locationId: string) {
           workflowByLocation={workflowByLocation}
         />
       </SentryShell>
-
-      <SupportChat
-        chatInput={chatInput}
-        chatOpen={chatOpen}
-        messages={messages}
-        onClose={() => setChatOpen(false)}
-        onCreateTicket={() => handleCreateSupportTicket(chatInput)}
-        onInputChange={setChatInput}
-        onSend={sendChat}
-        onToggle={() => setChatOpen((current) => !current)}
-      />
 
       {showAddLocation ? (
         <AddLocationModal

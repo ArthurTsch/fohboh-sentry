@@ -7,6 +7,7 @@ import { HelpTip, SectionCard } from "../ui/primitives";
 const DEFAULT_BILLING_RATE_BPS = 1250;
 const BUNDLE_SUBSCRIPTION_CENTS = 29900;
 const SINGLE_MODULE_SUBSCRIPTION_CENTS = 19900;
+const WHITE_GLOVE_SUBSCRIPTION_CENTS = 39900;
 
 type StatementRow = {
   caarFeeCents: number;
@@ -25,8 +26,8 @@ function parseAmountToCents(value: string) {
 
 function formatCurrency(cents: number) {
   return new Intl.NumberFormat("en-US", {
-    style: "currency",
     currency: "USD",
+    style: "currency",
   }).format(cents / 100);
 }
 
@@ -37,14 +38,12 @@ function parsePeriodLabel(period: string) {
 
 function formatDueDate(period: string) {
   const periodDate = parsePeriodLabel(period);
-  if (!periodDate) {
-    return "Draft";
-  }
+  if (!periodDate) return "Draft";
 
   const dueDate = new Date(periodDate.getFullYear(), periodDate.getMonth(), 25);
   return dueDate.toLocaleDateString("en-US", {
-    month: "2-digit",
     day: "2-digit",
+    month: "2-digit",
   });
 }
 
@@ -58,8 +57,8 @@ function downloadStatementPreview(statement: StatementRow, feeRateBps: number) {
     `Status: ${statement.status}`,
     `Modeled fee rate: ${(feeRateBps / 100).toFixed(2)}%`,
     "",
-    "Billing automation is not connected yet.",
-    "This is a generated statement preview based on sealed CAAR records currently visible to the signed-in account.",
+    "Payment rail automation is not connected yet.",
+    "This statement preview is generated from sealed CAAR records currently visible to the signed-in account.",
   ].join("\n");
 
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -87,7 +86,8 @@ export function BillingView({
     return active;
   }, [locations]);
 
-  const subscriptionCents = accountModules.size >= 2 ? BUNDLE_SUBSCRIPTION_CENTS : SINGLE_MODULE_SUBSCRIPTION_CENTS;
+  const subscriptionCents =
+    accountModules.size >= 2 ? BUNDLE_SUBSCRIPTION_CENTS : SINGLE_MODULE_SUBSCRIPTION_CENTS;
   const billingRateBps = DEFAULT_BILLING_RATE_BPS;
 
   const statements = useMemo(() => {
@@ -126,8 +126,11 @@ export function BillingView({
 
   const currentStatement = statements[0] ?? null;
   const activeLocationsThisCycle = currentStatement
-    ? new Set(caars.filter((record) => record.period === currentStatement.period).map((record) => record.locationId))
-        .size
+    ? new Set(
+        caars
+          .filter((record) => record.period === currentStatement.period)
+          .map((record) => record.locationId),
+      ).size
     : 0;
 
   return (
@@ -148,7 +151,7 @@ export function BillingView({
               },
               {
                 label: "Current State",
-                text: "This page is future-ready. Payment rails are not connected yet, but the billing ledger and statement previews are prepared.",
+                text: "This page reflects the documented commercial model now and is prepared for hosted payment rails later without changing the billing basis.",
               },
             ]}
             footerLabel="Fee Basis"
@@ -180,7 +183,7 @@ export function BillingView({
             disabled
             className="mt-5 w-full rounded-md bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white opacity-60"
           >
-            Autopay connection coming soon
+            Payment method connection pending
           </button>
 
           <div className="mt-5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
@@ -188,13 +191,20 @@ export function BillingView({
               How This Is Calculated
             </div>
             <p className="mt-2 text-sm leading-7 text-[var(--muted)]">
-              10–15% of the certified recoverable amount per location, invoiced automatically the
+              10-15% of the certified recoverable amount per location, invoiced automatically the
               moment each CAAR seals. Never a bounty, never contingent on collection. FohBoh is not
               a debt collector.
             </p>
             <p className="mt-2 text-xs leading-6 text-[var(--muted)]">
-              Current modeled fee rate for this future-ready page: {(billingRateBps / 100).toFixed(2)}%
-              . Monthly plan basis: {formatCurrency(subscriptionCents)}.
+              Current modeled fee rate on this account: {(billingRateBps / 100).toFixed(2)}%. Base
+              subscription: {formatCurrency(subscriptionCents)} per month.
+            </p>
+            <p className="mt-2 text-xs leading-6 text-[var(--muted)]">
+              Commercial tiers from the product spec: M01 only{" "}
+              {formatCurrency(SINGLE_MODULE_SUBSCRIPTION_CENTS)}/mo, M02 only{" "}
+              {formatCurrency(SINGLE_MODULE_SUBSCRIPTION_CENTS)}/mo, M01+M02 bundle{" "}
+              {formatCurrency(BUNDLE_SUBSCRIPTION_CENTS)}/mo, and White Glove{" "}
+              {formatCurrency(WHITE_GLOVE_SUBSCRIPTION_CENTS)}/mo per certification cadence.
             </p>
           </div>
         </SectionCard>
@@ -206,14 +216,14 @@ export function BillingView({
           <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
             <div className="text-sm font-medium text-[var(--text)]">No payment methods configured yet</div>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-              Card and ACH collection rails are not connected yet. This area is prepared for future
+              Card and ACH collection rails are not connected yet. This area is prepared for hosted,
               PCI-compliant tokenized payment methods.
             </p>
           </div>
           <p className="mt-5 text-xs leading-6 text-[var(--muted)]">
             Card and account numbers will never be entered directly into this screen. Future updates
-            will open a secure hosted payment form. FohBoh systems will store only tokenized references
-            and masked last-four details.
+            will open a secure hosted payment form. FohBoh systems will store only tokenized
+            references and masked last-four details.
           </p>
         </SectionCard>
       </div>
@@ -275,7 +285,8 @@ export function BillingView({
               ) : (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-sm text-[var(--muted)]">
-                    No billing statements are available yet because no CAAR has sealed for this account.
+                    No billing statements are available yet because no CAAR has sealed for this
+                    account.
                   </td>
                 </tr>
               )}
@@ -286,8 +297,8 @@ export function BillingView({
 
       <p className="text-xs leading-6 text-[var(--muted)]">
         Plan basis: {accountModules.size >= 2 ? "M01+M02 bundle" : "Single active module"} ·{" "}
-        {formatCurrency(subscriptionCents)}/mo, all visible locations included. Every CAAR transaction
-        fee line traces to a specific certified run and sealed CAAR.
+        {formatCurrency(subscriptionCents)}/mo, all visible locations included. Every CAAR
+        transaction fee line traces to a specific certified run and sealed CAAR.
       </p>
     </div>
   );

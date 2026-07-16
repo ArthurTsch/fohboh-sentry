@@ -28,6 +28,7 @@ import { OnboardingView } from "./views/OnboardingView";
 import { PermissionsView } from "./views/PermissionsView";
 import { ProfileView } from "./views/ProfileView";
 import { SchemaRegistryView } from "./views/SchemaRegistryView";
+import { SupportTicketsView } from "./views/SupportTicketsView";
 import { UploadCenterView } from "./views/UploadCenterView";
 import { UserGuideView } from "./views/UserGuideView";
 import { WaterfallView } from "./views/WaterfallView";
@@ -39,6 +40,8 @@ export function SentryViewRouter({
   activeUploadLocationId,
   activeUploadModules,
   activeUploadLocationName,
+  activeSupportAccountId,
+  activeSupportAccountName,
   activeUploadSourceConfig,
   diyLocationSourceConfigs,
   approvals,
@@ -75,6 +78,7 @@ export function SentryViewRouter({
   onOpenUploads,
   onOpenUser,
   onInitializeWorkspace,
+  onSupportTicketCreated,
   onQueryChange,
   onResolveQueue,
   onRunCertification,
@@ -100,6 +104,8 @@ export function SentryViewRouter({
   activeUploadLocationId: string | null;
   activeUploadModules: Array<"M01" | "M02">;
   activeUploadLocationName: string | null;
+  activeSupportAccountId: string | null;
+  activeSupportAccountName: string;
   activeUploadSourceConfig: LocationSourceConfig | null;
   diyLocationSourceConfigs: Record<string, LocationSourceConfig>;
   approvals: WgsApproval[];
@@ -150,6 +156,7 @@ export function SentryViewRouter({
   onOpenUser: Dispatch<SetStateAction<WgsUser | null>>;
   onInitializeWorkspace: (locationId: string, module: "M01" | "M02", vendor?: string) => void;
   onOpenDiy: () => void;
+  onSupportTicketCreated: () => void | Promise<void>;
   onQueryChange: Dispatch<SetStateAction<string>>;
   onResolveQueue: (ticketId: string) => void | Promise<void>;
   onRunCertification: (locationId: string) => void;
@@ -221,6 +228,18 @@ export function SentryViewRouter({
 
   if (activeView === "profile") {
     return <ProfileView session={session} visibleLocationCount={locations.length} />;
+  }
+
+  if (activeView === "support") {
+    return (
+      <SupportTicketsView
+        accountId={activeSupportAccountId}
+        accountName={activeSupportAccountName}
+        locations={locations}
+        onTicketCreated={onSupportTicketCreated}
+        session={session}
+      />
+    );
   }
 
   if (activeView === "permissions") {

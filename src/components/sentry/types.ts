@@ -8,6 +8,7 @@ export type ViewId =
   | "caars"
   | "billing"
   | "log"
+  | "support"
   | "profile"
   | "permissions"
   | "diy"
@@ -410,6 +411,37 @@ export type WgsUser = {
 export type ChatMessage = {
   from: "assistant" | "user";
   text: string;
+};
+
+export type SupportTicketCategory =
+  | "Certification"
+  | "Upload / Schema"
+  | "Team & Access"
+  | "Billing"
+  | "Account / Login"
+  | "Other";
+
+export type SupportTicketUrgency = "Low" | "Medium" | "High" | "Critical";
+
+export type SupportTicketRecord = {
+  id: string;
+  accountId: string | null;
+  accountName: string;
+  category: SupportTicketCategory;
+  createdAt: string | null;
+  description: string;
+  emailDelivery: "not_configured" | "prepared" | "queued" | "sent" | "failed";
+  lastUpdatedAt: string | null;
+  locationId: string | null;
+  locationName: string | null;
+  priority: "High" | "Medium" | "Low";
+  requesterEmail: string;
+  requesterName: string | null;
+  requesterRole: string | null;
+  status: "open" | "in_review" | "waiting_on_customer" | "resolved";
+  subject: string;
+  urgency: SupportTicketUrgency;
+  workflow: string | null;
 };
 
 export type SessionState = {

@@ -1,28 +1,22 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/app/generated/prisma/client";
+import type { SupportTicketCategory, SupportTicketRecord, SupportTicketUrgency } from "@/components/sentry/types";
 import { requireManagerSession } from "@/lib/auth/session";
 import { logServerError, writeAuditLog } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
 import prisma from "@/lib/prisma";
+import { prepareSupportTicketEmail } from "@/lib/support/email";
+import {
+  getSupportTicketPriority,
+  normalizeEmailDeliveryStatus,
+  normalizeTicketStatus,
+  parseSupportTicketIssue,
+  serializeSupportTicketIssue,
+  type SupportTicketDraft,
+} from "@/lib/support/tickets";
 
 function toJsonValue(value: unknown) {
   return value as Prisma.InputJsonValue;
-}
-
-function getPriority(issue: string) {
-  const normalized = issue.toLowerCase();
-  if (
-    normalized.includes("trust score") ||
-    normalized.includes("certification") ||
-    normalized.includes("failed") ||
-    normalized.includes("blocked")
-  ) {
-    return "High" as const;
-  }
-  if (normalized.includes("upload") || normalized.includes("schema")) {
-    return "Medium" as const;
-  }
-  return "Low" as const;
 }
 
 function getAuthErrorResponse(error: unknown) {
@@ -40,16 +34,32 @@ export async function GET(request: Request) {
   const requestContext = getRequestContextFromRequest(request);
   try {
     const session = await requireManagerSession();
-    if (session.role !== "WGS Manager" && session.role !== "SuperAdmin" && session.role !== "Admin") {
+    const url = new URL(request.url);
+    const queueMode = url.searchParams.get("queue") === "1";
+    const accountId = session.accountId?.trim() || null;
+
+    if (queueMode && session.role !== "WGS Manager" && session.role !== "SuperAdmin" && session.role !== "Admin") {
       return withRequestHeaders(
-        NextResponse.json({ error: "This account cannot view support tickets." }, { status: 403 }),
+        NextResponse.json({ error: "This account cannot view the support queue." }, { status: 403 }),
         requestContext,
       );
     }
 
     const tickets = await prisma.support_tickets_v2.findMany({
       where: {
-        status: "open",
+        ...(queueMode
+          ? {
+              status: {
+                in: ["open", "in_review", "waiting_on_customer"],
+              },
+            }
+          : {
+              OR: [
+                ...(accountId ? [{ account_id: accountId }] : []),
+                ...(typeof session.managerId === "number" ? [{ created_by: session.managerId }] : []),
+                { requester_email: session.email },
+              ],
+            }),
       },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],
       select: {
@@ -57,19 +67,47 @@ export async function GET(request: Request) {
         created_at: true,
         external_id: true,
         issue: true,
+        location_id: true,
         priority: true,
+        requester_email: true,
+        requester_name: true,
+        requester_role: true,
+        resolved_at: true,
+        source: true,
+        status: true,
+        updated_at: true,
       },
+    });
+
+    const mappedTickets = tickets.map<SupportTicketRecord>((ticket) => {
+      const parsed = parseSupportTicketIssue(ticket.issue);
+      return {
+        accountId: ticket.account_id ?? null,
+        accountName: ticket.account_id ?? "Portfolio",
+        category: parsed.category,
+        createdAt: ticket.created_at?.toISOString() ?? null,
+        description: parsed.description,
+        emailDelivery: normalizeEmailDeliveryStatus(
+          ticket.source === "support_ticket_portal_email_ready" ? "prepared" : "not_configured",
+        ),
+        id: ticket.external_id,
+        lastUpdatedAt: ticket.updated_at?.toISOString() ?? ticket.resolved_at?.toISOString() ?? null,
+        locationId: ticket.location_id ?? null,
+        locationName: parsed.locationName,
+        priority: normalizePriority(ticket.priority),
+        requesterEmail: ticket.requester_email,
+        requesterName: ticket.requester_name ?? null,
+        requesterRole: ticket.requester_role ?? null,
+        status: normalizeTicketStatus(ticket.status),
+        subject: parsed.subject,
+        urgency: parsed.urgency,
+        workflow: parsed.workflow,
+      };
     });
 
     return withRequestHeaders(
       NextResponse.json({
-        tickets: tickets.map((ticket) => ({
-          account: ticket.account_id ?? "Portfolio",
-          age: formatAge(ticket.created_at),
-          id: ticket.external_id,
-          issue: ticket.issue,
-          priority: normalizePriority(ticket.priority),
-        })),
+        tickets: mappedTickets,
       }),
       requestContext,
     );
@@ -95,30 +133,63 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       accountId?: string | null;
       accountName?: string | null;
-      issue?: string | null;
+      category?: SupportTicketCategory | null;
+      description?: string | null;
       locationId?: string | null;
+      locationName?: string | null;
+      subject?: string | null;
+      urgency?: SupportTicketUrgency | null;
+      workflow?: string | null;
     };
 
-    const issue = body.issue?.trim() ?? "";
-    if (!issue) {
+    const subject = body.subject?.trim() ?? "";
+    const description = body.description?.trim() ?? "";
+    if (!subject) {
       return withRequestHeaders(
-        NextResponse.json({ error: "Support ticket message is required." }, { status: 400 }),
+        NextResponse.json({ error: "Ticket subject is required." }, { status: 400 }),
+        requestContext,
+      );
+    }
+    if (!description) {
+      return withRequestHeaders(
+        NextResponse.json({ error: "Ticket description is required." }, { status: 400 }),
         requestContext,
       );
     }
 
+    const draft: SupportTicketDraft = {
+      accountId: body.accountId?.trim() || session.accountId || null,
+      accountName: body.accountName?.trim() || null,
+      category: normalizeCategory(body.category),
+      description,
+      locationId: body.locationId?.trim() || null,
+      locationName: body.locationName?.trim() || null,
+      requesterEmail: session.email,
+      requesterName: session.name ?? null,
+      requesterRole: session.role,
+      subject,
+      urgency: normalizeUrgency(body.urgency),
+      workflow: body.workflow?.trim() || null,
+    };
+    const externalId = `TCK-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    const priority = getSupportTicketPriority(draft);
+    const emailDispatch = await prepareSupportTicketEmail(externalId, draft);
+
     const created = await prisma.support_tickets_v2.create({
       data: {
-        account_id: body.accountId?.trim() || session.accountId || null,
+        account_id: draft.accountId,
         created_by: session.managerId ?? null,
-        external_id: `TCK-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
-        issue,
-        location_id: body.locationId?.trim() || null,
-        priority: getPriority(issue),
+        external_id: externalId,
+        issue: serializeSupportTicketIssue(draft),
+        location_id: draft.locationId,
+        priority,
         requester_email: session.email,
         requester_name: session.name ?? null,
         requester_role: session.role,
-        source: "support_chat",
+        source:
+          emailDispatch.delivery === "not_configured"
+            ? "support_ticket_portal"
+            : "support_ticket_portal_email_ready",
         status: "open",
         updated_at: new Date(),
       },
@@ -127,7 +198,13 @@ export async function POST(request: Request) {
         created_at: true,
         external_id: true,
         issue: true,
+        location_id: true,
         priority: true,
+        requester_email: true,
+        requester_name: true,
+        requester_role: true,
+        status: true,
+        updated_at: true,
       },
     });
 
@@ -139,20 +216,39 @@ export async function POST(request: Request) {
       ipAddress: requestContext.ipAddress,
       metadata: toJsonValue({
         accountId: created.account_id,
+        category: draft.category,
+        emailDelivery: emailDispatch.delivery,
+        locationId: draft.locationId,
         requestId: requestContext.requestId,
+        subject: draft.subject,
+        workflow: draft.workflow,
       }),
       summary: `Created support ticket ${created.external_id}.`,
       userAgent: requestContext.userAgent,
     });
 
+    const parsed = parseSupportTicketIssue(created.issue);
     return withRequestHeaders(
       NextResponse.json({
         ticket: {
-          account: body.accountName?.trim() || created.account_id || "Portfolio",
-          age: formatAge(created.created_at),
+          accountId: created.account_id ?? null,
+          accountName: draft.accountName?.trim() || created.account_id || "Portfolio",
+          category: parsed.category,
+          createdAt: created.created_at?.toISOString() ?? null,
+          description: parsed.description,
+          emailDelivery: emailDispatch.delivery,
           id: created.external_id,
-          issue: created.issue,
+          lastUpdatedAt: created.updated_at?.toISOString() ?? null,
+          locationId: created.location_id ?? null,
+          locationName: parsed.locationName,
           priority: normalizePriority(created.priority),
+          requesterEmail: created.requester_email,
+          requesterName: created.requester_name ?? null,
+          requesterRole: created.requester_role ?? null,
+          status: normalizeTicketStatus(created.status),
+          subject: parsed.subject,
+          urgency: parsed.urgency,
+          workflow: parsed.workflow,
         },
       }),
       requestContext,
@@ -186,4 +282,23 @@ function formatAge(createdAt: Date | null) {
 
 function normalizePriority(value: string): "High" | "Medium" | "Low" {
   return value === "High" || value === "Medium" || value === "Low" ? value : "Medium";
+}
+
+function normalizeCategory(value: SupportTicketCategory | null | undefined): SupportTicketCategory {
+  return (
+    value === "Certification" ||
+    value === "Upload / Schema" ||
+    value === "Team & Access" ||
+    value === "Billing" ||
+    value === "Account / Login" ||
+    value === "Other"
+  )
+    ? value
+    : "Other";
+}
+
+function normalizeUrgency(value: SupportTicketUrgency | null | undefined): SupportTicketUrgency {
+  return value === "Low" || value === "Medium" || value === "High" || value === "Critical"
+    ? value
+    : "Medium";
 }
