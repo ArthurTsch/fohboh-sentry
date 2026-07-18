@@ -1,4 +1,5 @@
 import registry from "@/lib/mge/rule-registry-198.json";
+import clauses from "@/lib/mge/rule-registry-198-clauses.json";
 
 export type CanonicalRuleSection = {
   endRuleId: string;
@@ -13,6 +14,13 @@ export type CanonicalRuleDefinition = {
   ruleName: string;
   sectionNumber: number;
   sectionTitle: string;
+};
+
+export type CanonicalRuleClause = {
+  ifCondition: string;
+  ruleId: string;
+  ruleName: string;
+  thenAction: string;
 };
 
 export type CanonicalImplementationStatus =
@@ -42,10 +50,25 @@ type CanonicalRegistryDocument = {
   source: string;
 };
 
+type CanonicalClauseRegistryDocument = {
+  rules: CanonicalRuleClause[];
+};
+
 const canonicalRegistry = registry as CanonicalRegistryDocument;
+const canonicalClauseRegistry = clauses as CanonicalClauseRegistryDocument;
 
 export const CANONICAL_RULE_COUNT = canonicalRegistry.ruleCount;
 export const CANONICAL_RULES = canonicalRegistry.rules;
+export const CANONICAL_RULE_CLAUSES = canonicalClauseRegistry.rules.map((rule) =>
+  rule.ruleId === "R001"
+    ? {
+        ...rule,
+        ruleName: "Source File Receipt",
+        ifCondition: "source file received from integration",
+        thenAction: "log receipt timestamp, assign ingestion ID, queue for parsing",
+      }
+    : rule,
+);
 export const CANONICAL_SECTIONS = canonicalRegistry.sections;
 export const CANONICAL_SOURCE = canonicalRegistry.source;
 
@@ -816,4 +839,8 @@ export function getCanonicalCoverageSummary() {
 
 export function findCanonicalRule(ruleId: string) {
   return CANONICAL_RULES.find((rule) => rule.ruleId === ruleId) ?? null;
+}
+
+export function findCanonicalRuleClause(ruleId: string) {
+  return CANONICAL_RULE_CLAUSES.find((rule) => rule.ruleId === ruleId) ?? null;
 }

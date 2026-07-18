@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { HelpTip } from "../ui/primitives";
 import { getScoreBar, getTrustTone } from "../utils";
+import { findCanonicalRule, findCanonicalRuleClause, getRuntimeRuleCrosswalk } from "@/lib/mge/canonical-registry";
 
 type ExhibitRow = {
   description: string;
@@ -60,11 +61,20 @@ export function CaarReportModal({
   });
   const coverageComplete = exhibits.every((row) => row.status === "Provided");
   const integrityReady = exhibits.every((row) => row.integrity === "Verified" || row.integrity === "Sealed");
-  const claimReady = traceability?.courtAdmissible ?? record.status === "Court Admissible";
-  const remediationDone = claimReady;
   const evidenceRows = traceability?.evidence ?? [];
   const fieldAudit = traceability?.fieldAudit ?? [];
+  const passedRuleCitations = traceability?.passedRuleCitations ?? [];
   const ruleCitations = traceability?.ruleCitations ?? [];
+  const hasPersistedTraceability =
+    Boolean(traceability?.certRunId) &&
+    (Boolean(traceability?.ruleSetVersion) ||
+      Boolean(traceability?.sealedAt) ||
+      evidenceRows.length > 0 ||
+      fieldAudit.length > 0 ||
+      passedRuleCitations.length > 0 ||
+      ruleCitations.length > 0);
+  const monetaryRuleCitations = ruleCitations.filter((row) => !isZeroVarianceDisplay(row.varianceDisplay));
+  const blockingRuleCitations = ruleCitations.filter((row) => isZeroVarianceDisplay(row.varianceDisplay));
   const ruleSetVersion = traceability?.ruleSetVersion ?? null;
   const certificationDate = traceability?.sealedAt ?? traceability?.certCompletedAt ?? "Not persisted";
   const unsupportedFieldAudit = fieldAudit.filter((row) => !row.supported);
@@ -76,8 +86,19 @@ export function CaarReportModal({
     ...unsupportedFieldAudit.map((row) => `Backfill ${row.field} from a persisted upload, sealed config, or stored engine output.`),
   ];
   const lowDimensions = record.dimensions.filter((dimension) => dimension.score < 85);
+  const traceabilityGap =
+    !hasPersistedTraceability
+      ? "This CAAR summary row exists, but its linked persisted certification-run traceability is incomplete or missing. Treat this report as broken lineage until the certification run, rule citations, and evidence trace are restored."
+      : null;
+  const claimReady =
+    Boolean(traceability?.courtAdmissible ?? record.status === "Court Admissible") &&
+    hasPersistedTraceability &&
+    unsupportedFieldAudit.length === 0;
+  const remediationDone = claimReady;
   const effectiveRemediationSteps =
-    remediationSteps.length > 0
+    traceabilityGap
+      ? [traceabilityGap]
+      : remediationSteps.length > 0
       ? remediationSteps
       : !claimReady
         ? [
@@ -112,6 +133,11 @@ export function CaarReportModal({
     status: row.sha256 ? "Hashed" : "Missing",
   }));
   const mq6 = deriveMq6(record);
+  const weeklyPreliminary = isWeeklyPreliminaryRecord(record, ruleSetVersion);
+  const preliminaryTrustScore = weeklyPreliminary ? computeDimensionCompositeScore(record) : null;
+  const finalReleaseScore = weeklyPreliminary ? record.trustScore : null;
+  const headlineScore = preliminaryTrustScore ?? record.trustScore;
+  const headlineBadge = getScoreBandLabel(headlineScore);
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f7f7f9]">
@@ -176,31 +202,51 @@ export function CaarReportModal({
           <div className="rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-6">
             <div className="flex items-center justify-between gap-3">
               <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
-                Trust Score
+                {weeklyPreliminary ? "Preliminary Trust Score" : "Trust Score"}
               </div>
               <span
                 className={`rounded-full px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] ${
-                  record.trustScore >= 85
+                  headlineScore >= 85
                     ? "bg-[rgba(0,200,83,0.08)] text-[var(--success)]"
-                    : record.trustScore >= 50
+                    : headlineScore >= 50
                       ? "bg-[rgba(255,152,0,0.12)] text-[#b86a00]"
                       : "bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"
                 }`}
               >
-                {record.trustScore >= 85 ? "Certified" : record.trustScore >= 50 ? "Qualified" : "At Risk"}
+                {headlineBadge}
               </span>
             </div>
-            <div className={`mt-4 font-[family-name:var(--font-display)] text-8xl font-extrabold tracking-[-0.08em] ${getTrustTone(record.trustScore)}`}>
-              {record.trustScore}
+            <div className={`mt-4 font-[family-name:var(--font-display)] text-8xl font-extrabold tracking-[-0.08em] ${getTrustTone(headlineScore)}`}>
+              {headlineScore}
             </div>
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
-              <div className={`h-full rounded-full ${getScoreBar(record.trustScore)}`} style={{ width: `${record.trustScore}%` }} />
+              <div className={`h-full rounded-full ${getScoreBar(headlineScore)}`} style={{ width: `${headlineScore}%` }} />
             </div>
             <p className="mt-4 text-sm leading-7 text-[var(--muted)]">
-              {claimReady
-                ? "This CAAR is backed by persisted uploads, sealed governance records, and stored rule-engine outputs."
-                : "This CAAR is not yet fully supported by persisted evidence or sealed governance records for every required field."}
+              {weeklyPreliminary
+                ? "Weekly Preliminary runs expose an operational trust reading from the MQ6 dimensions while keeping the final release score separate until the monthly final gate is attempted."
+                : traceabilityGap
+                  ? "This CAAR headline exists, but the persisted certification-run lineage for this report is incomplete. The summary must not be treated as a defensible final record until traceability is restored."
+                : claimReady
+                  ? "This CAAR is backed by persisted uploads, sealed governance records, and stored rule-engine outputs."
+                  : "This CAAR is not yet fully supported by persisted evidence or sealed governance records for every required field."}
             </p>
+            {weeklyPreliminary ? (
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <ScoreExplainCard
+                  label="Preliminary Trust Score"
+                  tone={headlineScore}
+                  value={headlineScore}
+                  description="Operational confidence from the MQ6 dimension rollup for this weekly preliminary run."
+                />
+                <ScoreExplainCard
+                  label="Final Release Score"
+                  tone={finalReleaseScore ?? 0}
+                  value={finalReleaseScore ?? 0}
+                  description="Court-admissible release score. Weekly preliminary keeps this blocked until the monthly final cadence completes."
+                />
+              </div>
+            ) : null}
             <div className="mt-4 rounded-2xl border border-[var(--border)] bg-white p-4">
               <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
                 Traceability Summary
@@ -217,9 +263,14 @@ export function CaarReportModal({
 
         <div className="grid gap-4 lg:grid-cols-2">
           <ReportCard eyebrow="Certification Output" title="Persisted result summary" sub="Only persisted engine outputs are shown here. Synthetic fee calculations were removed.">
+            {traceabilityGap ? (
+              <div className="mb-4 rounded-2xl border border-[rgba(214,48,49,0.18)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]">
+                {traceabilityGap}
+              </div>
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-3">
               <ValueChip label="Module" value={moduleId} />
-              <ValueChip label="Rule Citations" value={String(ruleCitations.length)} />
+              <ValueChip label="Rule Citations" value={hasPersistedTraceability ? String(ruleCitations.length) : "Trace missing"} />
               <ValueChip label="Certified Variance" value={record.amount} accent />
             </div>
             <div className="mt-4 space-y-3">
@@ -336,10 +387,20 @@ export function CaarReportModal({
             ))}
           </div>
           <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
-            Composite trust score for this report is <strong>{record.trustScore}/100</strong>.{" "}
-            {claimReady
-              ? "The certification state is court-admissible because the persisted engine output and required evidence package are both present."
-              : "A high trust score alone is not enough. Unsupported fields, missing uploads, or review-state evidence still block a defensible certification."}
+            {weeklyPreliminary ? (
+              <>
+                Preliminary Trust Score for this weekly report is <strong>{headlineScore}/100</strong>. Final Release
+                Score remains <strong>{finalReleaseScore ?? 0}/100</strong> until monthly-final bank tie-out and release
+                gates are evaluated.
+              </>
+            ) : (
+              <>
+                Composite trust score for this report is <strong>{record.trustScore}/100</strong>.{" "}
+                {claimReady
+                  ? "The certification state is court-admissible because the persisted engine output and required evidence package are both present."
+                  : "A high trust score alone is not enough. Unsupported fields, missing uploads, or review-state evidence still block a defensible certification."}
+              </>
+            )}
           </div>
         </ReportCard>
 
@@ -408,7 +469,9 @@ export function CaarReportModal({
               <AttestRow label="Certification Run" value={traceability?.certRunId ? `cert_runs_v2#${traceability.certRunId}` : "Not linked"} />
               <AttestRow label="Rule Set Version" value={ruleSetVersion ?? "Not persisted"} />
               <AttestRow label="Certification Timestamp" value={certificationDate} />
-              <AttestRow label="Rule Citations Persisted" value={String(ruleCitations.length)} />
+              <AttestRow label="Monetary Rule Citations" value={String(monetaryRuleCitations.length)} />
+              <AttestRow label="Blocking Rule Citations" value={String(blockingRuleCitations.length)} />
+              <AttestRow label="Passed Rule Citations" value={String(passedRuleCitations.length)} />
               <AttestRow
                 label="Integrity Hash"
                 value={
@@ -424,28 +487,270 @@ export function CaarReportModal({
 
         <ReportCard
           eyebrow="Rule Citations"
-          title={ruleCitations.length > 0 ? "Persisted rule-engine findings" : "No persisted rule citations"}
-          sub="Only stored rule citations are shown here. If there are no citations, the UI does not invent them."
+          title={
+            !hasPersistedTraceability
+              ? "Rule-citation trace unavailable"
+              : monetaryRuleCitations.length > 0
+                ? "Persisted monetary rule-engine findings"
+                : "No persisted monetary rule citations"
+          }
+          sub="Only stored rules with attributed dollar variance are shown here. Zero-dollar blocking controls are separated below."
         >
-          {ruleCitations.length > 0 ? (
+          {!hasPersistedTraceability ? (
+            <div className="rounded-2xl border border-[rgba(214,48,49,0.18)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]">
+              Stored rule-citation lineage is missing for this CAAR record. The summary row exists, but the linked certification-run trace was not recovered.
+            </div>
+          ) : monetaryRuleCitations.length > 0 ? (
             <SimpleTable
               columns={["Rule", "Version", "Fired", "Variance", "Sample Evidence"]}
-              rows={ruleCitations.map((row) => [
-                row.ruleId,
+              rows={monetaryRuleCitations.map((row) => [
+                <RuleCitationCell
+                  key={`${row.ruleId}:${row.ruleVersion}`}
+                  evidenceRows={evidenceRows}
+                  rule={row}
+                  moduleId={moduleId}
+                  disposition="monetary_problem"
+                />,
                 row.ruleVersion,
                 String(row.firedCount),
-                row.varianceDisplay,
+                <VarianceCitationCell
+                  key={`${row.ruleId}:${row.ruleVersion}:variance`}
+                  evidenceRows={evidenceRows}
+                  rule={row}
+                  moduleId={moduleId}
+                  disposition="monetary_problem"
+                />,
                 `${row.sampleEvidenceCount} sample entries`,
               ])}
             />
           ) : (
             <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
-              No persisted `rule_citations_v2` rows were found for this CAAR. The report therefore does not fabricate
-              rule-level conclusions beyond the stored findings summary.
+              No persisted monetary rule citations were found for this CAAR. Dollar-attributed findings are only shown
+              when the stored engine output assigns non-zero variance to a rule.
             </div>
           )}
         </ReportCard>
+
+        <details className="rounded-[28px] border border-[var(--border)] bg-white">
+          <summary className="cursor-pointer list-none px-6 py-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
+                  Blocking Controls
+                </div>
+                <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+                  Non-monetary blocking rule findings
+                </div>
+                <div className="mt-1 text-sm text-[var(--muted)]">
+                  Expand to inspect stored rule citations that block release or mark a control failure without assigning
+                  direct dollar variance.
+                </div>
+              </div>
+              <div className="rounded-full border border-[var(--border)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
+                {hasPersistedTraceability ? `${blockingRuleCitations.length} stored` : "Trace missing"}
+              </div>
+            </div>
+          </summary>
+          <div className="border-t border-[var(--border)] px-6 py-6">
+            {!hasPersistedTraceability ? (
+              <div className="rounded-2xl border border-[rgba(214,48,49,0.18)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]">
+                Stored blocking-control rows are unavailable because the linked certification-run lineage is missing for this CAAR.
+              </div>
+            ) : blockingRuleCitations.length > 0 ? (
+              <SimpleTable
+                columns={["Rule", "Version", "Issue", "Recorded", "Sample Evidence"]}
+                rows={blockingRuleCitations.map((row) => [
+                  <RuleCitationCell
+                    key={`${row.ruleId}:${row.ruleVersion}:blocking`}
+                    evidenceRows={evidenceRows}
+                    rule={row}
+                    moduleId={moduleId}
+                    disposition="blocking_problem"
+                  />,
+                  row.ruleVersion,
+                  buildBlockingIssueSummary(row, moduleId, evidenceRows),
+                  String(row.firedCount),
+                  `${row.sampleEvidenceCount} sample entr${row.sampleEvidenceCount === 1 ? "y" : "ies"}`,
+                ])}
+              />
+            ) : (
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
+                No non-monetary blocking citations were persisted for this CAAR.
+              </div>
+            )}
+          </div>
+        </details>
+
+        <details className="rounded-[28px] border border-[var(--border)] bg-white">
+          <summary className="cursor-pointer list-none px-6 py-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+                  Passed Controls
+                </div>
+                <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+                  Persisted passed rule traces
+                </div>
+                <div className="mt-1 text-sm text-[var(--muted)]">
+                  Expand to inspect rules that were evaluated and passed without attributed variance.
+                </div>
+              </div>
+              <div className="rounded-full border border-[var(--border)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
+                {hasPersistedTraceability ? `${passedRuleCitations.length} stored` : "Trace missing"}
+              </div>
+            </div>
+          </summary>
+          <div className="border-t border-[var(--border)] px-6 py-6">
+            {!hasPersistedTraceability ? (
+              <div className="rounded-2xl border border-[rgba(214,48,49,0.18)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]">
+                Stored passed-control traces are unavailable because the linked certification-run lineage is missing for this CAAR.
+              </div>
+            ) : passedRuleCitations.length > 0 ? (
+              <SimpleTable
+                columns={["Rule", "Version", "Recorded", "Variance", "Sample Evidence"]}
+                rows={passedRuleCitations.map((row) => [
+                  <RuleCitationCell
+                    key={`${row.ruleId}:${row.ruleVersion}:passed`}
+                    evidenceRows={evidenceRows}
+                    rule={row}
+                    moduleId={moduleId}
+                    disposition="passed"
+                  />,
+                  row.ruleVersion,
+                  String(row.firedCount),
+                  <VarianceCitationCell
+                    key={`${row.ruleId}:${row.ruleVersion}:passed:variance`}
+                    evidenceRows={evidenceRows}
+                    rule={row}
+                    moduleId={moduleId}
+                    disposition="passed"
+                  />,
+                  `${row.sampleEvidenceCount} sample entr${row.sampleEvidenceCount === 1 ? "y" : "ies"}`,
+                ])}
+              />
+            ) : (
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
+                No passed control-trace citations were persisted for this CAAR.
+              </div>
+            )}
+          </div>
+        </details>
       </div>
+    </div>
+  );
+}
+
+function RuleCitationCell({
+  disposition,
+  evidenceRows,
+  moduleId,
+  rule,
+}: {
+  disposition: CitationDisposition;
+  evidenceRows: CaarEvidenceTrace[];
+  moduleId: "M01" | "M02";
+  rule: CaarRuleCitationRow;
+}) {
+  const tip = describeRuleCitation(rule, moduleId, evidenceRows, disposition);
+
+  return (
+    <div className="flex items-center gap-2">
+      <span>{rule.ruleId}</span>
+      <HelpTip
+        title={`Rule Citation · ${rule.ruleId}`}
+        sections={[
+          { label: "Rule", text: tip.ruleText },
+          { label: "Evidence", text: tip.evidence },
+        ]}
+        footerLabel="Canonical Link"
+        footerValue={tip.footer}
+      />
+    </div>
+  );
+}
+
+function VarianceCitationCell({
+  disposition,
+  evidenceRows,
+  moduleId,
+  rule,
+}: {
+  disposition: CitationDisposition;
+  evidenceRows: CaarEvidenceTrace[];
+  moduleId: "M01" | "M02";
+  rule: CaarRuleCitationRow;
+}) {
+  const tip = describeRuleCitation(rule, moduleId, evidenceRows, disposition);
+
+  return (
+    <div className="flex items-center gap-2">
+      <span>{rule.varianceDisplay}</span>
+      <HelpTip
+        title={`Variance Detail · ${rule.ruleId}`}
+        sections={[
+          { label: "Calculation", text: tip.calculation },
+          { label: "Evidence", text: tip.evidence },
+        ]}
+        footerLabel="Sample Evidence"
+        footerValue={`${rule.sampleEvidenceCount} persisted entr${rule.sampleEvidenceCount === 1 ? "y" : "ies"}`}
+      />
+    </div>
+  );
+}
+
+function isWeeklyPreliminaryRecord(record: CaarRecord, ruleSetVersion: string | null) {
+  return (
+    record.period.toLowerCase().includes("weekly preliminary") ||
+    (ruleSetVersion ?? "").toLowerCase().includes("weekly")
+  );
+}
+
+function computeDimensionCompositeScore(record: CaarRecord) {
+  const weights: Record<string, number> = {
+    Auditability: 0.2,
+    "Cross-System Reconciliation": 0.25,
+    "Data Completeness": 0.1,
+    "Data Freshness": 0.1,
+    "Rule Integrity": 0.15,
+    "Source Authenticity": 0.2,
+  };
+
+  const score = record.dimensions.reduce((sum, dimension) => {
+    return sum + dimension.score * (weights[dimension.name] ?? 0);
+  }, 0);
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function getScoreBandLabel(score: number) {
+  if (score >= 85) return "Certified";
+  if (score >= 50) return "Qualified";
+  return "At Risk";
+}
+
+function ScoreExplainCard({
+  description,
+  label,
+  tone,
+  value,
+}: {
+  description: string;
+  label: string;
+  tone: number;
+  value: number;
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-white p-4">
+      <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+        {label}
+      </div>
+      <div className={`mt-2 font-[family-name:var(--font-display)] text-4xl font-extrabold tracking-[-0.06em] ${getTrustTone(tone)}`}>
+        {value}
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--surface)]">
+        <div className={`h-full rounded-full ${getScoreBar(tone)}`} style={{ width: `${value}%` }} />
+      </div>
+      <p className="mt-3 text-sm leading-6 text-[var(--muted)]">{description}</p>
     </div>
   );
 }
@@ -455,6 +760,491 @@ function inferModule(record: CaarRecord) {
   return corpus.includes("processor") || corpus.includes("interchange") || corpus.includes("merchant")
     ? "M01"
     : "M02";
+}
+
+function isZeroVarianceDisplay(value: string) {
+  const normalized = value.replace(/[$,\s]/g, "");
+  return normalized === "0" || normalized === "0.00" || normalized === "(0)" || normalized === "-0" || normalized === "-0.00";
+}
+
+function buildBlockingIssueSummary(
+  rule: CaarRuleCitationRow,
+  moduleId: "M01" | "M02",
+  evidenceRows: CaarEvidenceTrace[],
+) {
+  const tip = describeRuleCitation(rule, moduleId, evidenceRows, "blocking_problem");
+  const firstSample = rule.sampleEvidence[0] ?? {};
+  const detail = typeof firstSample.detail === "string" ? firstSample.detail.trim() : "";
+
+  if (detail) {
+    return detail;
+  }
+
+  const conciseRule = tip.ruleText
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\.$/, "");
+
+  if (conciseRule.length <= 140) {
+    return conciseRule;
+  }
+
+  return `${conciseRule.slice(0, 137)}...`;
+}
+
+type RuleCitationTip = {
+  calculation: string;
+  evidence: string;
+  footer: string;
+  ruleText: string;
+};
+
+type CitationDisposition = "monetary_problem" | "blocking_problem" | "passed";
+type CaarRuleCitationRow = NonNullable<CaarRecord["traceability"]>["ruleCitations"][number];
+type RuleCitationSample = Record<string, string | number | boolean | null>;
+
+const RUNTIME_RULE_MAP = new Map(getRuntimeRuleCrosswalk().map((row) => [row.runtimeRuleId, row]));
+
+const RULE_TOOLTIP_OVERRIDES: Record<string, RuleCitationTip> = {
+  "MFR-BIL-15": {
+    ruleText:
+      "Rebuild the expected M01 processor fee from the sealed pricing terms, then compare it to the observed processor fee burden on the statement.",
+    calculation:
+      "Expected fee is reconstructed from governed contract terms such as markup bps, fixed per-transaction fee, and recurring fees. Variance is observed statement fees minus expected governed fees.",
+    evidence:
+      "Uses the processor statement upload for gross sales / fee totals, the sealed contract config for pricing terms, and the governed source mapping that binds those fields into engine inputs.",
+    footer: "Primary M01 fee-audit runtime rule",
+  },
+  "MFR-MRK-03": {
+    ruleText:
+      "Audit whether the processor markup basis points charged in practice exceed the sealed markup cap.",
+    calculation:
+      "Observed markup bps from the governed statement is compared against the sealed markup-bps term. Positive excess over the contract threshold creates attributed variance.",
+    evidence:
+      "Uses the processor statement field mapped to processor_markup_bps and the sealed contract-config markup term for the active vendor workspace.",
+    footer: "Markup overcharge control",
+  },
+  "MFR-MRK-05": {
+    ruleText:
+      "Audit whether the processor charged a per-transaction fixed fee above the governed contract amount.",
+    calculation:
+      "Observed txn-fee behavior is measured against the sealed per-transaction fee. Excess fee per transaction multiplied by transaction volume yields variance.",
+    evidence:
+      "Uses transaction_count from governed source mapping plus the sealed contract fixed-fee term.",
+    footer: "Per-transaction fee control",
+  },
+  "MFR-INT-12": {
+    ruleText:
+      "Check Visa debit fee behavior against the sealed card-brand interchange and markup truth table.",
+    calculation:
+      "Expected Visa debit fee is reconstructed from the sealed card-brand rate and fixed fee, then compared against the observed Visa debit fee pool.",
+    evidence:
+      "Uses card-brand fee and volume metrics extracted from the processor source plus the sealed card-brand pricing table in contract config.",
+    footer: "Visa debit downgrade / interchange control",
+  },
+  "MFR-INT-14": {
+    ruleText:
+      "Check Mastercard debit fee behavior against the sealed card-brand interchange and markup truth table.",
+    calculation:
+      "Expected Mastercard debit fee is reconstructed from the sealed card-brand rate and fixed fee, then compared against the observed Mastercard debit fee pool.",
+    evidence:
+      "Uses card-brand fee and volume metrics extracted from the processor source plus the sealed card-brand pricing table in contract config.",
+    footer: "Mastercard debit downgrade / interchange control",
+  },
+  "MFR-VOL-08": {
+    ruleText:
+      "Detect missed tier-volume discount behavior where processed volume should have qualified for a better governed rate.",
+    calculation:
+      "Actual governed volume is measured against the sealed tier structure. If the active tier does not reflect achieved volume, the model computes excess fee variance.",
+    evidence:
+      "Uses governed statement volume metrics and sealed contract tier-volume pricing terms.",
+    footer: "Tier-volume drift control",
+  },
+  "MFR-VOL-09": {
+    ruleText:
+      "Detect wrong tier application or tier downgrade relative to the sealed pricing schedule.",
+    calculation:
+      "Expected fee under the proper sealed tier is compared against observed fee behavior to attribute variance caused by tier misapplication.",
+    evidence:
+      "Uses governed statement basis volume, transaction counts, and the sealed tier schedule.",
+    footer: "Tier application control",
+  },
+  "MFR-CBK-04": {
+    ruleText:
+      "Detect chargeback-fee leakage beyond the sealed agreement.",
+    calculation:
+      "Observed chargeback-related fee burden is tested against the governed chargeback expectations and attributed where excess billing remains.",
+    evidence:
+      "Uses governed statement counts / fee pools and sealed chargeback-related contract terms.",
+    footer: "Chargeback fee control",
+  },
+  "MFR-RFD-01": {
+    ruleText:
+      "Detect refund-processing fees or refund-linked fee leakage beyond governed expectations.",
+    calculation:
+      "Refund count and related fee behavior are compared to the sealed refund pricing assumptions to attribute overcharge variance.",
+    evidence:
+      "Uses refund counts or refund-related source metrics plus the sealed contract pricing model.",
+    footer: "Refund fee control",
+  },
+  "MFR-FEE-21": {
+    ruleText:
+      "Capture residual extra-fee pools that are not justified by the sealed pricing model.",
+    calculation:
+      "After all known governed fee components are reconstructed, any remaining unexplained positive processor fee pool is attributed as residual variance.",
+    evidence:
+      "Uses the processor statement fee totals, sealed contract pricing truth, and the full reconstructed expected-fee model.",
+    footer: "Residual unexplained fee control",
+  },
+  R123: {
+    ruleText:
+      "Cross-system reconciliation must clear the release band before final CAAR release is defensible.",
+    calculation:
+      "The engine checks whether reconciliation score reaches the release threshold. A score below threshold remains a blocking condition rather than a direct dollar variance rule.",
+    evidence:
+      "Uses processor source, POS export, and bank evidence as applicable to the certification cadence.",
+    footer: "Canonical reconciliation threshold",
+  },
+  R128: {
+    ruleText:
+      "Fee-legitimacy gate score is evaluated from governed evidence and deterministic fee reconstruction.",
+    calculation:
+      "The engine resolves TG07 from the fee-legitimacy controls and uses it as a major weighted component of final release scoring.",
+    evidence:
+      "Uses governed processor or DSP fee evidence together with the sealed contract truth used by the trust-gate layer.",
+    footer: "TG07 trust-gate checkpoint",
+  },
+  R129: {
+    ruleText:
+      "Fee-variance grade must clear the final legitimacy band before release.",
+    calculation:
+      "The certification checks whether TG07 clears the release threshold. If not, the CAAR remains non-releasable even when other dimensions look strong.",
+    evidence:
+      "Uses the persisted TG07 trust-gate result derived from source evidence and sealed pricing controls.",
+    footer: "Fee legitimacy release threshold",
+  },
+  R135: {
+    ruleText:
+      "Final CAAR eligibility depends on the composite trust-gate threshold clearing the required release mark.",
+    calculation:
+      "TG11 is set to pass only when the weighted TG01-TG10 composite clears the eligibility threshold. Otherwise final release remains blocked.",
+    evidence:
+      "Uses the persisted trust-gate results computed from the certification package for the active run.",
+    footer: "Final eligibility gate",
+  },
+};
+
+function describeRuleCitation(
+  row: CaarRuleCitationRow,
+  moduleId: "M01" | "M02",
+  evidenceRows: CaarEvidenceTrace[],
+  disposition: CitationDisposition,
+): RuleCitationTip {
+  const ruleId = row.ruleId;
+  const sample = row.sampleEvidence[0] ?? {};
+  const override = RULE_TOOLTIP_OVERRIDES[ruleId];
+  if (override) {
+    return {
+      ...override,
+      calculation: buildRuleCalculation(ruleId, moduleId, sample, row.varianceDisplay, override.calculation),
+      evidence: buildRuleEvidence(ruleId, moduleId, sample, evidenceRows, override.evidence),
+    };
+  }
+
+  const runtimeRule = RUNTIME_RULE_MAP.get(ruleId) ?? null;
+  const canonicalIds = runtimeRule?.canonicalRuleIds ?? [ruleId];
+  const canonicalRules = canonicalIds
+    .map((canonicalId) => findCanonicalRule(canonicalId))
+    .filter((rule): rule is NonNullable<ReturnType<typeof findCanonicalRule>> => Boolean(rule));
+  const canonicalClauses = canonicalIds
+    .map((canonicalId) => findCanonicalRuleClause(canonicalId))
+    .filter((rule): rule is NonNullable<ReturnType<typeof findCanonicalRuleClause>> => Boolean(rule));
+  const canonicalSummary =
+    canonicalRules.length > 0
+      ? canonicalRules.map((rule) => `${rule.ruleId} ${rule.ruleName}`).join(" | ")
+      : "Canonical rule metadata is not yet expanded for this runtime citation.";
+  const canonicalRuleText = canonicalClauses.length > 0
+    ? canonicalClauses
+        .map((rule) => {
+          const lines = [
+            `${rule.ruleId} ${rule.ruleName}`,
+            rule.ifCondition ? `IF ${rule.ifCondition}` : null,
+            rule.thenAction ? `THEN ${rule.thenAction}` : null,
+          ].filter(Boolean);
+          return lines.join("\n");
+        })
+        .join("\n\n")
+    : canonicalSummary;
+  const runtimeMeaning =
+    runtimeRule?.note ??
+    `${moduleId} certification persisted this rule because the deterministic engine found a governed condition tied to ${canonicalSummary}.`;
+  const detail = typeof sample.detail === "string" && sample.detail.trim().length > 0 ? sample.detail.trim() : null;
+  const outcomeLabel =
+    disposition === "passed"
+      ? "Passed control"
+      : disposition === "blocking_problem"
+        ? "Blocking control"
+        : "Monetary variance control";
+  const outcomeText =
+    disposition === "passed"
+      ? detail ?? "This control was evaluated and did not block release for this persisted CAAR run."
+      : disposition === "blocking_problem"
+        ? detail ?? "This control remains a non-monetary blocker for release on this persisted CAAR run."
+        : detail ?? "This control attributed non-zero variance on this persisted CAAR run.";
+  const whyItAppears =
+    disposition === "passed"
+      ? "This row is shown in Passed Controls because the rule was recorded for audit traceability and finished without attributed variance."
+      : disposition === "blocking_problem"
+        ? "This row is shown in Blocking Controls because it recorded a release-blocking condition without assigning direct dollar variance."
+        : "This row is shown in monetary findings because the stored engine output attributed non-zero dollar variance to this rule.";
+
+  return {
+    ruleText: `Canonical Rule\n${canonicalRuleText}\n\nCurrent Result\n${outcomeLabel}\n${outcomeText}\n\nWhy This Row Appears\n${whyItAppears}\n\nRuntime Meaning\n${runtimeMeaning}`,
+    calculation: buildRuleCalculation(ruleId, moduleId, sample, row.varianceDisplay, buildGenericCalculation(ruleId, moduleId)),
+    evidence: buildRuleEvidence(ruleId, moduleId, sample, evidenceRows, buildGenericEvidence(ruleId, moduleId)),
+    footer:
+      canonicalRules.length > 0
+        ? canonicalRules.map((rule) => `${rule.ruleId} · Section ${rule.sectionNumber}`).join(" | ")
+        : "Runtime-only citation",
+  };
+}
+
+function buildGenericCalculation(ruleId: string, moduleId: "M01" | "M02") {
+  if (ruleId.startsWith("MFR-") || moduleId === "M01") {
+    return "The engine reconstructs expected merchant-fee behavior from the sealed contract terms and compares that governed expectation to observed processor and POS evidence. Any justified excess becomes attributed variance or a release-blocking control failure.";
+  }
+
+  if (ruleId.startsWith("DFR-") || moduleId === "M02") {
+    return "The engine reconstructs expected delivery-fee and commission behavior from sealed DSP terms, then compares it against settlement, POS, and bank evidence. Any excess or mismatch becomes attributed variance or a release-blocking control failure.";
+  }
+
+  return "The deterministic engine compares governed expected behavior to persisted observed evidence and stores the rule when the condition remains materially relevant to certification.";
+}
+
+function buildGenericEvidence(ruleId: string, moduleId: "M01" | "M02") {
+  if (ruleId === "R135" || ruleId.startsWith("R12") || ruleId.startsWith("R13")) {
+    return "Evidence comes from the persisted trust-gate, MQ6, and governed-state outputs stored with the certification run.";
+  }
+
+  if (moduleId === "M01") {
+    return "Evidence comes from the governed processor statement, POS export, signed merchant agreement, bank evidence when required, sealed source-column bindings, and sealed contract terms.";
+  }
+
+  return "Evidence comes from the governed DSP settlement export, POS summary/export, signed DSP agreement, bank deposit evidence when required, sealed schema bindings, and sealed DSP contract terms.";
+}
+
+function formatMetricValue(value: string | number | boolean | null | undefined) {
+  if (value === null || value === undefined) return "not stored in this citation row";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
+  }
+  return value;
+}
+
+function formatMoneyLike(value: string | number | boolean | null | undefined) {
+  if (typeof value !== "number") return formatMetricValue(value);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function humanizeMetricKey(key: string) {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b[a-z]/g, (match) => match.toUpperCase());
+}
+
+function buildPersistedInputs(sample: RuleCitationSample) {
+  const rows = Object.entries(sample).map(([key, value]) => `${humanizeMetricKey(key)}: ${formatMetricValue(value)}`);
+  return rows.length > 0 ? rows.join("\n") : "No sample-evidence payload was stored with this citation.";
+}
+
+function buildRuleCalculation(
+  ruleId: string,
+  moduleId: "M01" | "M02",
+  sample: RuleCitationSample,
+  varianceDisplay: string,
+  fallback: string,
+) {
+  const detail = typeof sample.detail === "string" && sample.detail.trim().length > 0 ? sample.detail.trim() : null;
+
+  if (ruleId === "MFR-BIL-15" || ruleId === "R083") {
+    return [
+      "Formula",
+      "Δ = max(0, F_obs - F_exp)",
+      "Variance_attributed = min(Δ, residual_variance_pool)",
+      "",
+      "Operands",
+      `F_obs (observed processor fee total from statement) = ${formatMoneyLike(sample.actual_fee_amount)}`,
+      `F_exp (expected governed fee total from sealed pricing terms) = ${formatMoneyLike(sample.expected_fee_amount)}`,
+      `Δ stored on citation row as unexplained_fee_delta = ${formatMoneyLike(sample.unexplained_fee_delta)}`,
+      `Variance_attributed = ${varianceDisplay}`,
+      "",
+      sample.actual_fee_amount === null || sample.actual_fee_amount === undefined || sample.expected_fee_amount === null || sample.expected_fee_amount === undefined
+        ? "This persisted citation row stores the final variance but does not store one or more intermediate operands. The engine therefore proved the variance at run time, but this specific row cannot reproduce every operand numerically."
+        : "This row contains the actual operands used by the engine for the fee-gap comparison.",
+    ].join("\n");
+  }
+
+  if (ruleId === "MFR-MRK-03" || ruleId === "R078" || ruleId === "R085") {
+    return [
+      "Formula",
+      "observed_rate_bps = ((observed_fee_pool - fixed_txn_fee_pool - monthly_fee) / basis_amount) × 10,000",
+      "delta_bps = observed_rate_bps - contracted_rate_bps",
+      "Variance_attributed = basis_amount × delta_bps / 10,000",
+      "",
+      "Operands",
+      `basis_amount = ${formatMoneyLike(sample.basis_amount)}`,
+      `observed_rate_bps = ${formatMetricValue(sample.actual_rate_bps ?? sample.observed_rate_bps)} bps`,
+      `contracted_rate_bps = ${formatMetricValue(sample.contracted_markup_bps ?? sample.contracted_rate_bps)} bps`,
+      `delta_bps = ${formatMetricValue(sample.excess_rate_bps ?? sample.rate_delta_bps)} bps`,
+      `Variance_attributed = ${varianceDisplay}`,
+    ].join("\n");
+  }
+
+  if (ruleId === "MFR-MRK-05") {
+    return [
+      "Formula",
+      "excess_per_txn = observed_per_txn_fee - contracted_per_txn_fee",
+      "Variance_attributed = excess_per_txn × transaction_count",
+      "",
+      "Operands",
+      `observed_per_txn_fee = ${formatMoneyLike(sample.observed_per_txn_fee)}`,
+      `contracted_per_txn_fee = ${formatMoneyLike(sample.contracted_per_txn_fee)}`,
+      `excess_per_txn = ${formatMoneyLike(sample.excess_per_txn_fee)}`,
+      `transaction_count = ${formatMetricValue(sample.transaction_count)}`,
+      `Variance_attributed = ${varianceDisplay}`,
+    ].join("\n");
+  }
+
+  if (ruleId === "DSP-COM-04" || ruleId === "DSP-COM-05" || ruleId === "DSP-VAR-11") {
+    return [
+      "Formula",
+      "observed_rate_pct = actual_commission / commission_base_amount × 100",
+      "expected_commission = commission_base_amount × contracted_rate_pct / 100",
+      "Variance_attributed = max(0, actual_commission - expected_commission)",
+      "",
+      "Operands",
+      `commission_base_amount = ${formatMoneyLike(sample.commission_base_amount ?? sample.expected_commission_base ?? sample.basis_amount)}`,
+      `actual_commission = ${formatMoneyLike(sample.actual_commission)}`,
+      `contracted_rate_pct = ${formatMetricValue(sample.contracted_rate_pct)}%`,
+      sample.observed_rate_pct !== undefined ? `Observed rate: ${formatMetricValue(sample.observed_rate_pct)}%` : null,
+      sample.effective_rate_variance_pct !== undefined
+        ? `Effective-rate variance: ${formatMetricValue(sample.effective_rate_variance_pct)}%`
+        : null,
+      sample.observed_commission_base !== undefined
+        ? `Observed commission base used by source: ${formatMoneyLike(sample.observed_commission_base)}`
+        : null,
+      `Variance_attributed = ${varianceDisplay}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (varianceDisplay === "$0" || varianceDisplay === "$0.00") {
+    return [
+      detail ? `Stored outcome\n${detail}` : fallback,
+      "",
+      "Persisted input values",
+      buildPersistedInputs(sample),
+      `Variance_attributed = ${varianceDisplay}`,
+    ].join("\n");
+  }
+
+  return [
+    fallback,
+    "",
+    "Persisted input values",
+    buildPersistedInputs(sample),
+    `Variance_attributed = ${varianceDisplay}`,
+  ].join("\n");
+}
+
+function buildRuleEvidence(
+  ruleId: string,
+  moduleId: "M01" | "M02",
+  sample: RuleCitationSample,
+  evidenceRows: CaarEvidenceTrace[],
+  fallback: string,
+) {
+  const processorSource = evidenceRows.find((row) => row.artifactKey.includes(moduleId === "M01" ? "processor" : "settlement"));
+  const posSource = evidenceRows.find((row) => row.artifactKey.includes("pos"));
+  const agreementSource = evidenceRows.find((row) => row.artifactKey.includes("agreement"));
+  const bankSource = evidenceRows.find((row) => row.artifactKey.includes("bank"));
+
+  function artifactLine(label: string, row: CaarEvidenceTrace | undefined, whatItSupplies: string) {
+    if (!row) {
+      return `${label}: no persisted upload row was linked to this CAAR for this source.`;
+    }
+    return `${label}: ${row.fileName ?? row.label} (${row.trace}) -> ${whatItSupplies}`;
+  }
+
+  const lines =
+    moduleId === "M01"
+      ? [
+          artifactLine(
+            "Processor Source Statement / PDF",
+            processorSource,
+            "observed fee totals, sales basis, transaction counts, and rate-side source metrics used by M01 rules",
+          ),
+          artifactLine(
+            "Signed Merchant Agreement",
+            agreementSource,
+            "legal pricing terms that are sealed into contract config: markup bps, txn fee, monthly fee, chargeback fee, and related controls",
+          ),
+          bankSource
+            ? artifactLine(
+                "Bank Statement",
+                bankSource,
+                "deposit tie-out evidence used by reconciliation / release gates when applicable",
+              )
+            : null,
+        ]
+      : [
+          artifactLine(
+            "DSP Settlement source",
+            processorSource,
+            "observed commission, payout, and settlement-side totals",
+          ),
+          artifactLine(
+            "POS Export / Summary",
+            posSource,
+            "order counts, sales totals, and comparison-side basis metrics",
+          ),
+          artifactLine(
+            "Signed DSP Agreement",
+            agreementSource,
+            "governed rate, commission-base, and payout terms sealed into contract config",
+          ),
+          bankSource
+            ? artifactLine(
+                "Bank Deposit Evidence",
+                bankSource,
+                "bank-side payout confirmation used by monthly final reconciliation",
+              )
+            : null,
+        ];
+
+  if ("commission_base_field" in sample) {
+    lines.push(`Stored commission-base field used by engine: ${formatMetricValue(sample.commission_base_field)}.`);
+  }
+
+  if (
+    moduleId === "M01" &&
+    (ruleId === "MFR-BIL-15" || ruleId === "R083")
+  ) {
+    lines.push(
+      "For this fee-gap rule specifically:",
+      "- actual_fee_amount comes from the processor statement fee total parsed into engine metrics.",
+      "- expected_fee_amount is computed from sealed contract terms applied to governed source metrics.",
+      "- unexplained_fee_delta is the residual positive gap after expected fees are subtracted from observed fees.",
+    );
+  }
+
+  return [fallback, "", "Where the values came from", ...lines.filter(Boolean)].join("\n");
 }
 
 function buildExhibits({

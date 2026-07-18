@@ -1,8 +1,15 @@
 import { useMemo, useRef, useState } from "react";
 import type { IntakeState, PosSchemaGovernance, Role, SchemaWorkspace, UploadReceipt } from "../types";
 import { Badge, HelpTip, MetaBlock } from "../ui/primitives";
+import { getExpectedHeaders } from "@/lib/uploads/definitions";
 
 type TabId = "mappings" | "contract" | "missing" | "posschema" | "upload" | "vault";
+
+type ComparisonFieldDefinition = {
+  description: string;
+  field: string;
+  required: boolean;
+};
 
 const CANONICAL_FIELD_HELP: Record<
   string,
@@ -84,6 +91,19 @@ export function SchemaEditorModal({
   const uploadReady = requiredRemaining === 0 && reviewFields.length === 0;
   const posSchema = draft.posSchema ?? createEmptyPosSchema();
   const posSchemaValidated = posSchema.validatedHeaders.length > 0;
+  const vendorKey = normalizeSchemaVendorKey(draft.vendor);
+  const comparisonFieldDefinitions = useMemo(
+    () => getComparisonFieldDefinitions(draft.module, vendorKey),
+    [draft.module, vendorKey],
+  );
+  const comparisonCandidateHeaders = useMemo(
+    () => uniqueHeaders([...posSchema.extractedHeaders, ...posSchema.manualHeaders]),
+    [posSchema.extractedHeaders, posSchema.manualHeaders],
+  );
+  const comparisonBindings = useMemo(
+    () => mergeHeaderBindings(comparisonFieldDefinitions, posSchema.headerBindings ?? [], comparisonCandidateHeaders),
+    [comparisonCandidateHeaders, comparisonFieldDefinitions, posSchema.headerBindings],
+  );
   const headerAttentionNeeded =
     !posSchemaValidated || missingFields.length > 0 || reviewFields.length > 0;
   const sourceLabel =
@@ -199,7 +219,7 @@ export function SchemaEditorModal({
               { id: "mappings" as const, label: "Column Mappings" },
               { id: "contract" as const, label: "Contract Config" },
               { id: "missing" as const, label: "Missing Fields" },
-              { id: "posschema" as const, label: "POS Source Schema" },
+              { id: "posschema" as const, label: "Comparison Source Schema" },
               { id: "upload" as const, label: "Upload Statement" },
               { id: "vault" as const, label: "Vault Record" },
             ].map((item) => (
@@ -315,20 +335,20 @@ export function SchemaEditorModal({
             {tab === "posschema" ? (
               <div className="space-y-4">
                 <TabHeading
-                  title="POS Source Schema"
-                  tipTitle="Schema Editor · POS Source Schema"
+                  title="Comparison Source Schema"
+                  tipTitle="Schema Editor · Comparison Source Schema"
                   sections={[
                     {
                       label: "What It Is",
-                      text: "A governed sample POS export header set for this location, module, and vendor.",
+                      text: "A governed binding set between the app's comparison-source fields and the real headers exported by this vendor.",
                     },
                     {
                       label: "What It Does",
-                      text: "Defines the expected live POS export columns used to validate recurring POS uploads before certification.",
+                      text: "Defines the expected live comparison-source columns used to validate recurring uploads before certification.",
                     },
                     {
                       label: "Why It Matters",
-                      text: "If the POS file shape changes and this governed header set is stale, reconciliation can fail even when evidence is otherwise complete.",
+                      text: "If the vendor file shape changes and this governed binding set is stale, reconciliation can fail even when evidence is otherwise complete.",
                     },
                   ]}
                 />
@@ -337,11 +357,11 @@ export function SchemaEditorModal({
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
                       <div className="font-[family-name:var(--font-display)] text-xl font-bold tracking-[-0.03em]">
-                        Governed POS header set
+                        Governed comparison-source header map
                       </div>
                       <div className="mt-1 text-sm text-[var(--muted)]">
-                        Upload a representative POS CSV export, review the extracted headers, or type them manually.
-                        When validated, these headers are sealed with the workspace and reused by Upload Data.
+                        Upload a representative comparison-source CSV, review the extracted headers, or type them manually.
+                        Then bind the app fields below to the real vendor headers. Those bindings are sealed with the workspace and reused by Upload Data.
                       </div>
                     </div>
                     <Badge tone={posSchemaValidated ? "success" : posSchema.status === "draft" ? "warning" : "danger"}>
@@ -355,23 +375,24 @@ export function SchemaEditorModal({
                       onClick={() => fileInputRef.current?.click()}
                       className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
                     >
-                      Upload POS Example CSV
+                      Upload Comparison CSV
                     </button>
                     <button
                       type="button"
                       onClick={() =>
                         setDraft((current) => ({
                           ...current,
-                          posSchema: {
-                            ...(current.posSchema ?? createEmptyPosSchema()),
-                            status: current.posSchema?.manualHeaders?.length ? "validated" : "missing",
-                            validatedHeaders: [...(current.posSchema?.manualHeaders ?? [])],
-                          },
+                          posSchema: commitHeaderBindings(
+                            current.posSchema ?? createEmptyPosSchema(),
+                            comparisonFieldDefinitions,
+                            comparisonCandidateHeaders,
+                            current.posSchema?.manualHeaders ?? [],
+                          ),
                         }))
                       }
                       className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
                     >
-                      Validate Manual Headers
+                      Validate Manual Mapping
                     </button>
                     <button
                       type="button"
@@ -379,16 +400,17 @@ export function SchemaEditorModal({
                       onClick={() =>
                         setDraft((current) => ({
                           ...current,
-                          posSchema: {
-                            ...(current.posSchema ?? createEmptyPosSchema()),
-                            status: current.posSchema?.extractedHeaders?.length ? "validated" : "missing",
-                            validatedHeaders: [...(current.posSchema?.extractedHeaders ?? [])],
-                          },
+                          posSchema: commitHeaderBindings(
+                            current.posSchema ?? createEmptyPosSchema(),
+                            comparisonFieldDefinitions,
+                            comparisonCandidateHeaders,
+                            current.posSchema?.extractedHeaders ?? [],
+                          ),
                         }))
                       }
                       className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] disabled:opacity-50"
                     >
-                      Validate Extracted Headers
+                      Validate Extracted Mapping
                     </button>
                   </div>
 
@@ -398,7 +420,7 @@ export function SchemaEditorModal({
                       <div className="mt-1 text-sm text-[var(--muted)]">
                         {posSchema.sourceFileName
                           ? `Source file: ${posSchema.sourceFileName}`
-                          : "No sample POS export uploaded yet."}
+                          : "No comparison-source sample uploaded yet."}
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {posSchema.extractedHeaders.length > 0 ? (
@@ -412,7 +434,7 @@ export function SchemaEditorModal({
                           ))
                         ) : (
                           <div className="text-sm text-[var(--muted)]">
-                            Upload a representative POS export CSV to extract the native headers automatically.
+                            Upload a representative comparison-source CSV to extract the native vendor headers automatically.
                           </div>
                         )}
                       </div>
@@ -436,29 +458,77 @@ export function SchemaEditorModal({
                           }))
                         }
                         className="mt-3 min-h-[180px] w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm outline-none"
-                        placeholder="date&#10;batch_date&#10;pos_merchant_sales"
+                        placeholder="Settled date&#10;Payments&#10;Payout"
                       />
                     </div>
                   </div>
 
                   <div className="mt-4 rounded-2xl border border-[var(--border)] bg-white p-4">
-                    <div className="font-medium">Sealed header set preview</div>
+                    <div className="font-medium">App field to vendor header binding</div>
                     <div className="mt-1 text-sm text-[var(--muted)]">
-                      This is the POS header set that will be stored in the governed workspace and reused by Upload Data validation.
+                      The app fields on the left are what the certification engine expects. Bind each one to the real header from the uploaded vendor file.
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {posSchema.validatedHeaders.length > 0 ? (
-                        posSchema.validatedHeaders.map((header) => (
-                          <span
-                            key={`validated:${header}`}
-                            className="rounded-full border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] px-3 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--success)]"
+                    <div className="mt-4 space-y-3">
+                      {comparisonFieldDefinitions.map((definition) => {
+                        const binding = comparisonBindings.find((item) => item.appField === definition.field);
+                        return (
+                          <div
+                            key={definition.field}
+                            className="grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 md:grid-cols-[1fr_1fr]"
                           >
-                            {header}
-                          </span>
+                            <div>
+                              <div className="font-medium text-[var(--text)]">{definition.field}</div>
+                              <div className="mt-1 text-xs text-[var(--muted)]">
+                                {definition.required ? "Required app field" : "Optional app field"} · {definition.description}
+                              </div>
+                            </div>
+                            <select
+                              value={binding?.sourceHeader ?? ""}
+                              onChange={(event) =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  posSchema: updatePosSchemaBinding(
+                                    current.posSchema ?? createEmptyPosSchema(),
+                                    definition.field,
+                                    event.target.value,
+                                  ),
+                                }))
+                              }
+                              className="rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm outline-none"
+                            >
+                              <option value="">Select vendor header...</option>
+                              {comparisonCandidateHeaders.map((header) => (
+                                <option key={`${definition.field}:${header}`} value={header}>
+                                  {header}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 rounded-2xl border border-[var(--border)] bg-white p-4">
+                    <div className="font-medium">Sealed binding preview</div>
+                    <div className="mt-1 text-sm text-[var(--muted)]">
+                      This is the governed comparison-source binding set that will be stored in the workspace and reused by Upload Data validation.
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {comparisonBindings.length > 0 ? (
+                        comparisonBindings.map((binding) => (
+                          <div
+                            key={`validated:${binding.appField}`}
+                            className="grid gap-2 rounded-xl border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] px-4 py-3 text-sm md:grid-cols-[1fr_auto_1fr]"
+                          >
+                            <span className="font-medium text-[var(--text)]">{binding.appField}</span>
+                            <span className="font-[family-name:var(--font-mono)] text-[var(--success)]">→</span>
+                            <span className="font-[family-name:var(--font-mono)] text-[var(--success)]">{binding.sourceHeader}</span>
+                          </div>
                         ))
                       ) : (
                         <div className="text-sm text-[var(--muted)]">
-                          No validated POS headers are staged for seal yet.
+                          No validated comparison-source bindings are staged for seal yet.
                         </div>
                       )}
                     </div>
@@ -709,8 +779,8 @@ export function SchemaEditorModal({
                       </div>
                       <div className="mt-2 text-sm leading-6 text-[var(--muted)]">
                         {headerAttentionNeeded
-                          ? "A header review is recommended before sealing. Open the POS Source Schema tab to update the governed header set when source columns no longer match."
-                          : "The governed POS header set is already validated for this workspace."}
+                          ? "A comparison-source review is recommended before sealing. Open the Comparison Source Schema tab to update the governed header bindings when vendor columns no longer match."
+                          : "The governed comparison-source header bindings are already validated for this workspace."}
                       </div>
                     </div>
                     <Badge tone={headerAttentionNeeded ? "warning" : "success"}>
@@ -724,7 +794,7 @@ export function SchemaEditorModal({
                       disabled={!canEditGovernanceHeaders}
                       className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#D8D9E0] disabled:text-[#7C8092]"
                     >
-                      Change Governed Headers
+                      Change Governed Mapping
                     </button>
                     {!canEditGovernanceHeaders ? (
                       <div className="text-sm leading-6 text-[var(--muted)]">
@@ -732,7 +802,7 @@ export function SchemaEditorModal({
                       </div>
                     ) : (
                       <div className="text-sm leading-6 text-[var(--muted)]">
-                        Updating headers here changes the governed POS schema used by Upload Data validation after the workspace is resealed.
+                        Updating bindings here changes the governed comparison-source schema used by Upload Data validation after the workspace is resealed.
                       </div>
                     )}
                   </div>
@@ -824,7 +894,7 @@ export function SchemaEditorModal({
                 <div>Verified fields: {verifiedFields.length}</div>
                 <div>Review items: {reviewFields.length}</div>
                 <div>Missing fields: {missingFields.length}</div>
-                <div>POS schema: {posSchemaValidated ? `${posSchema.validatedHeaders.length} validated headers` : "Not validated yet"}</div>
+                <div>Comparison schema: {posSchemaValidated ? `${posSchema.validatedHeaders.length} validated headers` : "Not validated yet"}</div>
                 <div>Upload gate: {uploadReady ? "Release Ready" : "Blocked / Review"}</div>
               </div>
             </div>
@@ -833,7 +903,7 @@ export function SchemaEditorModal({
               <div className="font-medium">Verification flow</div>
               <div className="mt-3 space-y-2 text-sm text-[var(--muted)]">
                 <div>1. Confirm native headers against canonical fields.</div>
-                <div>2. Validate the governed POS sample header set.</div>
+                <div>2. Validate the governed comparison-source header bindings.</div>
                 <div>3. Verify contract terms against the signed agreement.</div>
                 <div>4. Resolve all amber or missing controls.</div>
                 <div>5. Seal only when the workspace reflects evidentiary truth.</div>
@@ -873,6 +943,7 @@ export function SchemaEditorModal({
 function createEmptyPosSchema(): PosSchemaGovernance {
   return {
     extractedHeaders: [],
+    headerBindings: [],
     manualHeaders: [],
     status: "missing",
     validatedHeaders: [],
@@ -929,6 +1000,150 @@ function splitCsvLine(line: string) {
 
 function normalizeHeaderToken(value: string) {
   return value.trim().replace(/^"+|"+$/g, "").trim();
+}
+
+function normalizeSchemaVendorKey(vendor: string) {
+  return vendor.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function uniqueHeaders(headers: string[]) {
+  return [...new Set(headers.map((header) => header.trim()).filter(Boolean))];
+}
+
+function getComparisonFieldDefinitions(module: "M01" | "M02", vendorKey: string): ComparisonFieldDefinition[] {
+  const headers = getExpectedHeaders(module === "M01" ? "m01-pos" : "m02-pos", vendorKey);
+  return headers.map((field) => ({
+    description: getComparisonFieldDescription(field),
+    field,
+    required: true,
+  }));
+}
+
+function getComparisonFieldDescription(field: string) {
+  const descriptions: Record<string, string> = {
+    date: "Primary comparison date used by the engine for source-period alignment.",
+    batch_date: "Settlement or batch-close date used for lag and payout timing checks.",
+    pos_merchant_sales: "Gross merchant sales amount from the comparison-source file.",
+    platform_net_sales: "Net payout or settled amount from the comparison-source file.",
+    transaction_fees: "Fees shown on the comparison-source file for payout reconciliation.",
+    processing_fees: "Processor fee column when the vendor exposes it separately.",
+    other_merchant_fees: "Additional withholdings or other merchant fees.",
+    calculated_recovery_variance: "Vendor-side variance field if the source exposes one.",
+    bank_deposit_amount: "Deposit amount expected to tie to bank evidence.",
+    card_type: "Card or tender type where exposed by the source.",
+    entry_method: "Entry method or transaction routing metadata.",
+    interchange_rate_applied: "Applied interchange or effective rate field if exposed.",
+    transaction_count: "Transaction volume field used by the engine.",
+    notes: "Free-form notes or status column when the source includes it.",
+    channel: "Sales channel from the source file.",
+    pos_net_sales: "Net sales amount at channel level.",
+    commission_variance: "Variance field between expected and observed channel economics.",
+    gross_sales: "Gross sales total from the comparison-source file.",
+    tenders: "Tender summary field or category field from the comparison-source file.",
+    transactions: "Transaction-count field from the comparison-source file.",
+  };
+
+  return descriptions[field] ?? "Governed comparison-source field used by upload validation and certification.";
+}
+
+function getSourceHeaderAliases(field: string) {
+  const aliases: Record<string, string[]> = {
+    date: ["date", "settled date", "settled_date"],
+    batch_date: ["batch_date", "sales period end", "sales_period_end", "batch date"],
+    pos_merchant_sales: ["pos_merchant_sales", "payments", "gross_sales", "gross sales"],
+    platform_net_sales: ["platform_net_sales", "payout", "net_payout", "deposit", "bank_deposit_amount"],
+    transaction_fees: ["transaction_fees", "fees", "processing_fees", "fee_amount"],
+    processing_fees: ["processing_fees", "fees"],
+    other_merchant_fees: ["other_merchant_fees", "withholdings", "external"],
+    calculated_recovery_variance: ["calculated_recovery_variance", "external", "status"],
+    bank_deposit_amount: ["bank_deposit_amount", "payout", "deposit", "deposit_amount"],
+    card_type: ["card_type", "type"],
+    entry_method: ["entry_method", "type"],
+    interchange_rate_applied: ["interchange_rate_applied", "rate"],
+    transaction_count: ["transaction_count", "# txns", "#_txns", "transactions"],
+    notes: ["notes", "status", "external ref. id", "external_ref._id"],
+    channel: ["channel", "type"],
+    pos_net_sales: ["pos_net_sales", "payout", "payments"],
+    commission_variance: ["commission_variance", "fees", "external"],
+    gross_sales: ["gross_sales", "payments"],
+    tenders: ["tenders", "type", "name"],
+    transactions: ["transactions", "# txns", "#_txns", "transaction_count"],
+  };
+
+  return aliases[field] ?? [field];
+}
+
+function inferHeaderBindings(definitions: ComparisonFieldDefinition[], availableHeaders: string[]) {
+  const availableByNormalized = new Map(
+    availableHeaders.map((header) => [header.trim().toLowerCase(), header]),
+  );
+
+  return definitions
+    .map((definition) => {
+      const sourceHeader = getSourceHeaderAliases(definition.field)
+        .map((alias) => availableByNormalized.get(alias.trim().toLowerCase()) ?? "")
+        .find(Boolean);
+
+      if (!sourceHeader) {
+        return null;
+      }
+
+      return {
+        appField: definition.field,
+        sourceHeader,
+      };
+    })
+    .filter(Boolean) as NonNullable<PosSchemaGovernance["headerBindings"]>;
+}
+
+function mergeHeaderBindings(
+  definitions: ComparisonFieldDefinition[],
+  savedBindings: NonNullable<PosSchemaGovernance["headerBindings"]>,
+  availableHeaders: string[],
+) {
+  const inferred = inferHeaderBindings(definitions, availableHeaders);
+  const savedByField = new Map((savedBindings ?? []).map((binding) => [binding.appField, binding]));
+
+  return definitions
+    .map((definition) => {
+      const saved = savedByField.get(definition.field);
+      if (saved?.sourceHeader) {
+        return saved;
+      }
+      return inferred.find((binding) => binding.appField === definition.field) ?? null;
+    })
+    .filter(Boolean) as NonNullable<PosSchemaGovernance["headerBindings"]>;
+}
+
+function updatePosSchemaBinding(posSchema: PosSchemaGovernance, appField: string, sourceHeader: string): PosSchemaGovernance {
+  const nextBindings = [
+    ...(posSchema.headerBindings ?? []).filter((binding) => binding.appField !== appField),
+    ...(sourceHeader ? [{ appField, sourceHeader }] : []),
+  ];
+
+  return {
+    ...posSchema,
+    headerBindings: nextBindings,
+    status: nextBindings.length > 0 ? "draft" : "missing",
+    validatedHeaders: nextBindings.map((binding) => binding.sourceHeader),
+  };
+}
+
+function commitHeaderBindings(
+  posSchema: PosSchemaGovernance,
+  definitions: ComparisonFieldDefinition[],
+  availableHeaders: string[],
+  preferredHeaders: string[],
+): PosSchemaGovernance {
+  const candidateHeaders = uniqueHeaders(preferredHeaders.length > 0 ? preferredHeaders : availableHeaders);
+  const inferredBindings = inferHeaderBindings(definitions, candidateHeaders);
+
+  return {
+    ...posSchema,
+    headerBindings: inferredBindings,
+    status: inferredBindings.length > 0 ? "validated" : "missing",
+    validatedHeaders: inferredBindings.map((binding) => binding.sourceHeader),
+  };
 }
 
 function TabHeading({

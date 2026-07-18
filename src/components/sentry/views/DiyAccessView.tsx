@@ -578,13 +578,57 @@ function RegistryWorkspacePanel({
               className="grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 md:grid-cols-[1fr_1fr_140px]"
             >
               <div>
-                <div className="font-medium text-[var(--text)]">Engine field: {field.canonical}</div>
+                <div className="flex items-center gap-2 font-medium text-[var(--text)]">
+                  <span>Engine field: {field.canonical}</span>
+                  <HelpTip
+                    title={`Column Mapping · ${field.canonical}`}
+                    sections={[
+                      {
+                        label: "What It Is",
+                        text: getCanonicalFieldMeaning(field.canonical, workspace.module),
+                      },
+                      {
+                        label: "How It Is Used",
+                        text: getCanonicalFieldUsage(field.canonical, workspace.module),
+                      },
+                      {
+                        label: "Source Requirement",
+                        text: field.required
+                          ? `This is a required engine field. The certification flow cannot rely on this workspace unless a trustworthy source header is bound to it.`
+                          : `This is an optional engine field. It improves audit precision and narrative support when present, but it is not always required to release the module.`,
+                      },
+                    ]}
+                    footerLabel="Document"
+                    footerValue={sourceDocumentLabel}
+                  />
+                </div>
                 <div className="mt-1 text-xs text-[var(--muted)]">
                   {field.required ? "Required canonical field" : "Optional canonical field"}
                 </div>
               </div>
               <div>
-                <div className="font-[family-name:var(--font-mono)] text-sm text-[var(--info)]">{field.source}</div>
+                <div className="flex items-center gap-2 font-[family-name:var(--font-mono)] text-sm text-[var(--info)]">
+                  <span>{field.source}</span>
+                  <HelpTip
+                    title={`Mapped Source Header · ${field.source}`}
+                    sections={[
+                      {
+                        label: "What It Is",
+                        text: `This is the exact native column header currently bound from the ${sourceDocumentLabel}. It is the raw header name the uploader/parser matched in the vendor file.`,
+                      },
+                      {
+                        label: "How It Is Used",
+                        text: `During certification, rows from this native source header are normalized into ${field.canonical} so the engine can apply sealed contract terms, trust gates, and deterministic rule checks.`,
+                      },
+                      {
+                        label: "When To Change It",
+                        text: `Change this mapping only if the vendor export changed header names or the wrong source column was bound. Any mapping change should be reviewed before the next seal.`,
+                      },
+                    ]}
+                    footerLabel="Bound To"
+                    footerValue={field.canonical}
+                  />
+                </div>
                 <div className="mt-1 text-xs text-[var(--muted)]">
                   Mapped native column header from the {sourceDocumentLabel}
                 </div>
@@ -766,6 +810,70 @@ function downloadWorkspaceTemplate(workspace: SchemaWorkspace) {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+function getCanonicalFieldMeaning(field: string, module: "M01" | "M02") {
+  const normalized = field.toLowerCase();
+
+  if (normalized === "gross_sales_amount") {
+    return module === "M01"
+      ? "The total card sales base the M01 engine uses to reconstruct what processor fees should have been under the sealed merchant agreement."
+      : "The total sales base used to compare the DSP settlement or payout against POS-side merchant sales for M02 reconciliation.";
+  }
+
+  if (normalized === "processor_markup_bps") {
+    return "The processor markup expressed in basis points. One basis point equals 0.01%, so this field captures the variable markup rate charged on processed volume.";
+  }
+
+  if (normalized === "network_fee_amount") {
+    return "The network or pass-through fee amount surfaced by the source export. It helps separate true processor markup from card-network or third-party pass-through charges.";
+  }
+
+  if (normalized.includes("date")) {
+    return "A source timing field used to determine certification period coverage, settlement timing, freshness, and reconciliation windows.";
+  }
+
+  if (normalized.includes("fee")) {
+    return "A source fee field used to reconstruct observed charges and compare them to the sealed contract truth for recovery testing.";
+  }
+
+  if (normalized.includes("sales") || normalized.includes("amount")) {
+    return "A monetary source field used as part of the governed transaction or payout basis for deterministic certification calculations.";
+  }
+
+  return "A canonical engine field in FohBoh's governed schema. It represents a normalized value the certification engine needs from the uploaded source document.";
+}
+
+function getCanonicalFieldUsage(field: string, module: "M01" | "M02") {
+  const normalized = field.toLowerCase();
+
+  if (normalized === "gross_sales_amount") {
+    return module === "M01"
+      ? "The engine uses this field to calculate expected processor fees from sealed contract terms, compare them to observed statement charges, and quantify recoverable M01 variance."
+      : "The engine uses this field to tie DSP-side data back to POS-side revenue, detect basis mismatches, and score cross-system reconciliation for M02.";
+  }
+
+  if (normalized === "processor_markup_bps") {
+    return "The engine uses this mapped value when checking markup drift, pricing compliance, and fee legitimacy against the sealed contract configuration.";
+  }
+
+  if (normalized === "network_fee_amount") {
+    return "The engine uses this value to distinguish legitimate network/pass-through charges from recoverable processor overcharges and to strengthen audit traceability.";
+  }
+
+  if (normalized.includes("date")) {
+    return "The engine uses this field to verify that the upload belongs to the correct certification period and to detect timing gaps or delayed settlement behavior.";
+  }
+
+  if (normalized.includes("fee")) {
+    return "The engine uses this field in fee reconstruction, variance testing, and rule checks that determine whether charges are legitimate, excessive, duplicated, or unsupported.";
+  }
+
+  if (normalized.includes("sales") || normalized.includes("amount")) {
+    return "The engine uses this value as a monetary input in trust-gate scoring, reconciliation checks, and deterministic rule evaluation for the active module.";
+  }
+
+  return "The engine normalizes this field from the native upload into a governed value, then reuses it in trust gates, reconciliation logic, and deterministic certification rules.";
 }
 
 function buildWorkspaceIdentity(workspace: SchemaWorkspace) {

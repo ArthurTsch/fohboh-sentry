@@ -165,6 +165,23 @@ function normalizeStringArray(value: unknown) {
   return value.map((entry) => String(entry).trim()).filter(Boolean);
 }
 
+function normalizeHeaderBindings(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      const source = extractObject(entry);
+      if (!source) return null;
+      const appField = typeof source.appField === "string" ? source.appField.trim() : "";
+      const sourceHeader = typeof source.sourceHeader === "string" ? source.sourceHeader.trim() : "";
+      if (!appField || !sourceHeader) return null;
+      return {
+        appField,
+        sourceHeader,
+      };
+    })
+    .filter(Boolean) as NonNullable<PosSchemaGovernance["headerBindings"]>;
+}
+
 function normalizePosSchemaGovernance(value: unknown): PosSchemaGovernance {
   const source = extractObject(value);
 
@@ -174,6 +191,7 @@ function normalizePosSchemaGovernance(value: unknown): PosSchemaGovernance {
         ? source.extractedAt
         : undefined,
     extractedHeaders: normalizeStringArray(source?.extractedHeaders),
+    headerBindings: normalizeHeaderBindings(source?.headerBindings),
     manualHeaders: normalizeStringArray(source?.manualHeaders),
     sourceFileName:
       source && typeof source.sourceFileName === "string" && source.sourceFileName.trim().length > 0
@@ -190,6 +208,7 @@ function normalizePosSchemaGovernance(value: unknown): PosSchemaGovernance {
 function createEmptyPosSchemaGovernance(): PosSchemaGovernance {
   return {
     extractedHeaders: [],
+    headerBindings: [],
     manualHeaders: [],
     status: "missing",
     validatedHeaders: [],

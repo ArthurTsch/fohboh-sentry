@@ -87,5 +87,6 @@ export async function getScopedPersistedCaar(session: SessionState, caarExternal
   return {
     caar,
     location,
+    restaurantId: report.restaurant_id ?? null,
   };
 }

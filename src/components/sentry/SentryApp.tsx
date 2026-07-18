@@ -1687,9 +1687,9 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
                 : `${payload.vendor ?? "selected"} settlement source file`;
           const workflow = workflowByLocation[payload.locationId];
           setCertificationBlocker({
-            blockers: [payload.error],
-            description:
-              "This workspace cannot be sealed yet. Open DIY Access, upload the missing governed document from the POS Source Schema or Contract Config workflow, then return here and click Seal Contract Config again.",
+              blockers: [payload.error],
+              description:
+                "This workspace cannot be sealed yet. Open DIY Access, upload the missing governed document from the Comparison Source Schema or Contract Config workflow, then return here and click Seal Contract Config again.",
             eyebrow: "Workspace Sealing Blocked",
             locationId: payload.locationId,
             locationName: payload.locationName,

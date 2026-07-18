@@ -36,6 +36,137 @@ function formatVarianceDisplay(cents: bigint | number | null | undefined) {
   return formatCentsToCurrency(numeric);
 }
 
+function parseCitationSamples(value: unknown) {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "samples" in value
+  ) {
+    const samples = (value as { samples?: unknown }).samples;
+    return Array.isArray(samples)
+      ? samples.filter(
+          (entry): entry is Record<string, unknown> =>
+            Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+        )
+      : [];
+  }
+
+  return Array.isArray(value)
+    ? value.filter(
+        (entry): entry is Record<string, unknown> =>
+          Boolean(entry) && typeof entry === "object" && !Array.isArray(entry),
+      )
+    : [];
+}
+
+function normalizeCitationSampleValue(value: unknown): string | number | boolean | null {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function normalizeCitationSamples(value: unknown) {
+  return parseCitationSamples(value).map((entry) =>
+    Object.fromEntries(
+      Object.entries(entry).map(([key, sampleValue]) => [key, normalizeCitationSampleValue(sampleValue)]),
+    ),
+  );
+}
+
+function sampleSignalsProblem(sample: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(sample)) {
+    if (typeof value === "number" && key.endsWith("_score") && value < 85) {
+      return true;
+    }
+
+    if (
+      (key === "high_variance_flag" || key === "duplicate_detected") &&
+      value === true
+    ) {
+      return true;
+    }
+
+    if (
+      (key === "source_hash" || key === "pos_hash") &&
+      value === false
+    ) {
+      return true;
+    }
+
+    if (key === "contract_fields" && typeof value === "number" && value < 3) {
+      return true;
+    }
+
+    if (typeof value === "string") {
+      const normalized = value.toLowerCase();
+      if (
+        [
+          "no parse failure blocked",
+          "no blocking unmapped",
+          "no blocking ",
+          "no duplicate events were detected",
+          "validation passed",
+          "was not rejected",
+          "did not prevent normalization",
+          "no negative-value normalization flags",
+          "advanced into deterministic certification",
+          "completed and produced governed metrics",
+          "has been applied to the governed source artifact",
+        ].some((pattern) => normalized.includes(pattern))
+      ) {
+        continue;
+      }
+
+      if (
+        [
+          "blocked",
+          "below the",
+          "failed",
+          "incomplete",
+          "insufficient",
+          "missing",
+          "outside final tolerance",
+          "penalty remains",
+          "remains active",
+          "remains below",
+          "remains blocked",
+          "stale",
+        ].some((pattern) => normalized.includes(pattern))
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function isProblemRuleCitation(row: {
+  fired_count: number;
+  rule_id: string;
+  rule_version: string;
+  sample_evidence: unknown;
+  variance_cents: bigint;
+}) {
+  if (row.fired_count <= 0) {
+    return false;
+  }
+
+  if (Number(row.variance_cents) !== 0) {
+    return true;
+  }
+
+  return parseCitationSamples(row.sample_evidence).some(sampleSignalsProblem);
+}
+
 function getArtifactLabel(moduleId: "M01" | "M02", artifactKey: string) {
   const normalized = artifactKey.toLowerCase();
   if (normalized.endsWith("processor")) return "Processor Source Statement";
@@ -184,7 +315,8 @@ function buildRuleCitationSummaries(
     firedCount: row.fired_count,
     ruleId: row.rule_id,
     ruleVersion: row.rule_version,
-    sampleEvidenceCount: Array.isArray(row.sample_evidence) ? row.sample_evidence.length : 0,
+    sampleEvidence: normalizeCitationSamples(row.sample_evidence),
+    sampleEvidenceCount: parseCitationSamples(row.sample_evidence).length,
     varianceDisplay: formatVarianceDisplay(row.variance_cents),
   }));
 }
@@ -463,13 +595,21 @@ export async function GET(request: Request) {
       ruleCitationsByRun.set(citation.cert_run_id, current);
     }
 
+    const lineageBackedReports = reports.filter((report) => persistedCaarById.has(report.caar_id));
+    const orphanCount = reports.length - lineageBackedReports.length;
+    if (orphanCount > 0) {
+      console.warn(`Filtered ${orphanCount} orphan CAAR report row(s) without persisted lineage.`);
+    }
+
     return NextResponse.json({
-      reports: reports.map((report) => {
+      reports: lineageBackedReports.map((report) => {
         const persistedCaar = persistedCaarById.get(report.caar_id) ?? null;
         const moduleId =
           persistedCaar?.module === "M01" || persistedCaar?.module === "M02" ? persistedCaar.module : null;
         const certRun = persistedCaar ? certRunById.get(persistedCaar.cert_run_id) ?? null : null;
         const citations = certRun ? ruleCitationsByRun.get(certRun.id) ?? [] : [];
+        const problemCitations = citations.filter(isProblemRuleCitation);
+        const passedCitations = citations.filter((citation) => !isProblemRuleCitation(citation));
         const uploadLocationId = report.restaurant_id ?? null;
         const moduleUploads =
           uploadLocationId && moduleId
@@ -517,14 +657,15 @@ export async function GET(request: Request) {
                 status: report.status,
                 trustScore: report.trust_score,
               },
-              ruleCitationCount: citations.length,
+              ruleCitationCount: problemCitations.length,
               ruleSetVersion: certRun?.rule_set_version ?? null,
               sealedAt: persistedCaar?.sealed_at?.toISOString() ?? null,
               sealedContract,
               sealedSchema,
             }),
             module: moduleId,
-            ruleCitations: buildRuleCitationSummaries(citations),
+            passedRuleCitations: buildRuleCitationSummaries(passedCitations),
+            ruleCitations: buildRuleCitationSummaries(problemCitations),
             ruleSetVersion: certRun?.rule_set_version ?? null,
             sealedAt: persistedCaar?.sealed_at?.toISOString() ?? null,
           },
@@ -548,100 +689,14 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const session = await requireManagerSession();
-    if (session.role === "Viewer") {
-      return NextResponse.json({ error: "This account cannot save CAAR reports." }, { status: 403 });
-    }
-
-    const body = (await request.json()) as {
-      accountId?: string | null;
-      managerId?: number | null;
-      record?: CaarRecord | null;
-    };
-
-    if (!body.record) {
-      return NextResponse.json({ error: "CAAR record is required." }, { status: 400 });
-    }
-
-    const record = body.record;
-    const restaurant =
-      record.locationId.startsWith("LOC-DB-")
-        ? await prisma.restaurants.findFirst({
-            where: {
-              id: Number(record.locationId.replace("LOC-DB-", "")) || -1,
-            },
-            select: {
-              created_by: true,
-              id: true,
-            },
-          })
-        : await prisma.restaurants.findFirst({
-            where: {
-              OR: [
-                { unit_id: record.locationId },
-                { store_id: record.locationId },
-              ],
-            },
-            select: {
-              created_by: true,
-              id: true,
-            },
-          });
-
-    const saved = await prisma.caar_reports.upsert({
-      where: {
-        caar_id: record.id,
+    await requireManagerSession();
+    return NextResponse.json(
+      {
+        error:
+          "Legacy direct CAAR saves are disabled. CAAR records must be created through the certification pipeline so persisted lineage is guaranteed.",
       },
-      update: {
-        account_id:
-          session.role === "WGS Manager"
-            ? body.accountId ?? record.accountId ?? null
-            : session.accountId ?? body.accountId ?? record.accountId ?? null,
-        amount_cents: parseCurrencyToCents(record.amount),
-        amount_display: record.amount,
-        created_by: typeof session.managerId === "number" ? session.managerId : (restaurant?.created_by ?? null),
-        dimensions: record.dimensions,
-        exhibits: record.exhibits,
-        findings: record.findings,
-        location_id: record.locationId,
-        location_name: record.locationName,
-        narrative: record.narrative,
-        period: record.period,
-        restaurant_id: restaurant?.id ?? null,
-        status: record.status,
-        trust_score: record.trustScore,
-        updated_at: new Date(),
-      },
-      create: {
-        account_id:
-          session.role === "WGS Manager"
-            ? body.accountId ?? record.accountId ?? null
-            : session.accountId ?? body.accountId ?? record.accountId ?? null,
-        amount_cents: parseCurrencyToCents(record.amount),
-        amount_display: record.amount,
-        caar_id: record.id,
-        created_by: typeof session.managerId === "number" ? session.managerId : (restaurant?.created_by ?? null),
-        dimensions: record.dimensions,
-        exhibits: record.exhibits,
-        findings: record.findings,
-        location_id: record.locationId,
-        location_name: record.locationName,
-        narrative: record.narrative,
-        period: record.period,
-        restaurant_id: restaurant?.id ?? null,
-        status: record.status,
-        trust_score: record.trustScore,
-      },
-      select: {
-        caar_id: true,
-        id: true,
-      },
-    });
-
-    return NextResponse.json({
-      ok: true,
-      report: saved,
-    });
+      { status: 410 },
+    );
   } catch (error) {
     const authResponse = getAuthErrorResponse(error);
     if (authResponse) {

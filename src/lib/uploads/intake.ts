@@ -259,6 +259,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "channel_sales",
       "pos_merchant_sales",
       "pos_net_sales",
+      "payments",
     );
     metrics.feeAmount += read(
       "fee_amount",
@@ -272,14 +273,15 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "slice_commission",
       "transaction_fees",
       "commission_variance",
+      "fees",
     );
     metrics.interchangeFeeAmount += read("interchange_fee", "interchange_amount");
-    metrics.serviceFeeAmount += read("service_fee", "processing_fees", "transaction_fees");
-    metrics.otherFeeAmount += read("other_merchant_fees", "assessment");
+    metrics.serviceFeeAmount += read("service_fee", "processing_fees", "transaction_fees", "fees");
+    metrics.otherFeeAmount += read("other_merchant_fees", "assessment", "withholdings", "external");
     metrics.marketingFeeAmount += read("marketing_fee", "marketing_contribution");
     metrics.taxRemittedAmount += read("tax_remitted", "tax");
     metrics.tipAmount += read("tip");
-    metrics.adjustmentAmount += read("adjustment_amount", "adjustment");
+    metrics.adjustmentAmount += read("adjustment_amount", "adjustment", "external");
     metrics.errorChargeAmount += read("error_charge");
     metrics.deliveryFeeAmount += read("delivery_fee", "consumer_fee");
     metrics.payoutAmount += read(
@@ -287,6 +289,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "net_payout",
       "platform_net_sales",
       "bank_deposit_amount",
+      "payout",
     );
     metrics.depositAmount += read(
       "bank_deposit_amount",
@@ -294,6 +297,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "deposit_amount",
       "net_payout",
       "payout_amount",
+      "payout",
     );
 
     const commissionRateApplied = read("commission_rate_applied", "dd_commission_rate");
@@ -318,6 +322,9 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     const orderStatus = orderStatusIndex >= 0 ? String(row[orderStatusIndex] ?? "").toLowerCase() : "";
     if (orderStatus.includes("refund")) metrics.refundCount += 1;
     if (orderStatus.includes("void")) metrics.voidCount += 1;
+
+    if (read("refunds") > 0) metrics.refundCount += 1;
+    if (read("chargebacks") > 0) metrics.chargebackCount += 1;
 
     const disputeIndex = valueFor("dispute_id");
     if (disputeIndex >= 0 && String(row[disputeIndex] ?? "").trim()) {
@@ -396,7 +403,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
   }
 
   metrics.transactionCount =
-    round(sumColumn(headers, rows, ["transaction_count"])) || rows.length;
+    round(sumColumn(headers, rows, ["transaction_count", "#_txns", "# txns"])) || rows.length;
   metrics.orderCount = round(sumColumn(headers, rows, ["order_count", "menu_item_count"])) || rows.length;
 
   if (artifactKey.includes("bank")) {

@@ -50,6 +50,7 @@ export async function POST(request: Request) {
         caarExternalId: caarId,
         customerId: scoped.location.customer_id,
         locationId: scoped.location.id,
+        uploadLocationId: scoped.restaurantId ?? null,
       }),
     );
 
@@ -67,6 +68,7 @@ export async function POST(request: Request) {
     if (error instanceof Error) {
       if (
         error.message === "CAAR not found." ||
+        error.message.includes("Claim pack generation is blocked until") ||
         error.message.includes("court-admissible")
       ) {
         return NextResponse.json({ error: error.message }, { status: 409 });

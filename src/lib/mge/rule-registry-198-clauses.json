@@ -1,0 +1,1192 @@
+{
+  "rules": [
+    {
+      "ruleId": "R001",
+      "ruleName": "\u2013R198 TOTAL 198 Full deterministic certification rule set \u2014 DCLS v2.0 Trust Gate Weight Reference \u2014 MQ6 Scoring Gate Name Weight TG01 Data Completeness 8% TG02 Source Authenticity 6% TG03 Vendor Profile Currency 5% TG04 POS Reconciliation 12% TG05 Duplicate Absence 7% TG06 Period Coverage 8% TG07 Fee Legitimacy Engine 25% \u2190 DOMINANT TG08 KPI Formula Currency 9% TG09 Audit Trail Integrity 8% TG10 Narrative Hash Match 6% TG11 CAAR Eligibility 6% TOTAL MQ6 Trust Score (0 \u2013100) 100% Module",
+      "ifCondition": "",
+      "thenAction": ""
+    },
+    {
+      "ruleId": "R002",
+      "ruleName": "Vendor Type Classification",
+      "ifCondition": "source file matches known vendor format signature",
+      "thenAction": "assign vendor_type label (DSP / Processor / POS / Contract / Profile) INGEST"
+    },
+    {
+      "ruleId": "R003",
+      "ruleName": "Parser Version Selection",
+      "ifCondition": "vendor_type is assigned",
+      "thenAction": "select active parser version from Parser Registry for that vendor_type INGEST"
+    },
+    {
+      "ruleId": "R004",
+      "ruleName": "Parse Execution",
+      "ifCondition": "active parser version is confirmed",
+      "thenAction": "execute parsing; extract structured field array from raw file INGEST"
+    },
+    {
+      "ruleId": "R005",
+      "ruleName": "Parse Failure Handling",
+      "ifCondition": "parse result contains critical field extraction errors > threshold",
+      "thenAction": "flag PARSE_FAIL; halt pipeline; log error; notify operator INGEST"
+    },
+    {
+      "ruleId": "R006",
+      "ruleName": "Column Mapping Application",
+      "ifCondition": "parse succeeds; vendor_type is known",
+      "thenAction": "apply column mapping ruleset to translate vendor labels to canonical field names INGEST"
+    },
+    {
+      "ruleId": "R007",
+      "ruleName": "Unmapped Column Detection",
+      "ifCondition": "any extracted column has no mapping rule match",
+      "thenAction": "flag UNMAPPED_COLUMN; log for remediation; continue with mapped fields INGEST"
+    },
+    {
+      "ruleId": "R008",
+      "ruleName": "Canonical Schema Validation",
+      "ifCondition": "column mapping is complete",
+      "thenAction": "validate record against canonical schema: field types, required fields, date formats INGEST"
+    },
+    {
+      "ruleId": "R009",
+      "ruleName": "Schema Rejection Rule",
+      "ifCondition": "record fails canonical schema on required field",
+      "thenAction": "mark SCHEMA_REJECT; exclude from certification pipeline; log violation detail INGEST"
+    },
+    {
+      "ruleId": "R010",
+      "ruleName": "Duplicate Detection",
+      "ifCondition": "record ID + period combination already exists in certified record store",
+      "thenAction": "flag DUPLICATE; reject ingestion; log with original record reference INGEST"
+    },
+    {
+      "ruleId": "R011",
+      "ruleName": "Date Range Validation",
+      "ifCondition": "transaction date falls outside acceptable ingestion window (configurable per merchant)",
+      "thenAction": "flag DATE_OUT_OF_RANGE; quarantine record; notify operator INGEST"
+    },
+    {
+      "ruleId": "R012",
+      "ruleName": "Null Amount Rejection",
+      "ifCondition": "any monetary amount field is null or zero where non -zero is required",
+      "thenAction": "flag NULL_AMOUNT; reject record from certification pipeline INGEST"
+    },
+    {
+      "ruleId": "R013",
+      "ruleName": "Negative Amount Flag",
+      "ifCondition": "monetary amount field contains unexpected negative value outside credit/refund category",
+      "thenAction": "flag SIGN_ANOMALY; route to manual review queue INGEST"
+    },
+    {
+      "ruleId": "R014",
+      "ruleName": "Vendor Profile Lookup",
+      "ifCondition": "ingestion record contains merchant_id",
+      "thenAction": "look up Vendor Profile record; attach merchant configuration to processing context INGEST"
+    },
+    {
+      "ruleId": "R015",
+      "ruleName": "Normalization Completion Log",
+      "ifCondition": "record passes all schema checks and vendor profile is attached",
+      "thenAction": "mark NORMALIZED; write canonical record to certified data pipeline; log to Audit Trail INGEST 40 rules covering DSP fee legitimacy, rate matching, error detection, and TG07 contribution Module"
+    },
+    {
+      "ruleId": "R016",
+      "ruleName": "\u2013R055 Delivery Fee Recovery (DFR) 40 DSP commission verification, rate contract matching, promotional rate validation, duplicate detection, multi -platform reconciliation, and fee legitimacy certification. TG07 -dominant rules. Highest commercial value spoke.",
+      "ifCondition": "",
+      "thenAction": ""
+    },
+    {
+      "ruleId": "R017",
+      "ruleName": "DSP Rate Contract Match",
+      "ifCondition": "applied commission rate \u2260 contracted rate for merchant on that DSP",
+      "thenAction": "flag RATE_VARIANCE; calculate variance = (applied_rate - contracted_rate) \u00d7 order_subtotal DFR / TG07"
+    },
+    {
+      "ruleId": "R018",
+      "ruleName": "Promotional Rate Validation",
+      "ifCondition": "transaction date falls within a contracted promotional rate period",
+      "thenAction": "verify promotional rate was applied; if standard rate applied, flag PROMO_RATE_MISS DFR / TG07"
+    },
+    {
+      "ruleId": "R019",
+      "ruleName": "Cancelled Order Credit Check",
+      "ifCondition": "order has cancellation flag AND driver was dispatched before cancellation",
+      "thenAction": "check for credit issuance; if no credit found within credit window, flag CREDIT_MISSING DFR / TG07"
+    },
+    {
+      "ruleId": "R020",
+      "ruleName": "Cancelled Pre - Dispatch Credit",
+      "ifCondition": "order has cancellation flag AND driver was NOT dispatched",
+      "thenAction": "verify no commission was charged; if commission present, flag COMMISSION_ON_CANCEL DFR / TG07"
+    },
+    {
+      "ruleId": "R021",
+      "ruleName": "POS Price Match",
+      "ifCondition": "DSP order item price \u2260 POS item price for same item at same location on same date",
+      "thenAction": "flag PRICE_MISMATCH; calculate variance = DSP_price - POS_price per item DFR / TG04"
+    },
+    {
+      "ruleId": "R022",
+      "ruleName": "Menu Update Lag Detection",
+      "ifCondition": "price mismatch occurs across \u2265 3 consecutive orders for same item post menu -update date",
+      "thenAction": "flag MENU_LAG_PATTERN; escalate to systematic variance classification DFR / TG04"
+    },
+    {
+      "ruleId": "R023",
+      "ruleName": "Duplicate Order Detection",
+      "ifCondition": "order_id appears in settlement statement more than once in same billing period",
+      "thenAction": "flag DUPLICATE_ORDER_CHARGE; calculate duplicated amount DFR / TG05"
+    },
+    {
+      "ruleId": "R024",
+      "ruleName": "Order Volume Reconciliation",
+      "ifCondition": "DSP -reported order count for period \u2260 POS -recorded DSP order count for same period",
+      "thenAction": "flag ORDER_COUNT_DISCREPANCY; calculate unmatched order count and estimated value DFR / TG04"
+    },
+    {
+      "ruleId": "R025",
+      "ruleName": "Settlement Timing Validation",
+      "ifCondition": "settlement date exceeds contracted settlement window (e.g., 7 days from order date)",
+      "thenAction": "flag LATE_SETTLEMENT; log for financial reconciliation; not a fee certification trigger DFR / TG06"
+    },
+    {
+      "ruleId": "R026",
+      "ruleName": "DoorDash Rate Tier Validation",
+      "ifCondition": "merchant is on DD Standard and order_value > $X threshold for tier escalation",
+      "thenAction": "verify correct tier was applied; flag TIER_ERROR if wrong rate applied DFR / TG07"
+    },
+    {
+      "ruleId": "R027",
+      "ruleName": "Uber Eats Rate Tier Validation",
+      "ifCondition": "merchant has Uber Eats Lite plan and full commission was charged",
+      "thenAction": "flag UE_PLAN_MISMATCH; calculate variance DFR / TG07"
+    },
+    {
+      "ruleId": "R028",
+      "ruleName": "Grubhub Allocation Check",
+      "ifCondition": "Grubhub marketing fee allocation does not match contract exhibit",
+      "thenAction": "flag GH_ALLOCATION_ERROR; calculate variance from contract DFR / TG07"
+    },
+    {
+      "ruleId": "R029",
+      "ruleName": "Instacart Pickup vs Delivery",
+      "ifCondition": "Instacart order type is pickup but delivery commission rate was applied",
+      "thenAction": "flag IC_TYPE_MISMATCH; calculate variance = delivery_rate - pickup_rate \u00d7 order_value DFR / TG07"
+    },
+    {
+      "ruleId": "R030",
+      "ruleName": "DSP Adjustment Credit Audit",
+      "ifCondition": "DSP statement contains a line - item adjustment credit",
+      "thenAction": "verify credit corresponds to a known dispute, return, or contractual adjustment; if unverified, flag UNEXPLAINED_CREDIT DFR / TG06"
+    },
+    {
+      "ruleId": "R031",
+      "ruleName": "Alcohol Commission Exclusion",
+      "ifCondition": "order contains alcohol items AND jurisdiction prohibits DSP commission on alcohol",
+      "thenAction": "verify alcohol subtotal was excluded from commission basis; flag if not DFR / TG07 Module"
+    },
+    {
+      "ruleId": "R032",
+      "ruleName": "Third -Party Delivery Mismatch",
+      "ifCondition": "order is fulfilled by third -party logistics but platform commission matches DSP -delivered rate",
+      "thenAction": "flag LOGISTICS_RATE_MISMATCH; correct rate should reflect contract for merchant -managed delivery DFR / TG07"
+    },
+    {
+      "ruleId": "R033",
+      "ruleName": "Minimum Order Guarantee Check",
+      "ifCondition": "order value falls below DSP minimum order threshold for commission application",
+      "thenAction": "verify correct minimum -order treatment per contract; flag deviation DFR / TG07"
+    },
+    {
+      "ruleId": "R034",
+      "ruleName": "Error Rate Threshold Trigger",
+      "ifCondition": "period DFR error count / total period orders > configurable error rate threshold (default 2%)",
+      "thenAction": "escalate to SYSTEMATIC_VARIANCE flag; override standard sampling; trigger full-period audit DFR / TG07"
+    },
+    {
+      "ruleId": "R035",
+      "ruleName": "DSP Fee Cap Compliance",
+      "ifCondition": "DSP commission on any single order exceeds contractual per -order fee cap",
+      "thenAction": "flag FEE_CAP_BREACH; calculate overcollection = applied_fee - cap_amount DFR / TG07"
+    },
+    {
+      "ruleId": "R036",
+      "ruleName": "Multi -Platform Reconciliation",
+      "ifCondition": "merchant operates on \u2265 2 DSPs and aggregate DSP order count < POS off -premise order count",
+      "thenAction": "flag UNACCOUNTED_ORDERS; calculate unmatched volume DFR / TG04"
+    },
+    {
+      "ruleId": "R037",
+      "ruleName": "Refund Recovery Verification",
+      "ifCondition": "customer refund was issued by DSP and commission was not offset",
+      "thenAction": "flag COMMISSION_ON_REFUND; calculate unrecovered commission amount DFR / TG07"
+    },
+    {
+      "ruleId": "R038",
+      "ruleName": "Marketing Charge Segregation",
+      "ifCondition": "DSP marketing/advertising charge appears commingled with commission on statement",
+      "thenAction": "flag CHARGE_COMMINGLING; separate and reclassify for independent certification DFR / TG06"
+    },
+    {
+      "ruleId": "R039",
+      "ruleName": "DSP Currency Variance",
+      "ifCondition": "order was transacted in non -USD currency and conversion rate applied \u2260 contract rate",
+      "thenAction": "flag CURRENCY_CONVERSION_VARIANCE; calculate delta at certified exchange rate DFR / TG07"
+    },
+    {
+      "ruleId": "R040",
+      "ruleName": "New Location Onboarding Rate",
+      "ifCondition": "location has < 90 days of history on DSP and non -standard onboarding rate was charged",
+      "thenAction": "verify onboarding rate matches signed agreement exhibit; flag if no exhibit found DFR / TG07"
+    },
+    {
+      "ruleId": "R041",
+      "ruleName": "Subscription Plan Commission",
+      "ifCondition": "merchant is on a DSP subscription plan (flat monthly fee model)",
+      "thenAction": "verify per -order commission was NOT charged in addition; flag DOUBLE_CHARGE if found DFR / TG07"
+    },
+    {
+      "ruleId": "R042",
+      "ruleName": "Peak -Hour Surcharge Check",
+      "ifCondition": "DSP applied peak -hour or demand -surge surcharge to commission basis",
+      "thenAction": "verify surcharge is contractually permitted; flag UNAPPROVED_SURCHARGE if not in contract DFR / TG07"
+    },
+    {
+      "ruleId": "R043",
+      "ruleName": "Bundled Order Split Fee",
+      "ifCondition": "DSP bundled multiple merchant orders for delivery and applied full commission to each",
+      "thenAction": "verify bundling discount was applied per contract; flag if not DFR / TG07"
+    },
+    {
+      "ruleId": "R044",
+      "ruleName": "DSP Fraud Chargeback Fee",
+      "ifCondition": "fraud chargeback fee was applied without corresponding fraud determination record",
+      "thenAction": "flag UNSUPPORTED_CHARGEBACK; calculate unverified fee amount DFR / TG06"
+    },
+    {
+      "ruleId": "R045",
+      "ruleName": "DFR Certification Threshold",
+      "ifCondition": "total DFR certified variance for period > minimum certification amount (configurable)",
+      "thenAction": "proceed to Trust Score contribution; generate DFR certification record DFR / TG07"
+    },
+    {
+      "ruleId": "R046",
+      "ruleName": "DFR Below Threshold",
+      "ifCondition": "total DFR certified variance for period \u2264 minimum certification amount",
+      "thenAction": "log VARIANCE_BELOW_THRESHOLD; no certification action; retain record for cumulative tracking DFR / TG07 Module"
+    },
+    {
+      "ruleId": "R047",
+      "ruleName": "DFR Period Completeness",
+      "ifCondition": "statement coverage period has gaps > configurable tolerance (e.g., 2 days)",
+      "thenAction": "flag INCOMPLETE_PERIOD; reduce Trust Score contribution proportionally for TG07 DFR / TG01"
+    },
+    {
+      "ruleId": "R048",
+      "ruleName": "DFR Prior Period Carryover",
+      "ifCondition": "certified variance from prior period was carried forward but not yet actioned",
+      "thenAction": "include carryover in current period cumulative; flag PENDING_RECOVERY DFR / TG06"
+    },
+    {
+      "ruleId": "R049",
+      "ruleName": "DFR Systematic Variance",
+      "ifCondition": "same error type appears in > 20% of orders in a period",
+      "thenAction": "escalate to SYSTEMATIC_DFR_VARIANCE; generate CAAR -eligible certification for systemic dispute DFR / TG07"
+    },
+    {
+      "ruleId": "R050",
+      "ruleName": "DFR Contextual Benchmark",
+      "ifCondition": "merchant's DFR error rate deviates > 2 standard deviations from segment benchmark",
+      "thenAction": "flag BENCHMARK_DEVIATION; include benchmark comparison in certification narrative DFR / TG07"
+    },
+    {
+      "ruleId": "R051",
+      "ruleName": "DFR Trust Score Contribution",
+      "ifCondition": "DFR module certification is complete",
+      "thenAction": "calculate TG07 score contribution: (certified_accuracy / total_reviewed) \u00d7 TG07 weight (25%) DFR / TG07"
+    },
+    {
+      "ruleId": "R052",
+      "ruleName": "DSP Contract Absence Flag",
+      "ifCondition": "no signed DSP contract or rate exhibit is found in Vendor Profile for active DSP",
+      "thenAction": "flag NO_CONTRACT; apply industry standard rate for benchmarking; reduce TG07 score DFR / TG07"
+    },
+    {
+      "ruleId": "R053",
+      "ruleName": "DFR Multi -Location Rollup",
+      "ifCondition": "merchant has multiple locations on same DSP account",
+      "thenAction": "aggregate variance by location and by DSP; flag locations with > 2\u00d7 system - average error rate DFR / TG07"
+    },
+    {
+      "ruleId": "R054",
+      "ruleName": "DFR Audit Trail Completion",
+      "ifCondition": "DFR certification record is finalized",
+      "thenAction": "write immutable audit entry: rule IDs triggered, variance amounts, evidence references, Trust Score impact DFR / AUDIT"
+    },
+    {
+      "ruleId": "R055",
+      "ruleName": "DFR Narrative Token Set",
+      "ifCondition": "DFR certification record is complete and Trust Score \u2265 Provisional (40)",
+      "thenAction": "assemble DFR token set for DCLS injection: {dfr_vendor}, {dfr_variance_total}, {dfr_rule_count}, {dfr_period} DFR / DCLS 40 rules covering processing fee certification, interchange validation, surcharge compliance, and TG07 contribution Module"
+    },
+    {
+      "ruleId": "R056",
+      "ruleName": "\u2013R095 Merchant Fee Recovery (MFR) 40 Interchange classification, SIC validation, non - contracted fee detection, surcharge compliance, markup audit, and processor error recovery. Full payment processing fee error taxonomy.",
+      "ifCondition": "",
+      "thenAction": ""
+    },
+    {
+      "ruleId": "R057",
+      "ruleName": "SIC Code Validation",
+      "ifCondition": "merchant SIC code on processor account \u2260 certified SIC code in Vendor Profile",
+      "thenAction": "flag SIC_MISMATCH; calculate interchange delta from correct vs. applied category MFR / TG07"
+    },
+    {
+      "ruleId": "R058",
+      "ruleName": "Effective Rate Benchmark",
+      "ifCondition": "merchant effective blended rate > contract maximum effective rate",
+      "thenAction": "flag RATE_CEILING_BREACH; calculate excess as (actual_rate - max_rate) \u00d7 card_volume MFR / TG07"
+    },
+    {
+      "ruleId": "R059",
+      "ruleName": "Non -Negotiated Fee Detection",
+      "ifCondition": "fee line item (gateway, statement, PCI, batch, minimum)",
+      "thenAction": "flag NON_CONTRACTED_FEE; record fee amount as certifiable variance MFR / TG07 Module has no corresponding contract exhibit entry"
+    },
+    {
+      "ruleId": "R060",
+      "ruleName": "Duplicate Transaction Charge",
+      "ifCondition": "transaction appears more than once in settlement batch with same auth code and amount",
+      "thenAction": "flag DUPLICATE_SETTLEMENT; calculate duplicated amount MFR / TG05"
+    },
+    {
+      "ruleId": "R061",
+      "ruleName": "Surcharge Rate Compliance",
+      "ifCondition": "card surcharge was applied at rate > Visa/MC/Amex network cap (4% or contract rate, whichever lower)",
+      "thenAction": "flag SURCHARGE_EXCESS; calculate excess = (applied_rate - max_rate) \u00d7 surcharged_volume MFR / TG07"
+    },
+    {
+      "ruleId": "R062",
+      "ruleName": "Surcharge Card Type Exclusion",
+      "ifCondition": "surcharge was applied to debit card transaction",
+      "thenAction": "flag DEBIT_SURCHARGE_VIOLATION; debit surcharges are prohibited; calculate full surcharge as variance MFR / TG07"
+    },
+    {
+      "ruleId": "R063",
+      "ruleName": "Batch Settlement Timing",
+      "ifCondition": "batch was settled > 2 business days after authorization date (standard) or > contract window",
+      "thenAction": "flag LATE_BATCH; calculate qualified interchange rate delta from downgrade due to late settlement MFR / TG06"
+    },
+    {
+      "ruleId": "R064",
+      "ruleName": "Card Brand Fee Audit",
+      "ifCondition": "Visa/MC/Amex assessment fee rate \u2260 published quarterly network assessment rate",
+      "thenAction": "flag ASSESSMENT_FEE_ERROR; calculate variance at correct published rate MFR / TG07"
+    },
+    {
+      "ruleId": "R065",
+      "ruleName": "Address Verification Downgrade",
+      "ifCondition": "AVS (address verification) was not used on card -not-present transaction resulting in interchange downgrade",
+      "thenAction": "flag AVS_DOWNGRADE; calculate interchange delta MFR / TG07"
+    },
+    {
+      "ruleId": "R066",
+      "ruleName": "CVV Non -Compliance Downgrade",
+      "ifCondition": "CVV2/CVC verification was not performed on ecommerce/phone order resulting in interchange downgrade",
+      "thenAction": "flag CVV_DOWNGRADE; calculate interchange delta MFR / TG07"
+    },
+    {
+      "ruleId": "R067",
+      "ruleName": "Partial Auth Handling",
+      "ifCondition": "partial authorization was declined and full re -authorization resulted in duplicate capture",
+      "thenAction": "flag PARTIAL_AUTH_DOUBLE_CAPTURE; calculate duplicated amount MFR / TG05"
+    },
+    {
+      "ruleId": "R068",
+      "ruleName": "Monthly Minimum Fee Check",
+      "ifCondition": "processor charged a monthly minimum processing fee when actual processing fees met or exceeded the minimum",
+      "thenAction": "flag UNWARRANTED_MINIMUM; record minimum fee amount as variance MFR / TG07"
+    },
+    {
+      "ruleId": "R069",
+      "ruleName": "Early Termination Fee Check",
+      "ifCondition": "early termination fee was assessed and merchant has not triggered any early termination clause",
+      "thenAction": "flag ETF_WITHOUT_CAUSE; flag for legal review; record full ETF as potential variance MFR / TG07"
+    },
+    {
+      "ruleId": "R070",
+      "ruleName": "Tiered Pricing Validation",
+      "ifCondition": "processor uses tiered pricing (Qualified/Mid -Qualified/Non - Qualified) and transactions are over -routed to Non -Qualified",
+      "thenAction": "flag TIER_OVER_ROUTING; calculate variance vs. Interchange -Plus equivalent MFR / TG07"
+    },
+    {
+      "ruleId": "R071",
+      "ruleName": "Rewards Card Surcharge",
+      "ifCondition": "rewards card surcharge is applied in jurisdiction where surcharging is prohibited by state law",
+      "thenAction": "flag ILLEGAL_SURCHARGE; record full surcharge amount as variance; flag for legal review MFR / TG07"
+    },
+    {
+      "ruleId": "R072",
+      "ruleName": "Refund Processing Fee",
+      "ifCondition": "processing fee was assessed on a refund/credit transaction (not permitted in standard contracts)",
+      "thenAction": "flag REFUND_FEE; record fee as variance MFR / TG07 Module"
+    },
+    {
+      "ruleId": "R073",
+      "ruleName": "Chargeback Fee Audit",
+      "ifCondition": "chargeback fee exceeds contractual per -chargeback fee cap",
+      "thenAction": "flag CHARGEBACK_FEE_EXCESS; calculate variance = (applied_fee - contract_cap) \u00d7 chargeback_count MFR / TG07"
+    },
+    {
+      "ruleId": "R074",
+      "ruleName": "Retrieval Fee Audit",
+      "ifCondition": "retrieval/representment fee exceeds contract rate",
+      "thenAction": "flag RETRIEVAL_FEE_ERROR; calculate variance MFR / TG07"
+    },
+    {
+      "ruleId": "R075",
+      "ruleName": "PCI Non -Compliance Fee",
+      "ifCondition": "PCI non -compliance fee was assessed and merchant has current PCI compliance certification on file",
+      "thenAction": "flag WRONGFUL_PCI_FEE; record full fee as variance MFR / TG07"
+    },
+    {
+      "ruleId": "R076",
+      "ruleName": "Interchange Rate Table Match",
+      "ifCondition": "applied interchange rate for card type + entry method + merchant category does not match current Visa/MC rate table",
+      "thenAction": "flag INTERCHANGE_MISMATCH; calculate at certified rate MFR / TG07"
+    },
+    {
+      "ruleId": "R077",
+      "ruleName": "Amex OptBlue Rate Check",
+      "ifCondition": "merchant is on Amex OptBlue and applied Amex rate \u2260 Interchange Plus structure under OptBlue agreement",
+      "thenAction": "flag OPTBLUE_RATE_ERROR; calculate variance MFR / TG07"
+    },
+    {
+      "ruleId": "R078",
+      "ruleName": "Processor Markup Audit",
+      "ifCondition": "processor markup (basis points over interchange) exceeds contracted markup level",
+      "thenAction": "flag MARKUP_EXCESS; calculate variance = (applied_markup - contracted_markup) \u00d7 card_volume MFR / TG07"
+    },
+    {
+      "ruleId": "R079",
+      "ruleName": "Volume Discount Verification",
+      "ifCondition": "merchant processing volume exceeds contracted volume discount threshold and discount was not applied",
+      "thenAction": "flag MISSED_VOLUME_DISCOUNT; calculate discount amount owed MFR / TG07"
+    },
+    {
+      "ruleId": "R080",
+      "ruleName": "Equipment Rental Fee Check",
+      "ifCondition": "equipment rental fee was charged for equipment no longer in use at location",
+      "thenAction": "flag GHOST_RENTAL; record rental fee as variance MFR / TG07"
+    },
+    {
+      "ruleId": "R081",
+      "ruleName": "International Transaction Fee",
+      "ifCondition": "international card transaction fee exceeds contract rate or network cap",
+      "thenAction": "flag INTL_FEE_EXCESS; calculate variance MFR / TG07"
+    },
+    {
+      "ruleId": "R082",
+      "ruleName": "Currency Conversion Fee",
+      "ifCondition": "dynamic currency conversion was applied without customer consent indication in transaction record",
+      "thenAction": "flag UNAUTHORIZED_DCC; record conversion fee as variance MFR / TG07"
+    },
+    {
+      "ruleId": "R083",
+      "ruleName": "Statement Fee Audit",
+      "ifCondition": "monthly statement fee exceeds contracted rate (or was charged despite electronic statements being opted in)",
+      "thenAction": "flag STATEMENT_FEE_ERROR; record excess or full fee as variance MFR / TG07"
+    },
+    {
+      "ruleId": "R084",
+      "ruleName": "Annual Fee Validation",
+      "ifCondition": "annual account maintenance fee was charged without corresponding contract exhibit",
+      "thenAction": "flag UNCONTRACTED_ANNUAL_FEE; record full amount as variance MFR / TG07"
+    },
+    {
+      "ruleId": "R085",
+      "ruleName": "Rate Increase Notification",
+      "ifCondition": "processing rate was increased without required 30 -day advance notice per contract",
+      "thenAction": "flag RATE_CHANGE_NO_NOTICE; calculate variance from unauthorized rate change date forward MFR / TG07"
+    },
+    {
+      "ruleId": "R086",
+      "ruleName": "Processor Error Reversal",
+      "ifCondition": "processor issued a fee reversal in current period for prior period error",
+      "thenAction": "verify reversal amount matches originally flagged variance; flag PARTIAL_REVERSAL if shortfall exists MFR / TG06 Module"
+    },
+    {
+      "ruleId": "R087",
+      "ruleName": "MFR Error Rate Threshold",
+      "ifCondition": "period MFR fee error total / total processing fees > configurable threshold (default 3%)",
+      "thenAction": "escalate to SYSTEMATIC_MFR_VARIANCE; trigger full statement audit MFR / TG07"
+    },
+    {
+      "ruleId": "R088",
+      "ruleName": "MFR Below Threshold",
+      "ifCondition": "total MFR certified variance for period \u2264 minimum certification amount",
+      "thenAction": "log VARIANCE_BELOW_THRESHOLD; retain for cumulative tracking MFR / TG07"
+    },
+    {
+      "ruleId": "R089",
+      "ruleName": "MFR Certification Threshold",
+      "ifCondition": "total MFR certified variance > minimum certification amount",
+      "thenAction": "proceed to Trust Score contribution; generate MFR certification record MFR / TG07"
+    },
+    {
+      "ruleId": "R090",
+      "ruleName": "MFR Contract Absence Flag",
+      "ifCondition": "no signed processor agreement or rate schedule in Vendor Profile",
+      "thenAction": "flag NO_PROCESSOR_CONTRACT; apply published network rates for benchmarking; reduce TG07 score MFR / TG07"
+    },
+    {
+      "ruleId": "R091",
+      "ruleName": "MFR Systematic Variance",
+      "ifCondition": "same MFR error type appears across \u2265 3 consecutive billing periods",
+      "thenAction": "escalate to SYSTEMATIC_MFR; generate CAAR -eligible certification for chronic overcharge MFR / TG07"
+    },
+    {
+      "ruleId": "R092",
+      "ruleName": "MFR Period Completeness",
+      "ifCondition": "merchant statement coverage has gaps > configurable tolerance",
+      "thenAction": "flag INCOMPLETE_MFR_PERIOD; reduce TG07 score contribution proportionally MFR / TG01"
+    },
+    {
+      "ruleId": "R093",
+      "ruleName": "MFR Trust Score Contribution",
+      "ifCondition": "MFR certification is complete",
+      "thenAction": "calculate TG07 score contribution from MFR component: (certified_accuracy / total_reviewed) \u00d7 MFR weight within TG07 MFR / TG07"
+    },
+    {
+      "ruleId": "R094",
+      "ruleName": "MFR Audit Trail Completion",
+      "ifCondition": "MFR certification record is finalized",
+      "thenAction": "write immutable audit entry: rule IDs triggered, variance amounts, evidence references, Trust Score impact MFR / AUDIT"
+    },
+    {
+      "ruleId": "R095",
+      "ruleName": "MFR Narrative Token Set",
+      "ifCondition": "MFR certification is complete and Trust Score \u2265 Provisional (40)",
+      "thenAction": "assemble MFR token set for DCLS injection: {mfr_processor}, {mfr_variance_total}, {mfr_rule_count}, {mfr_period} MFR / DCLS 20 rules covering franchisee remittance certification, POS -to-royalty reconciliation, and leakage detection Module"
+    },
+    {
+      "ruleId": "R096",
+      "ruleName": "\u2013R115 Royalty / Spoke 3 20 Franchisee remittance certification, POS -to-royalty reconciliation, self -reporting discrepancy detection, marketing fund calculation, and franchise agreement validation.",
+      "ifCondition": "",
+      "thenAction": ""
+    },
+    {
+      "ruleId": "R097",
+      "ruleName": "Gross Sales Calculation",
+      "ifCondition": "POS transaction -level data is available for period",
+      "thenAction": "calculate certified gross sales = sum of all qualifying POS transactions for the period ROYALTY / TG04"
+    },
+    {
+      "ruleId": "R098",
+      "ruleName": "Sales Exclusion Validation",
+      "ifCondition": "sales record contains line items eligible for royalty exclusion (e.g., gift card redemptions, tax, bottle deposits)",
+      "thenAction": "remove exclusions per FDD definition; certify adjusted gross sales basis ROYALTY / TG04"
+    },
+    {
+      "ruleId": "R099",
+      "ruleName": "Royalty Fee Calculation",
+      "ifCondition": "certified gross sales is established",
+      "thenAction": "calculate required royalty = certified_gross_sales \u00d7 royalty_rate; compare to reported remittance ROYALTY / TG07 Module"
+    },
+    {
+      "ruleId": "R100",
+      "ruleName": "Royalty Variance Detection",
+      "ifCondition": "calculated required royalty \u2260 reported remittance \u00b1 tolerance",
+      "thenAction": "flag ROYALTY_VARIANCE; calculate delta = required_royalty - reported_remittance ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R101",
+      "ruleName": "Marketing Fund Calculation",
+      "ifCondition": "certified gross sales is established",
+      "thenAction": "calculate required marketing fund = certified_gross_sales \u00d7 marketing_fund_rate; compare to remittance ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R102",
+      "ruleName": "Marketing Fund Variance",
+      "ifCondition": "calculated marketing fund \u2260 reported marketing remittance \u00b1 tolerance",
+      "thenAction": "flag MKTG_FUND_VARIANCE; calculate delta ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R103",
+      "ruleName": "Self-Reporting Discrepancy",
+      "ifCondition": "franchisee -reported gross sales \u2260 POS-certified gross sales",
+      "thenAction": "flag SELF_REPORT_DISCREPANCY; certified POS value takes precedence for certification ROYALTY / TG04"
+    },
+    {
+      "ruleId": "R104",
+      "ruleName": "Underreporting Pattern",
+      "ifCondition": "same franchisee shows self - report discrepancy in \u2265 3 of last 12 periods",
+      "thenAction": "escalate to CHRONIC_UNDERREPORT; generate CAAR - eligible royalty certification ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R105",
+      "ruleName": "Royalty Rate Period Check",
+      "ifCondition": "royalty rate in Vendor Profile has an effective date and a prior rate exists",
+      "thenAction": "apply correct rate for each sub - period; flag RATE_PERIOD_ERROR if uniform rate applied across rate change date ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R106",
+      "ruleName": "Franchise Agreement Absence",
+      "ifCondition": "no signed franchise agreement in Vendor Profile for franchisee",
+      "thenAction": "flag NO_FA_ON_FILE; certification proceeds using industry -standard rate; reduce Trust Score TG07 ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R107",
+      "ruleName": "New Franchisee Grace Period",
+      "ifCondition": "franchisee onboarding date is within grace period defined in franchise agreement",
+      "thenAction": "verify grace period rate was applied; flag if full rate charged during grace period ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R108",
+      "ruleName": "Multi -Concept Allocation",
+      "ifCondition": "franchise location operates multiple brand concepts with separate royalty rates",
+      "thenAction": "verify sales allocation and royalty calculation is correctly split by concept ROYALTY / TG04"
+    },
+    {
+      "ruleId": "R109",
+      "ruleName": "Transfer Fee Audit",
+      "ifCondition": "franchise transfer occurred in period and transfer fee was assessed",
+      "thenAction": "verify transfer fee matches franchise agreement schedule; flag deviation ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R110",
+      "ruleName": "Royalty Waiver Verification",
+      "ifCondition": "royalty waiver was applied by franchisor",
+      "thenAction": "verify waiver is documented in Vendor Profile with authorization record; flag UNDOCUMENTED_WAIVER if not ROYALTY / TG06"
+    },
+    {
+      "ruleId": "R111",
+      "ruleName": "Royalty Below Threshold",
+      "ifCondition": "total royalty variance for period \u2264 minimum certification amount",
+      "thenAction": "log VARIANCE_BELOW_THRESHOLD; retain for cumulative tracking ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R112",
+      "ruleName": "Royalty Certification Trigger",
+      "ifCondition": "total royalty variance > minimum certification amount",
+      "thenAction": "generate royalty certification record; contribute to Trust Score ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R113",
+      "ruleName": "Royalty Trust Score Contribution",
+      "ifCondition": "royalty certification is complete",
+      "thenAction": "calculate TG07 score contribution from royalty component ROYALTY / TG07"
+    },
+    {
+      "ruleId": "R114",
+      "ruleName": "Royalty Audit Trail",
+      "ifCondition": "royalty certification record is finalized",
+      "thenAction": "write immutable audit entry with rule IDs, variance amounts, certified sales basis, franchisee ID ROYALTY / AUDIT"
+    },
+    {
+      "ruleId": "R115",
+      "ruleName": "Royalty Narrative Token Set",
+      "ifCondition": "royalty certification complete and Trust Score \u2265 Provisional",
+      "thenAction": "assemble royalty token set: {franchisee_id}, {certified_sales}, {variance_amount}, {royalty_period} ROYALTY / DCLS 20 rules executing the 11 Trust Gates with pass/partial/fail scoring logic Module"
+    },
+    {
+      "ruleId": "R116",
+      "ruleName": "\u2013R135 Trust Gate Evaluation 20 11 Trust Gates (TG01 \u2013TG11) with pass/fail/partial scoring rules. TG07 (Fee Legitimacy Engine) carries 25% of total Trust Score weight. Each gate has 1 \u20133 evaluation rules.",
+      "ifCondition": "",
+      "thenAction": ""
+    },
+    {
+      "ruleId": "R117",
+      "ruleName": "TG01 \u2014 POS Data Presence",
+      "ifCondition": "POS transaction data is absent for period",
+      "thenAction": "TG01 score \u2264 50%; flag POS_DATA_MISSING; downgrade certification eligibility TG01 (8%)"
+    },
+    {
+      "ruleId": "R118",
+      "ruleName": "TG02 \u2014 Source Authenticity",
+      "ifCondition": "source file metadata indicates file was not received directly from integration (manual upload with no provenance)",
+      "thenAction": "TG02 = PARTIAL; reduce Trust Score; add PROVENANCE_CAVEAT to output TG02 (6%)"
+    },
+    {
+      "ruleId": "R119",
+      "ruleName": "TG02 \u2014 File Integrity Hash",
+      "ifCondition": "source file has an integrity hash and hash does not match on re - verification",
+      "thenAction": "TG02 = FAIL; flag TAMPERED_SOURCE; halt certification; notify operator TG02 (6%)"
+    },
+    {
+      "ruleId": "R120",
+      "ruleName": "TG03 \u2014 Vendor Profile Current",
+      "ifCondition": "Vendor Profile was last updated > 180 days ago",
+      "thenAction": "TG03 = PARTIAL; reduce Trust Score; flag STALE_PROFILE TG03 (5%)"
+    },
+    {
+      "ruleId": "R121",
+      "ruleName": "TG03 \u2014 Contract Currency",
+      "ifCondition": "contract exhibits in Vendor Profile have expired effective date",
+      "thenAction": "TG03 = PARTIAL; flag EXPIRED_CONTRACT; certify against expired rates with notation TG03 (5%)"
+    },
+    {
+      "ruleId": "R122",
+      "ruleName": "TG04 \u2014 POS Reconciliation",
+      "ifCondition": "POS -certified order count reconciles to DSP order count within \u00b1 1%",
+      "thenAction": "TG04 = PASS; full weight contribution TG04 (12%)"
+    },
+    {
+      "ruleId": "R123",
+      "ruleName": "TG04 \u2014 POS Reconciliation Fail",
+      "ifCondition": "POS -to-DSP reconciliation gap > 5%",
+      "thenAction": "TG04 = FAIL; reduce Trust Score by TG04 weight; flag RECONCILIATION_GAP TG04 (12%)"
+    },
+    {
+      "ruleId": "R124",
+      "ruleName": "TG05 \u2014 Duplicate Absence",
+      "ifCondition": "no duplicate transactions detected in period",
+      "thenAction": "TG05 = PASS; full weight contribution to Trust Score TG05 (7%)"
+    },
+    {
+      "ruleId": "R125",
+      "ruleName": "TG05 \u2014 Duplicate Detected",
+      "ifCondition": "duplicate transactions detected",
+      "thenAction": "TG05 score reduced proportionally to duplicate rate; flag DUPLICATES_PRESENT TG05 (7%)"
+    },
+    {
+      "ruleId": "R126",
+      "ruleName": "TG06 \u2014 Period Coverage",
+      "ifCondition": "all source statements cover full certification period without gaps",
+      "thenAction": "TG06 = PASS; full weight contribution TG06 (8%)"
+    },
+    {
+      "ruleId": "R127",
+      "ruleName": "TG06 \u2014 Gap Penalty",
+      "ifCondition": "certification period has coverage gaps > 2 days",
+      "thenAction": "TG06 score = (covered_days / total_days) \u00d7 TG06 weight TG06 (8%)"
+    },
+    {
+      "ruleId": "R128",
+      "ruleName": "TG07 \u2014 Fee Legitimacy Score",
+      "ifCondition": "total certified fee variance < 0.5% of total fees reviewed",
+      "thenAction": "TG07 = PASS (full weight = 25%); no actionable variance TG07 (25%)"
+    },
+    {
+      "ruleId": "R129",
+      "ruleName": "TG07 \u2014 Fee Variance Grade",
+      "ifCondition": "certified fee variance is between 0.5% and 3% of fees reviewed",
+      "thenAction": "TG07 = PARTIAL PASS; score scaled by inverse of error rate \u00d7 25% TG07 (25%)"
+    },
+    {
+      "ruleId": "R130",
+      "ruleName": "TG07 \u2014 High Variance Flag",
+      "ifCondition": "certified fee variance > 5% of total fees reviewed",
+      "thenAction": "TG07 = ELEVATED; flag HIGH_FEE_VARIANCE; score reduced but CAAR still possible at TS \u2265 85 TG07 (25%)"
+    },
+    {
+      "ruleId": "R131",
+      "ruleName": "TG08 \u2014 KPI Formula Currency",
+      "ifCondition": "KPI formulas used were active in Vault for the full certification period",
+      "thenAction": "TG08 = PASS; full weight contribution TG08 (9%) Module"
+    },
+    {
+      "ruleId": "R132",
+      "ruleName": "TG08 \u2014 Mid-Period Formula Change",
+      "ifCondition": "KPI formula version changed during the certification period",
+      "thenAction": "TG08 = PARTIAL; split -period calculation required; flag FORMULA_VERSION_SPLIT TG08 (9%)"
+    },
+    {
+      "ruleId": "R133",
+      "ruleName": "TG09 \u2014 Audit Trail Integrity",
+      "ifCondition": "Audit Trail entries exist for all processing events and no gaps detected",
+      "thenAction": "TG09 = PASS; full weight contribution TG09 (8%)"
+    },
+    {
+      "ruleId": "R134",
+      "ruleName": "TG10 \u2014 Narrative Hash Match",
+      "ifCondition": "Narrative Hash stored in Audit Trail matches recomputed hash of final DCLS output",
+      "thenAction": "TG10 = PASS; document integrity confirmed TG10 (6%)"
+    },
+    {
+      "ruleId": "R135",
+      "ruleName": "TG11 \u2014 CAAR Eligibility",
+      "ifCondition": "all prior Trust Gates result in composite MQ6 Trust Score \u2265 85",
+      "thenAction": "TG11 = PASS; CAAR unlock condition met; proceed to CAAR generation eligibility check TG11 (6%) 10 rules for MQ6 scoring, certification zone assignment, and DCLS narrative production Module"
+    },
+    {
+      "ruleId": "R136",
+      "ruleName": "\u2013R145 Certification State & DCLS 10 MQ6 Trust Score calculation, five -zone assignment, certification record locking, DCLS template selection, token injection, and narrative hash generation.",
+      "ifCondition": "",
+      "thenAction": ""
+    },
+    {
+      "ruleId": "R137",
+      "ruleName": "Unverified Zone Assignment",
+      "ifCondition": "MQ6 Trust Score < 40",
+      "thenAction": "assign certification state = UNVERIFIED; no certified artifacts produced; generate data gap report CERT"
+    },
+    {
+      "ruleId": "R138",
+      "ruleName": "Provisional Zone Assignment",
+      "ifCondition": "MQ6 Trust Score \u2265 40 AND < 60",
+      "thenAction": "assign certification state = PROVISIONAL; limited certified artifacts produced; include limitations notice CERT"
+    },
+    {
+      "ruleId": "R139",
+      "ruleName": "Conditional Zone Assignment",
+      "ifCondition": "MQ6 Trust Score \u2265 60 AND < 80",
+      "thenAction": "assign certification state = CONDITIONAL; standard certified artifacts produced with condition notations CERT"
+    },
+    {
+      "ruleId": "R140",
+      "ruleName": "Validated Zone Assignment",
+      "ifCondition": "MQ6 Trust Score \u2265 80 AND < 85",
+      "thenAction": "assign certification state = VALIDATED; full certified artifacts produced; suitable for internal use and operator actions CERT"
+    },
+    {
+      "ruleId": "R141",
+      "ruleName": "Certified Zone Assignment",
+      "ifCondition": "MQ6 Trust Score \u2265 85",
+      "thenAction": "assign certification state = CERTIFIED; all artifacts unlocked including CAAR; FRE 803(6)/902(11)/1002 by architecture CERT"
+    },
+    {
+      "ruleId": "R142",
+      "ruleName": "Certification Record Lock",
+      "ifCondition": "certification state is assigned",
+      "thenAction": "lock certification record in KPI Vault; record is now immutable; compute record -level SHA -256 hash CERT"
+    },
+    {
+      "ruleId": "R143",
+      "ruleName": "DCLS Template Selection",
+      "ifCondition": "certification state and output_type are determined",
+      "thenAction": "Template Selector applies rule - based logic to select single approved template from Narrative Template Library CERT / DCLS"
+    },
+    {
+      "ruleId": "R144",
+      "ruleName": "Token Injection Execution",
+      "ifCondition": "template is selected",
+      "thenAction": "Token Injector reads each template token; retrieves corresponding certified CERT / DCLS Module value from Vault; performs substitution; validates type match"
+    },
+    {
+      "ruleId": "R145",
+      "ruleName": "Narrative Hash Generation",
+      "ifCondition": "token injection is complete and narrative text is finalized",
+      "thenAction": "compute SHA -256 hash of complete narrative string; attach hash to output artifact; log hash to Audit Trail CERT / DCLS (R146 \u2013R152) 7 rules governing CAAR generation, evidence packaging, and immutable audit trail completion Module"
+    },
+    {
+      "ruleId": "R146",
+      "ruleName": "\u2013R152 CAAR & Output Finalization 7 CAAR eligibility, evidence bundle assembly, attestation block generation, SHA -256 hash computation, Evidence ExportPack assembly, and Immutable Audit Trail finalization.",
+      "ifCondition": "",
+      "thenAction": ""
+    },
+    {
+      "ruleId": "R147",
+      "ruleName": "CAAR Template Selection",
+      "ifCondition": "CAAR eligibility is confirmed",
+      "thenAction": "select CAAR -specific template; include: full Trust Gate evaluation table, chain -of-custody log, certification attestation block CAAR"
+    },
+    {
+      "ruleId": "R148",
+      "ruleName": "CAAR Evidence Bundle",
+      "ifCondition": "CAAR is being generated",
+      "thenAction": "assemble evidence references: source file IDs, normalization record IDs, KPI formula version IDs, Trust Gate results, variance rule IDs triggered CAAR"
+    },
+    {
+      "ruleId": "R149",
+      "ruleName": "CAAR Attestation Block",
+      "ifCondition": "CAAR narrative and evidence bundle are assembled",
+      "thenAction": "generate certification attestation: certification date, Trust Score, active formula version, hash of KPI Vault state at time of certification CAAR"
+    },
+    {
+      "ruleId": "R150",
+      "ruleName": "CAAR Hash Computation",
+      "ifCondition": "CAAR full document is assembled including attestation",
+      "thenAction": "compute SHA -256 of complete CAAR document string; attach as CAAR integrity hash; log to Audit Trail CAAR"
+    },
+    {
+      "ruleId": "R151",
+      "ruleName": "Evidence ExportPack Assembly",
+      "ifCondition": "CAAR is requested AND operator selects Evidence ExportPack",
+      "thenAction": "assemble ZIP: source files, normalized records, certified calculation record, DCLS output, CAAR, Audit Trail extract, manifest CAAR / OUTPUT"
+    },
+    {
+      "ruleId": "R152",
+      "ruleName": "Immutable Audit Finalization",
+      "ifCondition": "all outputs (Certified UI, PDF, CAAR, ExportPack) are produced",
+      "thenAction": "write final audit log entry: output IDs, hashes, production timestamps, operator attribution; mark certification event COMPLETE AUDIT 13 rules executing the weekly batch pattern -analysis loop Loop B is the weekly batch counterpart to Loop A's daily/real -time execution. Where Loop A certifies a single period in isolation, Loop B reads locked certified records across rolling 13 -week windows to detect trends, vendor -behavior shifts, recurring erro r signatures, and patterns no single -period rule could see. Loop B never overwrites a Loop A certification; it produces supplemental findings that can re -trigger certification, escalate to systemic -dispute classification, and unlock pattern -based CAAR gene ration under R163 / R147. Module"
+    },
+    {
+      "ruleId": "R153",
+      "ruleName": "\u2013R165 Loop B Pattern Analysis & Anomaly Detection 13 Weekly batch pattern detection. Cross -period variance trends, vendor and merchant anomaly detection, recurring error signatures, new error type discovery, pattern -based CAAR eligibility.",
+      "ifCondition": "",
+      "thenAction": ""
+    },
+    {
+      "ruleId": "R154",
+      "ruleName": "Cross -Period Variance Trend",
+      "ifCondition": "certified variance for a single rule ID shows monotonic increase across \u2265 4 consecutive periods",
+      "thenAction": "flag VARIANCE_TREND_ASCENDING; record slope and confidence; promote to Loop B finding LOOP_B / TG07"
+    },
+    {
+      "ruleId": "R155",
+      "ruleName": "Vendor Behavior Anomaly Detection",
+      "ifCondition": "a vendor's fee composition deviates > 2 standard deviations from its own 13 -week rolling baseline",
+      "thenAction": "flag VENDOR_BEHAVIOR_SHIFT; identify changed fee categories; queue for operator review LOOP_B / TG07"
+    },
+    {
+      "ruleId": "R156",
+      "ruleName": "Merchant Cluster Benchmark Variance",
+      "ifCondition": "merchant's certified error rate falls outside the interquartile range of its cluster (concept \u00d7 geography \u00d7 volume tier)",
+      "thenAction": "flag CLUSTER_OUTLIER; attach benchmark comparison to next certification narrative LOOP_B / TG07"
+    },
+    {
+      "ruleId": "R157",
+      "ruleName": "Recurring Error Signature Detection",
+      "ifCondition": "identical IF -clause trigger pattern appears across \u2265 3 unrelated merchants on the same vendor",
+      "thenAction": "flag VENDOR_SYSTEMIC_PATTERN; elevate to vendor -level finding; CAAR - eligible at vendor scope LOOP_B / TG07"
+    },
+    {
+      "ruleId": "R158",
+      "ruleName": "New Error Type Discovery",
+      "ifCondition": "Loop B identifies a recurring data signature that no active rule (R001 \u2013 R152) matches",
+      "thenAction": "flag UNCLASSIFIED_PATTERN; create candidate rule entry in Rule Registry intake queue; do NOT auto -promote to active rule LOOP_B"
+    },
+    {
+      "ruleId": "R159",
+      "ruleName": "Loop B Re - Certification Trigger",
+      "ifCondition": "Loop B detects a pattern that materially changes a prior period's certified variance",
+      "thenAction": "flag RE_CERTIFY_REQUIRED for affected period; preserve original certification immutably; queue supplemental certification LOOP_B / CERT"
+    },
+    {
+      "ruleId": "R160",
+      "ruleName": "Pattern Confidence Score",
+      "ifCondition": "Loop B finding is generated",
+      "thenAction": "compute pattern confidence = (occurrence_count \u00d7 consistency_factor) / window_size; only findings \u2265 0.75 promote to certification impact LOOP_B"
+    },
+    {
+      "ruleId": "R161",
+      "ruleName": "Seasonal Pattern Adjustment",
+      "ifCondition": "detected variance trend correlates \u2265 0.80 with a known seasonal index for merchant segment",
+      "thenAction": "apply SEASONAL_ADJUSTMENT flag; do not escalate as anomaly; annotate certification narrative LOOP_B / TG06"
+    },
+    {
+      "ruleId": "R162",
+      "ruleName": "Cross -Vendor Pattern Correlation",
+      "ifCondition": "same merchant shows correlated variance trends across DFR, MFR, and Royalty modules",
+      "thenAction": "flag CROSS_MODULE_PATTERN; promote to executive -tier finding; include in next CAAR if Trust Score \u2265 85 LOOP_B / TG07"
+    },
+    {
+      "ruleId": "R163",
+      "ruleName": "Pattern -Based CAAR Eligibility",
+      "ifCondition": "Loop B finding meets confidence \u2265 0.85 AND merchant Trust Score \u2265 85 for affected periods",
+      "thenAction": "mark finding CAAR_ELIGIBLE_PATTERN; eligible for CAAR generation as systemic -dispute artifact under R147 LOOP_B / CAAR"
+    },
+    {
+      "ruleId": "R164",
+      "ruleName": "Loop B Audit Trail Write",
+      "ifCondition": "Loop B execution window closes",
+      "thenAction": "write immutable Loop B audit entry: findings list, confidence scores, affected merchants, baseline snapshot hash, execution duration LOOP_B / AUDIT"
+    },
+    {
+      "ruleId": "R165",
+      "ruleName": "Loop B Token Set Assembly",
+      "ifCondition": "Loop B finding is promoted to a certification or CAAR",
+      "thenAction": "assemble pattern token set for DCLS: {pattern_id}, {pattern_window}, {confidence_score}, {affected_periods}, {finding_class} LOOP_B / DCLS 10 rules reconciling DFR, MFR, and Royalty modules into a composite certification record The three recovery spokes (DFR, MFR, Royalty) certify independently, but a merchant's true variance and recovery posture only emerges when the modules are reconciled against each other \u2014 DSP order volume against card -present transaction volume, royalty gro ss-sales basis against POS channel splits, total certified variance against module -weighted Trust Score contribution. Section 9 produces the composite certification record that flows into CAAR (R148) when more than one module is active. Module"
+    },
+    {
+      "ruleId": "R166",
+      "ruleName": "DFR-MFR Order Volume Reconciliation",
+      "ifCondition": "same merchant has DFR -certified order volume and MFR -certified card -present volume for same period",
+      "thenAction": "reconcile total transaction count; flag XMOD_VOLUME_GAP if delta > configurable tolerance (default 1%) XMOD / TG04"
+    },
+    {
+      "ruleId": "R167",
+      "ruleName": "Royalty -DFR Sales Channel Reconciliation",
+      "ifCondition": "royalty certification used POS gross sales AND DFR certification used DSP -channel sales for same merchant + period",
+      "thenAction": "verify DSP channel \u2286 POS gross sales; flag CHANNEL_RECONCILIATION_GAP if DSP exceeds POS -recorded DSP channel XMOD / TG04"
+    },
+    {
+      "ruleId": "R168",
+      "ruleName": "Cross -Module Variance Aggregation",
+      "ifCondition": "DFR, MFR, and Royalty certifications all complete for same merchant + period",
+      "thenAction": "compute aggregate certified variance = sum across modules; record as merchant_period_total_variance XMOD / TG07"
+    },
+    {
+      "ruleId": "R169",
+      "ruleName": "Total Recovery Calculation",
+      "ifCondition": "cross -module aggregation is complete",
+      "thenAction": "compute total_recovery_eligible = aggregate certified variance \u00d7 recoverability factor by module; output to certification record XMOD / TG07"
+    },
+    {
+      "ruleId": "R170",
+      "ruleName": "Cross -Module Trust Score Roll -Up",
+      "ifCondition": "all active modules have produced Trust Score contributions",
+      "thenAction": "compute composite TG07 across modules using weighted average by reviewed -fee volume; flag MODULE_WEIGHT_IMBALANCE if any single module > 80% XMOD / TG07"
+    },
+    {
+      "ruleId": "R171",
+      "ruleName": "Module Coverage Completeness",
+      "ifCondition": "merchant is configured for \u2265 2 recovery modules but only 1 produced a certification record for period",
+      "thenAction": "flag MODULE_COVERAGE_GAP; reduce TG01 contribution proportionally; annotate certification with missing - module notice XMOD / TG01"
+    },
+    {
+      "ruleId": "R172",
+      "ruleName": "Cross -Module Conflict Resolution",
+      "ifCondition": "same underlying transaction appears in flag set of two or more modules with conflicting variance directions",
+      "thenAction": "flag XMOD_CONFLICT; halt aggregation for that transaction; route to manual reconciliation queue; do NOT certify until resolved XMOD"
+    },
+    {
+      "ruleId": "R173",
+      "ruleName": "Composite Certification Record",
+      "ifCondition": "cross -module aggregation, roll - up, and conflict resolution are complete",
+      "thenAction": "generate composite certification record in KPI Vault; lock immutably; compute composite SHA -256 hash XMOD / CERT"
+    },
+    {
+      "ruleId": "R174",
+      "ruleName": "Cross -Module Audit Trail",
+      "ifCondition": "composite certification record is finalized",
+      "thenAction": "write immutable audit entry: module record IDs, aggregation method, conflicts resolved, composite hash, contributing rule IDs XMOD / AUDIT"
+    },
+    {
+      "ruleId": "R175",
+      "ruleName": "Cross -Module Token Set",
+      "ifCondition": "composite certification record is complete and Trust Score \u2265 Provisional",
+      "thenAction": "assemble cross -module token set for DCLS: {xmod_total_variance}, {xmod_module_count}, {xmod_recovery_eligible}, {xmod_period} XMOD / DCLS MGE is deterministic, but humans still finalize certifications, file disputes, override flags, and track recoveries. Every operator action must be authenticated, authorized to scope, and recorded with operator attribution into the immutable audit trail. Ov errides above a configurable variance threshold require dual -control sign -off. Section 10 is the governance layer that makes operator activity legally defensible \u2014 the same rule discipline applied to data is applied to people. Module"
+    },
+    {
+      "ruleId": "R176",
+      "ruleName": "Operator Authentication",
+      "ifCondition": "an operator initiates any certification, override, or output action",
+      "thenAction": "verify operator identity via SSO + role token; reject and log if authentication fails or role does not authorize action OPS"
+    },
+    {
+      "ruleId": "R177",
+      "ruleName": "Certification Action Authorization",
+      "ifCondition": "operator requests certification finalization, CAAR generation, or ExportPack assembly",
+      "thenAction": "verify operator role includes required scope (CERTIFIER / SR_CERTIFIER); record role token in audit entry; reject if scope insufficient OPS / AUDIT"
+    },
+    {
+      "ruleId": "R178",
+      "ruleName": "Manual Review Queue Routing",
+      "ifCondition": "a record is flagged for manual review by any rule (e.g., R013, R030, R172)",
+      "thenAction": "route to Manual Review Queue with flag context, source rule ID, and recommended disposition; assign to qualified reviewer pool OPS"
+    },
+    {
+      "ruleId": "R179",
+      "ruleName": "Operator Override Logging",
+      "ifCondition": "operator manually overrides a deterministic rule outcome (e.g., dismisses a flag, accepts variance)",
+      "thenAction": "record OVERRIDE event with operator ID, original rule ID, overridden value, override justification text; require dual -control sign -off for variance \u2265 configurable threshold OPS / AUDIT"
+    },
+    {
+      "ruleId": "R180",
+      "ruleName": "Dispute Filing Trigger",
+      "ifCondition": "operator promotes a CAAR or composite certification to active dispute",
+      "thenAction": "create Dispute Record linked to certification record; capture counterparty, dispute basis, target recovery amount; mark certification as IN_DISPUTE OPS"
+    },
+    {
+      "ruleId": "R181",
+      "ruleName": "Recovery Action Tracking",
+      "ifCondition": "a dispute filed under R180 receives a counterparty response, settlement, or recovery payment",
+      "thenAction": "update Dispute Record with response type, recovery amount, recovery date; preserve original CAAR and certification immutably OPS / AUDIT"
+    },
+    {
+      "ruleId": "R182",
+      "ruleName": "Operator Attribution Recording",
+      "ifCondition": "any rule produces an audit entry from an operator -initiated action",
+      "thenAction": "attach operator_id, operator_role, action_timestamp, IP/session reference to the audit entry; never overwrite OPS / AUDIT"
+    },
+    {
+      "ruleId": "R183",
+      "ruleName": "Workflow State Transition",
+      "ifCondition": "a certification record changes state (e.g., DRAFT \u2192 CERTIFIED \u2192 IN_DISPUTE \u2192 RECOVERED)",
+      "thenAction": "record state transition with prior state, new state, trigger rule or operator, timestamp; reject any backward transition not explicitly authorized OPS"
+    },
+    {
+      "ruleId": "R184",
+      "ruleName": "Notification Dispatch",
+      "ifCondition": "a rule produces a flag class designated as operator -notifiable (e.g., R005, R119, R159, R172)",
+      "thenAction": "dispatch notification through configured channel; record dispatch event; do NOT block pipeline on notification failure OPS"
+    },
+    {
+      "ruleId": "R185",
+      "ruleName": "Operator Activity Audit Trail",
+      "ifCondition": "any operator session initiated against the platform",
+      "thenAction": "write session -level audit entry: operator_id, session_start, session_end, actions taken, records accessed; retain per retention policy OPS / AUDIT FRE 902(11) self -authentication requires more than a hash on the output \u2014 it requires that the system producing the output can attest to its own integrity. Section 11 runs continuous and scheduled self -checks: KPI Vault hash re -verification (R186), parser and rule version currency (R187, R188), formula registry validation (R189), audit -trail completeness scans (R190), system -clock drift (R191), hash -chain walks (R192), Loop A/B coordination (R195). The terminal rule, R198 Master System Certification, emits the MASTER_SYSTEM_HEALTHY attestation token that flows into the CAAR attestation block (R149) and is required for full self -authentication claim. Module"
+    },
+    {
+      "ruleId": "R186",
+      "ruleName": "KPI Vault Integrity Check",
+      "ifCondition": "scheduled Vault integrity job runs (daily)",
+      "thenAction": "re -compute SHA -256 of every locked certification record; compare to stored hash; flag VAULT_INTEGRITY_FAIL on any mismatch; halt new locks until resolved SYS / TG09"
+    },
+    {
+      "ruleId": "R187",
+      "ruleName": "Parser Registry Currency Check",
+      "ifCondition": "parser version is selected for a vendor (R003)",
+      "thenAction": "verify parser version is marked ACTIVE in Parser Registry and not flagged DEPRECATED; flag PARSER_STALE if deprecated; reduce TG02 contribution SYS / TG02"
+    },
+    {
+      "ruleId": "R188",
+      "ruleName": "Rule Registry Version Match",
+      "ifCondition": "a rule is executed during certification",
+      "thenAction": "verify rule version matches the locked DCLS version for the certification (default DCLS v2.0); flag RULE_VERSION_DRIFT if mismatch; halt certification SYS"
+    },
+    {
+      "ruleId": "R189",
+      "ruleName": "Formula Version Validation",
+      "ifCondition": "KPI formula is invoked during calculation",
+      "thenAction": "verify formula_id + formula_version exists in KPI Vault Formula Registry and is ACTIVE for the period; flag FORMULA_INVALID if not SYS / TG08"
+    },
+    {
+      "ruleId": "R190",
+      "ruleName": "Audit Trail Completeness Check",
+      "ifCondition": "scheduled Audit Trail completeness job runs (daily)",
+      "thenAction": "scan for gaps: certification records lacking matching audit entries, or audit entries lacking matching certification records; flag AUDIT_TRAIL_GAP per occurrence SYS / TG09"
+    },
+    {
+      "ruleId": "R191",
+      "ruleName": "System Clock Synchronization",
+      "ifCondition": "any certification, lock, or hash event records a timestamp",
+      "thenAction": "verify host clock is within \u00b1 1 second of trusted time source (NTP); flag CLOCK_DRIFT and halt timestamping if drift exceeds tolerance SYS"
+    },
+    {
+      "ruleId": "R192",
+      "ruleName": "Hash Chain Verification",
+      "ifCondition": "Audit Trail uses chained hashing (each entry references prior entry hash)",
+      "thenAction": "walk chain from genesis to head; flag CHAIN_BREAK on any broken link; preserve all entries; alert operator immediately SYS / TG09"
+    },
+    {
+      "ruleId": "R193",
+      "ruleName": "Certification Backlog Monitor",
+      "ifCondition": "unprocessed ingestion records exceed configurable backlog threshold (default 24h queue depth)",
+      "thenAction": "flag BACKLOG_EXCEEDED; do not block certifications in flight; raise operator alert and capacity diagnostic SYS"
+    },
+    {
+      "ruleId": "R194",
+      "ruleName": "Rule Execution Performance",
+      "ifCondition": "any rule execution exceeds configured latency budget for its module",
+      "thenAction": "log PERF_SLOW with rule ID, execution time, input record class; aggregate weekly for engineering review; do NOT block certification SYS"
+    },
+    {
+      "ruleId": "R195",
+      "ruleName": "Loop A / Loop B Coordination",
+      "ifCondition": "Loop A and Loop B execution windows would overlap on the same merchant",
+      "thenAction": "serialize execution: Loop A completes first; Loop B reads only locked records produced by Loop A; flag LOOP_COLLISION if attempted concurrent write SYS / LOOP_B Module"
+    },
+    {
+      "ruleId": "R196",
+      "ruleName": "System Health Trust Score Impact",
+      "ifCondition": "any active SYS rule produced a FAIL flag during the certification period (R186, R188, R191, R192)",
+      "thenAction": "reduce composite Trust Score by configured system -health penalty; never raise above original; annotate certification with SYS_HEALTH_DEGRADED SYS / CERT"
+    },
+    {
+      "ruleId": "R197",
+      "ruleName": "System Health Audit Trail",
+      "ifCondition": "any SYS rule produces a flag, FAIL, or alert event",
+      "thenAction": "write immutable SYS audit entry: rule ID, event type, severity, affected records or modules, resolution timestamp (when closed) SYS / AUDIT"
+    },
+    {
+      "ruleId": "R198",
+      "ruleName": "Master System Certification",
+      "ifCondition": "all SYS rules report PASS for the certification period AND no open SYS_HEALTH_DEGRADED flags exist",
+      "thenAction": "emit MASTER_SYSTEM_HEALTHY attestation token for inclusion in CAAR attestation block (R149); required for full FRE 902(11) self -authentication claim SYS / CAAR CAAR \u2014 Court -Admissible Analysis Report CAAR stands for Court -Admissible Analysis Report. It is the highest -tier output artifact MGE can produce \u2014 and it only unlocks when the MQ6 Trust Score reaches 85 or above (the Certified zone, TG11 pass condition, R135/R146). Each word, in context: \u2022 Court -Admissible \u2014 The architecture is designed to satisfy three Federal Rules of Evidence: FRE 803(6) (business records exception), 902(11) (self -authentication of business records), and 1002 (best evidence rule). \"Court - admissible\" describes the architec tural intent; the CAAR is engineered so a legal team can introduce it as evidence without requiring FohBoh to provide live testimony about how the number was calculated. The chain of custody, the immutable Vault record, the narrative hash, the attestation block, and now the Section 11 master system attestation are all designed to satisfy those standards by architecture. Important caveat: FohBoh does not make blanket court -admissible guarantees. A narrowly scoped legal opinion is required before that claim i s made in a specific proceeding. \u2022 Analysis \u2014 The CAAR is not a raw data export. It is a structured analytical document: it includes the full Trust Gate evaluation table, the certified variance calculation with rule IDs, the chain -of-custody log, the evidence bundle references, and the cert ification attestation block. It tells the story of how the certified number was reached, in language a non -technical reader (attorney, judge, arbitrator) can follow. \u2022 Report \u2014 A formatted, finalized document artifact. Not an API response. Not a dashboard widget. A document with a hash, a date, an attestation block, and an Evidence ExportPack that travels with it. The 85 -Threshold Below a score of 85, MGE still produces certified outputs \u2014 variance figures, Trust Score summaries, certified PDFs. Those are operationally valuable. But only the CAAR carries the full evidentiary apparatus: the attestation block (R149), the CAAR - specific SHA-256 hash (R150), the Evidence ExportPack (R151) with every source file, normalized record, and Audit Trail extract bundled together, and the master system attestation (R198). The 85 threshold exists because below that score, at least one Trust Gate is failing or significantly penalized \u2014 meaning there is a material gap in the evidence chain. A CAAR produced on incomplete data would not survive a competent challenge. The thresho ld is the integrity floor, not an arbitrary gate. The commercial implication is significant: the CAAR is what turns a certified variance number into a dispute instrument. A franchisor can take a CAAR to a franchisee in an arbitration proceeding. A restaurant can take a CAAR to a DSP's legal team in a fee dispute. Without the CAAR, you have a number. With the CAAR, you have evidence. Evidence ExportPack structured index document inside the bundle \u2014 the table of contents that makes the pack legally coherent rather than just a folder of f iles. When an operator requests an ExportPack alongside a CAAR (R151), MGE assembles a ZIP archive containing seven categories of material: \u2022 Source files \u2014 original ingestion files exactly as received (DSP statement, processor statement, POS export, contract exhibit). Unmodified. \u2022 Normalized records \u2014 the canonical -schema output from the ingestion pipeline. Proves the transformation was rule-governed, not interpretive. \u2022 Certified calculation record \u2014 the KPI Vault output. Shows which formula version was active, what inputs were applied, what certified output was produced. Immutably locked with its SHA -256 hash. \u2022 DCLS output \u2014 the full narrative artifact produced by the Certification Language System, with its narrative hash attached. \u2022 CAAR \u2014 the Court -Admissible Analysis Report itself, including the Trust Gate evaluation table, variance calculation, and attestation block. \u2022 Audit Trail extract \u2014 a time -stamped log of every processing event in the certification pipeline: ingestion receipt, normalization, rule execution, Trust Gate evaluation, output production. Every event has a timestamp and an operator attribution (R182). \u2022 Manifest \u2014 the document that ties all of the above together: inventory with integrity hashes, chain -of-custody declaration, rule -to-evidence mapping, certification metadata summary. Rule Registry \u2014 Version Control & IP Notice This Rule Registry constitutes the formal specification of the"
+    }
+  ]
+}

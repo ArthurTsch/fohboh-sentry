@@ -30,6 +30,7 @@ type GenerateClaimPackArgs = {
   caarExternalId: string;
   customerId: number | null;
   locationId: number;
+  uploadLocationId?: number | null;
 };
 
 type ProducedArtifact = {
@@ -887,6 +888,7 @@ export async function generateClaimPackForCaar(
     caarExternalId,
     customerId,
     locationId,
+    uploadLocationId = null,
   }: GenerateClaimPackArgs,
 ) {
   const caar = await tx.caars_v2.findFirst({
@@ -919,10 +921,19 @@ export async function generateClaimPackForCaar(
   }
 
   const canonicalBuffer = await readArtifactBlob(caar.canonical_payload_s3_key);
+  const uploadLocationIds = Array.from(
+    new Set(
+      [locationId, uploadLocationId].filter(
+        (value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0,
+      ),
+    ),
+  );
   const [uploadRows, ruleCitations, auditRows] = await Promise.all([
     tx.uploads_v2.findMany({
       where: {
-        location_id: locationId,
+        location_id: {
+          in: uploadLocationIds,
+        },
         module: caar.module,
         superseded_by: null,
       },

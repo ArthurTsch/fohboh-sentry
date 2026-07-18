@@ -30,6 +30,19 @@ function extractGovernedPosHeaders(value: unknown) {
   if (!value || typeof value !== "object") return [];
   const posSchema = (value as { posSchema?: unknown }).posSchema;
   if (!posSchema || typeof posSchema !== "object") return [];
+  const headerBindings = (posSchema as { headerBindings?: unknown }).headerBindings;
+  if (Array.isArray(headerBindings)) {
+    const boundHeaders = headerBindings
+      .map((entry) => {
+        if (!entry || typeof entry !== "object") return "";
+        const sourceHeader = (entry as { sourceHeader?: unknown }).sourceHeader;
+        return typeof sourceHeader === "string" ? sourceHeader.trim() : "";
+      })
+      .filter(Boolean);
+    if (boundHeaders.length > 0) {
+      return boundHeaders;
+    }
+  }
   const validatedHeaders = (posSchema as { validatedHeaders?: unknown }).validatedHeaders;
   if (!Array.isArray(validatedHeaders)) return [];
   return validatedHeaders.map((entry) => String(entry).trim()).filter(Boolean);

@@ -74,5 +74,11 @@ export function getExpectedKind(artifactKey: string) {
 }
 
 export function normalizeHeader(value: string) {
-  return value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return value
+    .trim()
+    .replace(/^\uFEFF/, "")
+    .replace(/^["']+|["']+$/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 }

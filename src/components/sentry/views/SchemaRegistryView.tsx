@@ -90,7 +90,7 @@ function SchemaWorkspaceCard({
             {workspace.account} | {workspace.module} | {workspace.vendor}
           </div>
           <div className="text-sm text-[var(--muted)]">
-            Column mappings, POS source schema, contract config, proof-zone upload, and vault state.
+            Column mappings, comparison-source schema, contract config, proof-zone upload, and vault state.
           </div>
         </div>
         <div className="flex gap-2">
@@ -187,42 +187,53 @@ function SchemaWorkspaceCard({
 
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <PanelTitle
-              title="POS Source Schema"
-              tipTitle="Schema Registry / POS Source Schema"
+              title="Comparison Source Schema"
+              tipTitle="Schema Registry / Comparison Source Schema"
               sections={[
                 {
                   label: "What It Is",
-                  text: "A governed sample POS export header set uploaded or entered inside the workspace editor.",
+                  text: "A governed header-binding set uploaded or entered inside the workspace editor for the comparison-source document.",
                 },
                 {
                   label: "What It Does",
-                  text: "Defines the expected live POS export columns used by Upload Data validation for recurring POS evidence.",
+                  text: "Defines the expected live vendor headers used by Upload Data validation for recurring comparison-source evidence.",
                 },
                 {
                   label: "Why It Matters",
-                  text: "It lets the platform seal the POS file shape, not just the processor or DSP source mapping, so recurring uploads can be checked against governed truth.",
+                  text: "It lets the platform seal the comparison-source file shape even when vendor headers do not match the app's internal field names.",
                 },
               ]}
               footerLabel="Seal Status"
               footerValue={
                 workspace.posSchema?.validatedHeaders?.length
                   ? `${workspace.posSchema.validatedHeaders.length} headers validated`
-                  : "POS schema not validated yet"
+                  : "Comparison schema not validated yet"
               }
             />
-            <div className="mt-4 flex flex-wrap gap-2">
-              {workspace.posSchema?.validatedHeaders?.length ? (
+            <div className="mt-4 space-y-2">
+              {workspace.posSchema?.headerBindings?.length ? (
+                workspace.posSchema.headerBindings.map((binding) => (
+                  <div
+                    key={`${workspace.accountId}:${workspace.locationId ?? "global"}:${workspace.module}:${workspace.vendor}:pos:${binding.appField}`}
+                    className="grid gap-2 rounded-xl border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] px-4 py-3 text-sm md:grid-cols-[1fr_auto_1fr]"
+                  >
+                    <span className="font-medium text-[var(--text)]">{binding.appField}</span>
+                    <span className="font-[family-name:var(--font-mono)] text-[var(--success)]">→</span>
+                    <span className="font-[family-name:var(--font-mono)] text-[var(--success)]">{binding.sourceHeader}</span>
+                  </div>
+                ))
+              ) : workspace.posSchema?.validatedHeaders?.length ? (
                 workspace.posSchema.validatedHeaders.map((header) => (
                   <span
                     key={`${workspace.accountId}:${workspace.locationId ?? "global"}:${workspace.module}:${workspace.vendor}:pos:${header}`}
-                    className="rounded-full border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] px-3 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--success)]"
+                    className="inline-flex rounded-full border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] px-3 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--success)]"
                   >
                     {header}
                   </span>
                 ))
               ) : (
                 <div className="text-sm text-[var(--muted)]">
-                  No governed POS headers have been validated for this workspace yet.
+                  No governed comparison-source headers have been validated for this workspace yet.
                 </div>
               )}
             </div>

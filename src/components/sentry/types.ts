@@ -98,6 +98,7 @@ export type CaarRuleCitationSummary = {
   ruleId: string;
   ruleVersion: string;
   sampleEvidenceCount: number;
+  sampleEvidence: Record<string, string | number | boolean | null>[];
   varianceDisplay: string;
 };
 
@@ -108,6 +109,7 @@ export type CaarTraceability = {
   evidence: CaarEvidenceTrace[];
   fieldAudit: CaarFieldAudit[];
   module: "M01" | "M02" | null;
+  passedRuleCitations: CaarRuleCitationSummary[];
   ruleCitations: CaarRuleCitationSummary[];
   ruleSetVersion: string | null;
   sealedAt: string | null;
@@ -381,6 +383,10 @@ export type ContractInputDefinition = {
 export type PosSchemaGovernance = {
   extractedAt?: string;
   extractedHeaders: string[];
+  headerBindings?: {
+    appField: string;
+    sourceHeader: string;
+  }[];
   manualHeaders: string[];
   sourceFileName?: string;
   status: "missing" | "draft" | "validated";
