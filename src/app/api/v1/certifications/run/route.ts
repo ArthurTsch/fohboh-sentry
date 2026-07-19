@@ -52,13 +52,20 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       cadence?: "monthly_final" | "weekly_preliminary" | null;
       locationId?: string | null;
-      modules?: Array<"M01" | "M02"> | null;
+      modules?: Array<"M01" | "M02" | "M03"> | null;
     };
     const locationId = body.locationId?.trim() ?? "";
     const cadence =
       body.cadence === "weekly_preliminary" ? "weekly_preliminary" : "monthly_final";
     const modules = Array.isArray(body.modules)
-      ? [...new Set(body.modules.filter((item): item is "M01" | "M02" => item === "M01" || item === "M02"))]
+      ? [
+          ...new Set(
+            body.modules.filter(
+              (item): item is "M01" | "M02" | "M03" =>
+                item === "M01" || item === "M02" || item === "M03",
+            ),
+          ),
+        ]
       : undefined;
     if (!locationId) {
       return withRequestHeaders(NextResponse.json({ error: "locationId is required." }, { status: 400 }), requestContext);

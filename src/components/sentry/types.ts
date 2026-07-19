@@ -108,7 +108,7 @@ export type CaarTraceability = {
   courtAdmissible: boolean | null;
   evidence: CaarEvidenceTrace[];
   fieldAudit: CaarFieldAudit[];
-  module: "M01" | "M02" | null;
+  module: "M01" | "M02" | "M03" | null;
   passedRuleCitations: CaarRuleCitationSummary[];
   ruleCitations: CaarRuleCitationSummary[];
   ruleSetVersion: string | null;
@@ -287,7 +287,7 @@ export type UploadReceipt = {
   matchedColumns?: number;
   matchPct?: number;
   metrics?: IntakeState["metrics"];
-  moduleId: "M01" | "M02";
+  moduleId: "M01" | "M02" | "M03";
   pageCount?: number;
   parseWarnings?: string[];
   rows?: number;
@@ -303,7 +303,7 @@ export type UploadReceipt = {
 
 export type UploadModule = {
   accountId: string;
-  id: "M01" | "M02";
+  id: "M01" | "M02" | "M03";
   title: string;
   subtitle: string;
   artifacts: UploadArtifact[];
@@ -340,7 +340,7 @@ export type WgsVendorOption = {
 export type WgsOnboardingUpload = {
   docKey?: string;
   hash: string;
-  module: "M01" | "M02";
+  module: "M01" | "M02" | "M03";
   name: string;
   rows: number;
   vendorName: string;

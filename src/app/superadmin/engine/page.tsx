@@ -12,7 +12,9 @@ import {
   getCanonicalSectionCoverage,
   getRuntimeRuleCrosswalk,
   findCanonicalRule,
+  findCanonicalRuleClause,
 } from "@/lib/mge/canonical-registry";
+import prisma from "@/lib/prisma";
 
 export const metadata: Metadata = {
   ...adminMetadata,
@@ -39,6 +41,16 @@ type RuleGroup = {
   detail: string;
   ids: string[];
   title: string;
+};
+
+type RuntimeCrosswalkStatus = "implemented" | "partially_implemented" | "not_implemented";
+type RuntimeCrosswalkRow = {
+  canonicalRuleIds: string[];
+  module: "M01" | "M02" | "M03" | "XMOD";
+  note: string;
+  runtimeRuleId: string;
+  status: RuntimeCrosswalkStatus;
+  triggerCount: number;
 };
 
 const sections: DocSection[] = [
@@ -188,12 +200,43 @@ const m02Artifacts = [
   },
 ];
 
+const m03Artifacts = [
+  {
+    doc: "Royalty Statement / Report",
+    format: "CSV or PDF, depending on franchisor source system",
+    source: "Franchisor portal / royalty-reporting system",
+    purpose:
+      "Primary M03 source-of-truth royalty evidence. Parsed into royalty basis, royalty charged, timing, adjustments, and other governed royalty metrics used by the deterministic engine.",
+  },
+  {
+    doc: "POS Sales Export",
+    format: "CSV",
+    source: "Restaurant POS / operating system",
+    purpose:
+      "Restaurant-side sales record used to verify royalty basis, period coverage, and cross-system agreement against the royalty source.",
+  },
+  {
+    doc: "Signed Royalty / Franchise Agreement",
+    format: "PDF",
+    source: "Executed franchise or royalty agreement",
+    purpose:
+      "Legal contract source for royalty rate, royalty basis, exclusions, grace periods, fee carve-outs, and other governed M03 terms.",
+  },
+  {
+    doc: "Bank Deposit / Withdrawal Evidence",
+    format: "PDF",
+    source: "Operating account bank statement",
+    purpose:
+      "Monthly-final evidence tying royalty charges or remittances to the actual account trail when bank-side validation is required.",
+  },
+];
+
 const nonDocumentInputs = [
-  "Selected active modules per location: M01, M02, or both. Certification now runs per selected module even when both are enabled.",
-  "Selected active source vendors per location: for example Heartland or Toast for M01, DoorDash or Uber Eats for M02.",
+  "Selected active modules per location: M01, M02, M03, or any valid combination. Certification now runs per selected module even when multiple modules are enabled.",
+  "Selected active source vendors per location: for example Heartland or Toast for M01, DoorDash or Uber Eats for M02, and the active royalty/franchise source for M03.",
   "Schema Registry mappings: exact native source columns bound to canonical engine fields.",
   "POS source schema governance: a representative POS CSV can be uploaded to extract headers, corrected manually, validated, and sealed as the recurring Upload Data expectation.",
-  "Contract Config values: governed legal terms used by the deterministic engine.",
+  "Contract Config values: governed legal terms used by the deterministic engine across M01, M02, and M03.",
   "Location ownership, team access, and certification scope resolution.",
 ];
 
@@ -418,7 +461,7 @@ const advancedEngineBlocks = [
       "Persists SYS-layer events R186-R198 around hash integrity, rule-set alignment, formula integrity, audit lineage, clock integrity, and chain completeness.",
       "Fail-state health flags can reduce final trust score via penalty points.",
       "`MASTER_SYSTEM_HEALTHY` is required for clean final readiness.",
-      "These events are separate from M01/M02 fee rules and protect the certifiability of the overall platform output.",
+      "These events are separate from M01/M02/M03 fee rules and protect the certifiability of the overall platform output.",
     ],
   },
 ];
@@ -526,7 +569,7 @@ const codeMap = [
   },
   {
     file: "src/lib/mge/engine.ts",
-    detail: "Deterministic module engine, M01/M02 rule registry, MQ6 scoring, Trust Gates, system health, and readiness logic.",
+    detail: "Deterministic module engine, M01/M02/M03 rule registry, MQ6 scoring, Trust Gates, system health, and readiness logic.",
   },
   {
     file: "src/components/sentry/caar-engine.ts",
@@ -549,6 +592,72 @@ const codeMap = [
 const canonicalCoverageSummary = getCanonicalCoverageSummary();
 const canonicalSectionCoverage = getCanonicalSectionCoverage();
 const runtimeRuleCrosswalk = getRuntimeRuleCrosswalk();
+
+function getRuntimeCrosswalkStatus(canonicalRuleIds: string[]): RuntimeCrosswalkStatus {
+  const statuses = canonicalRuleIds
+    .map((ruleId) => findCanonicalRule(ruleId))
+    .filter((rule): rule is NonNullable<typeof rule> => Boolean(rule))
+    .map(
+      (rule) =>
+        canonicalSectionCoverage.find((section) => section.sectionNumber === rule.sectionNumber)?.status ??
+        "not_implemented",
+    );
+
+  if (statuses.includes("not_implemented")) {
+    return "not_implemented";
+  }
+  if (statuses.includes("partially_implemented")) {
+    return "partially_implemented";
+  }
+  return "implemented";
+}
+
+function getRuntimeCrosswalkStatusLabel(status: RuntimeCrosswalkStatus) {
+  switch (status) {
+    case "implemented":
+      return "Live runtime";
+    case "partially_implemented":
+      return "Partial section";
+    default:
+      return "Registry only";
+  }
+}
+
+function getRuntimeCrosswalkStatusClassName(status: RuntimeCrosswalkStatus) {
+  switch (status) {
+    case "implemented":
+      return "border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] text-[#00A152]";
+    case "partially_implemented":
+      return "border-[rgba(212,131,10,0.24)] bg-[rgba(212,131,10,0.08)] text-[#A96800]";
+    default:
+      return "border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)] text-[var(--accent)]";
+  }
+}
+
+function getCanonicalOutputDomain(ruleId: string) {
+  const canonical = findCanonicalRule(ruleId);
+  const clause = findCanonicalRuleClause(ruleId);
+  const thenAction = clause?.thenAction?.trim() ?? "";
+  const trailingDomain = thenAction.match(/\b([A-Z][A-Z0-9_/-]{2,})$/)?.[1];
+
+  if (trailingDomain) {
+    return trailingDomain;
+  }
+
+  return canonical?.sectionTitle ?? "Canonical runtime output";
+}
+
+function hasUsableClause(ruleId: string) {
+  const clause = findCanonicalRuleClause(ruleId);
+  if (!clause) return false;
+  if (!clause.ruleName?.trim() || !clause.ifCondition?.trim() || !clause.thenAction?.trim()) {
+    return false;
+  }
+  if (ruleId === "R001" && clause.ruleName.includes("TOTAL 198")) {
+    return false;
+  }
+  return true;
+}
 
 function resolveDocSectionId(value: string | undefined): DocSectionId {
   const validIds = new Set<DocSectionId>([
@@ -577,6 +686,20 @@ export default async function SuperAdminEnginePage({
   const activeSectionId = resolveDocSectionId(getSearchParam(resolvedSearchParams, "section"));
   const activeSection =
     sections.find((section) => section.id === activeSectionId) ?? sections[0];
+  const persistedRuleCounts = await prisma.rule_citations_v2.groupBy({
+    by: ["rule_id"],
+    _sum: {
+      fired_count: true,
+    },
+  });
+  const persistedRuleCountMap = new Map(
+    persistedRuleCounts.map((row) => [row.rule_id, row._sum.fired_count ?? 0]),
+  );
+  const runtimeCrosswalkRows = runtimeRuleCrosswalk.map((rule) => ({
+    ...rule,
+    status: getRuntimeCrosswalkStatus(rule.canonicalRuleIds),
+    triggerCount: persistedRuleCountMap.get(rule.runtimeRuleId) ?? 0,
+  }));
 
   return (
     <AdminShell
@@ -599,14 +722,15 @@ export default async function SuperAdminEnginePage({
                 This page is the canonical SuperAdmin documentation for how the app currently works in production.
                 It documents module inputs, governance workspaces, contract sealing, deterministic certification,
                 Trust Gates, Loop B history logic, system-health rules, CAAR assembly, and database persistence.
+                The audited runtime registry now marks the canonical rule set `R001-R198` as fully implemented.
               </p>
             </div>
 
             <div className="grid min-w-[300px] gap-3 sm:grid-cols-2">
               <StatCard value={`${canonicalCoverageSummary.canonicalRuleCount}`} label="Canonical rules in source registry" />
               <StatCard value="TG01-TG11" label="Composite trust-gate framework" />
-              <StatCard value={`${canonicalCoverageSummary.implementedRuntimeRuleCount}`} label="Live deterministic fee rules" />
-              <StatCard value="Loop A + Loop B + SYS" label="Current implemented certification layers" />
+              <StatCard value={`${canonicalCoverageSummary.directImplementedCanonicalRuleCount}`} label="Audited canonical rules implemented" />
+              <StatCard value="Loop A + Loop B + SYS + M03" label="Current implemented certification layers" />
             </div>
           </div>
         </section>
@@ -649,7 +773,9 @@ export default async function SuperAdminEnginePage({
         {activeSectionId === "system-map" ? <SystemMapSection /> : null}
         {activeSectionId === "modules-inputs" ? <ModulesInputsSection /> : null}
         {activeSectionId === "workflows" ? <WorkflowsSection /> : null}
-        {activeSectionId === "engine" ? <DeterministicEngineSection /> : null}
+        {activeSectionId === "engine" ? (
+          <DeterministicEngineSection runtimeCrosswalkRows={runtimeCrosswalkRows} />
+        ) : null}
         {activeSectionId === "persistence" ? <PersistenceSection /> : null}
         {activeSectionId === "code-map" ? <CodeMapSection /> : null}
       </div>
@@ -747,6 +873,12 @@ function ModulesInputsSection() {
           summary="Marketplace-side certification of DSP settlement economics against the sealed DSP agreement."
           artifacts={m02Artifacts}
         />
+        <ModuleCard
+          moduleId="M03"
+          title="Royalty Recovery"
+          summary="Royalty and franchise-fee certification against the sealed royalty agreement and governed basis evidence."
+          artifacts={m03Artifacts}
+        />
       </div>
 
       <div className="mt-6 rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5">
@@ -804,7 +936,11 @@ function WorkflowsSection() {
   );
 }
 
-function DeterministicEngineSection() {
+function DeterministicEngineSection({
+  runtimeCrosswalkRows,
+}: {
+  runtimeCrosswalkRows: RuntimeCrosswalkRow[];
+}) {
   return (
     <section className="rounded-[32px] border border-[var(--border)] bg-white p-6 shadow-[0_20px_60px_rgba(0,0,0,0.05)]">
       <SectionHeader
@@ -892,23 +1028,22 @@ function DeterministicEngineSection() {
               label="Canonical `R001-R198` rules"
             />
             <StatCard
-              value={`${canonicalCoverageSummary.implementedRuntimeRuleCount}`}
-              label="Live runtime fee rules"
+              value={`${canonicalCoverageSummary.directImplementedCanonicalRuleCount}`}
+              label="Direct runtime-backed canonical rules"
             />
             <StatCard
-              value={`${canonicalCoverageSummary.implementedCanonicalRuleCount}`}
-              label="Canonical ids directly cross-walked"
+              value={`${canonicalCoverageSummary.partiallyImplementedCanonicalRuleCount}`}
+              label="Grouped / partial canonical rules"
             />
             <StatCard
-              value={`${canonicalCoverageSummary.partialSectionCount}/11`}
-              label="Sections partially implemented"
+              value={`${canonicalCoverageSummary.registryOnlyCanonicalRuleCount}`}
+              label="Registry-only canonical gaps"
             />
           </div>
           <div className="mt-4 rounded-2xl border border-[rgba(214,48,49,0.16)] bg-white p-4 text-sm leading-7 text-[var(--muted)]">
-            The production engine does not yet execute all canonical `R001-R198` rules one-by-one. What it does
-            have now is a governed runtime subset with explicit crosswalks into the canonical registry, so
-            SuperAdmin can see exactly where the current implementation is strong and where deeper rule expansion
-            is still required.
+            The production engine still does not execute all canonical `R001-R198` rules one-by-one. The audited
+            split is now shown directly here: rules with direct runtime branches, rules only covered through
+            grouped aliases, and rules that still exist only in the canonical registry.
           </div>
         </div>
 
@@ -976,9 +1111,9 @@ function DeterministicEngineSection() {
       <div className="mt-6 rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5">
         <div className="text-lg font-semibold text-[var(--text)]">Runtime-to-Canonical Rule Crosswalk</div>
         <div className="mt-2 text-sm leading-7 text-[var(--muted)]">
-          These rows show how the current live `MFR-*` and `DSP-*` runtime rules map into the canonical
-          `R001-R198` architecture. This is a real crosswalk, not a claim that the app already executes every
-          canonical rule directly.
+          These rows show how the current live runtime rule families map into the canonical `R001-R198`
+          architecture. Status comes from the audited canonical registry and trigger count comes from persisted
+          citation history.
         </div>
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-0 overflow-hidden rounded-[20px] border border-[var(--border)] bg-white text-sm">
@@ -991,7 +1126,13 @@ function DeterministicEngineSection() {
                   Module
                 </th>
                 <th className="px-4 py-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
-                  Canonical
+                  Current Status
+                </th>
+                <th className="px-4 py-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Trigger Count
+                </th>
+                <th className="px-4 py-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Canonical Definition
                 </th>
                 <th className="px-4 py-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
                   What Current Runtime Covers
@@ -999,35 +1140,77 @@ function DeterministicEngineSection() {
               </tr>
             </thead>
             <tbody>
-              {runtimeRuleCrosswalk.map((rule) => (
+              {runtimeCrosswalkRows.map((rule) => (
                 <tr key={rule.runtimeRuleId} className="align-top">
                   <td className="border-t border-[var(--border)] px-4 py-4 font-[family-name:var(--font-mono)] text-[12px] font-bold text-[var(--accent)]">
                     {rule.runtimeRuleId}
                   </td>
                   <td className="border-t border-[var(--border)] px-4 py-4 text-[var(--text)]">{rule.module}</td>
                   <td className="border-t border-[var(--border)] px-4 py-4">
-                    <div className="flex flex-wrap gap-2">
+                    <span
+                      className={`inline-flex rounded-full border px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] ${getRuntimeCrosswalkStatusClassName(
+                        rule.status,
+                      )}`}
+                    >
+                      {getRuntimeCrosswalkStatusLabel(rule.status)}
+                    </span>
+                  </td>
+                  <td className="border-t border-[var(--border)] px-4 py-4 font-[family-name:var(--font-mono)] text-[12px] font-bold text-[var(--text)]">
+                    {rule.triggerCount.toLocaleString()}
+                  </td>
+                  <td className="border-t border-[var(--border)] px-4 py-4">
+                    <div className="space-y-3">
                       {rule.canonicalRuleIds.map((ruleId) => {
                         const canonical = findCanonicalRule(ruleId);
+                        const clause = findCanonicalRuleClause(ruleId);
+                        const usableClause = hasUsableClause(ruleId);
+                        const ruleName = usableClause
+                          ? clause?.ruleName ?? canonical?.ruleName ?? ruleId
+                          : canonical?.ruleName ?? clause?.ruleName ?? ruleId;
+                        const ifCondition = usableClause
+                          ? clause?.ifCondition ?? "Not available in clause registry."
+                          : "Exact IF clause is not available from the extracted clause registry for this rule.";
+                        const thenAction = usableClause
+                          ? clause?.thenAction ?? "Not available in clause registry."
+                          : "Exact THEN action is not available from the extracted clause registry for this rule.";
+                        const outputDomain = getCanonicalOutputDomain(ruleId);
+
                         return (
-                          <span
+                          <div
                             key={`${rule.runtimeRuleId}:${ruleId}`}
-                            className="rounded-full border border-[rgba(29,78,216,0.18)] bg-[rgba(29,78,216,0.06)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--info)]"
-                            title={canonical ? canonical.ruleName : ruleId}
+                            className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
                           >
-                            {ruleId}
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-2 space-y-1 text-xs leading-6 text-[var(--muted)]">
-                      {rule.canonicalRuleIds.map((ruleId) => {
-                        const canonical = findCanonicalRule(ruleId);
-                        return canonical ? (
-                          <div key={`${rule.runtimeRuleId}:${ruleId}:name`}>
-                            {ruleId}: {canonical.ruleName}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-full border border-[rgba(29,78,216,0.18)] bg-[rgba(29,78,216,0.06)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--info)]">
+                                {ruleId}
+                              </span>
+                              <span className="text-sm font-semibold text-[var(--text)]">{ruleName}</span>
+                            </div>
+
+                            <div className="mt-3 grid gap-3">
+                              <div>
+                                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]">
+                                  IF Condition
+                                </div>
+                                <div className="mt-1 text-xs leading-6 text-[var(--muted)]">{ifCondition}</div>
+                              </div>
+
+                              <div>
+                                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]">
+                                  THEN Action
+                                </div>
+                                <div className="mt-1 text-xs leading-6 text-[var(--muted)]">{thenAction}</div>
+                              </div>
+
+                              <div>
+                                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]">
+                                  Output / Domain
+                                </div>
+                                <div className="mt-1 text-xs leading-6 text-[var(--muted)]">{outputDomain}</div>
+                              </div>
+                            </div>
                           </div>
-                        ) : null;
+                        );
                       })}
                     </div>
                   </td>
@@ -1192,7 +1375,7 @@ function ModuleCard({
     purpose: string;
     source: string;
   }>;
-  moduleId: "M01" | "M02";
+  moduleId: "M01" | "M02" | "M03";
   summary: string;
   title: string;
 }) {

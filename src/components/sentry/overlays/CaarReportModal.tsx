@@ -50,7 +50,12 @@ export function CaarReportModal({
 }) {
   const traceability = record.traceability;
   const moduleId = traceability?.module ?? inferModule(record);
-  const moduleLabel = moduleId === "M01" ? "Merchant Fee Recovery" : "Delivery Fee Recovery";
+  const moduleLabel =
+    moduleId === "M01"
+      ? "Merchant Fee Recovery"
+      : moduleId === "M02"
+        ? "Delivery Fee Recovery"
+        : "Royalty Recovery";
   const locationModules = uploadModules.filter((module) => module.accountId === record.accountId && module.id === moduleId);
   const exhibits = buildExhibits({
     artifactIntakeState,
@@ -648,7 +653,7 @@ function RuleCitationCell({
 }: {
   disposition: CitationDisposition;
   evidenceRows: CaarEvidenceTrace[];
-  moduleId: "M01" | "M02";
+  moduleId: "M01" | "M02" | "M03";
   rule: CaarRuleCitationRow;
 }) {
   const tip = describeRuleCitation(rule, moduleId, evidenceRows, disposition);
@@ -659,6 +664,7 @@ function RuleCitationCell({
       <HelpTip
         title={`Rule Citation · ${rule.ruleId}`}
         sections={[
+          { label: "Canonical Definition", text: tip.canonicalDefinition },
           { label: "Rule", text: tip.ruleText },
           { label: "Evidence", text: tip.evidence },
         ]}
@@ -677,7 +683,7 @@ function VarianceCitationCell({
 }: {
   disposition: CitationDisposition;
   evidenceRows: CaarEvidenceTrace[];
-  moduleId: "M01" | "M02";
+  moduleId: "M01" | "M02" | "M03";
   rule: CaarRuleCitationRow;
 }) {
   const tip = describeRuleCitation(rule, moduleId, evidenceRows, disposition);
@@ -757,6 +763,9 @@ function ScoreExplainCard({
 
 function inferModule(record: CaarRecord) {
   const corpus = `${record.id} ${record.narrative} ${record.findings.join(" ")}`.toLowerCase();
+  if (corpus.includes("royalty") || corpus.includes("franchise") || corpus.includes("m03")) {
+    return "M03";
+  }
   return corpus.includes("processor") || corpus.includes("interchange") || corpus.includes("merchant")
     ? "M01"
     : "M02";
@@ -769,7 +778,7 @@ function isZeroVarianceDisplay(value: string) {
 
 function buildBlockingIssueSummary(
   rule: CaarRuleCitationRow,
-  moduleId: "M01" | "M02",
+  moduleId: "M01" | "M02" | "M03",
   evidenceRows: CaarEvidenceTrace[],
 ) {
   const tip = describeRuleCitation(rule, moduleId, evidenceRows, "blocking_problem");
@@ -793,11 +802,14 @@ function buildBlockingIssueSummary(
 }
 
 type RuleCitationTip = {
+  canonicalDefinition: string;
   calculation: string;
   evidence: string;
   footer: string;
   ruleText: string;
 };
+
+type RuleTooltipOverride = Omit<RuleCitationTip, "canonicalDefinition">;
 
 type CitationDisposition = "monetary_problem" | "blocking_problem" | "passed";
 type CaarRuleCitationRow = NonNullable<CaarRecord["traceability"]>["ruleCitations"][number];
@@ -805,7 +817,32 @@ type RuleCitationSample = Record<string, string | number | boolean | null>;
 
 const RUNTIME_RULE_MAP = new Map(getRuntimeRuleCrosswalk().map((row) => [row.runtimeRuleId, row]));
 
-const RULE_TOOLTIP_OVERRIDES: Record<string, RuleCitationTip> = {
+function getCanonicalOutputDomain(ruleId: string) {
+  const canonical = findCanonicalRule(ruleId);
+  const clause = findCanonicalRuleClause(ruleId);
+  const thenAction = clause?.thenAction?.trim() ?? "";
+  const trailingDomain = thenAction.match(/\b([A-Z][A-Z0-9_/-]{2,})$/)?.[1];
+
+  if (trailingDomain) {
+    return trailingDomain;
+  }
+
+  return canonical?.sectionTitle ?? "Canonical runtime output";
+}
+
+function hasUsableClause(ruleId: string) {
+  const clause = findCanonicalRuleClause(ruleId);
+  if (!clause) return false;
+  if (!clause.ruleName?.trim() || !clause.ifCondition?.trim() || !clause.thenAction?.trim()) {
+    return false;
+  }
+  if (ruleId === "R001" && clause.ruleName.includes("TOTAL 198")) {
+    return false;
+  }
+  return true;
+}
+
+const RULE_TOOLTIP_OVERRIDES: Record<string, RuleTooltipOverride> = {
   "MFR-BIL-15": {
     ruleText:
       "Rebuild the expected M01 processor fee from the sealed pricing terms, then compare it to the observed processor fee burden on the statement.",
@@ -936,7 +973,7 @@ const RULE_TOOLTIP_OVERRIDES: Record<string, RuleCitationTip> = {
 
 function describeRuleCitation(
   row: CaarRuleCitationRow,
-  moduleId: "M01" | "M02",
+  moduleId: "M01" | "M02" | "M03",
   evidenceRows: CaarEvidenceTrace[],
   disposition: CitationDisposition,
 ): RuleCitationTip {
@@ -946,6 +983,22 @@ function describeRuleCitation(
   if (override) {
     return {
       ...override,
+      canonicalDefinition: [
+        "Rule ID",
+        ruleId,
+        "",
+        "Rule Name",
+        override.footer,
+        "",
+        "IF Condition",
+        "Runtime-specific override",
+        "",
+        "THEN Action",
+        "See runtime meaning, calculation, and evidence sections.",
+        "",
+        "Output / Domain",
+        getCanonicalOutputDomain(ruleId),
+      ].join("\n"),
       calculation: buildRuleCalculation(ruleId, moduleId, sample, row.varianceDisplay, override.calculation),
       evidence: buildRuleEvidence(ruleId, moduleId, sample, evidenceRows, override.evidence),
     };
@@ -956,25 +1009,44 @@ function describeRuleCitation(
   const canonicalRules = canonicalIds
     .map((canonicalId) => findCanonicalRule(canonicalId))
     .filter((rule): rule is NonNullable<ReturnType<typeof findCanonicalRule>> => Boolean(rule));
-  const canonicalClauses = canonicalIds
-    .map((canonicalId) => findCanonicalRuleClause(canonicalId))
-    .filter((rule): rule is NonNullable<ReturnType<typeof findCanonicalRuleClause>> => Boolean(rule));
   const canonicalSummary =
     canonicalRules.length > 0
       ? canonicalRules.map((rule) => `${rule.ruleId} ${rule.ruleName}`).join(" | ")
       : "Canonical rule metadata is not yet expanded for this runtime citation.";
-  const canonicalRuleText = canonicalClauses.length > 0
-    ? canonicalClauses
-        .map((rule) => {
-          const lines = [
-            `${rule.ruleId} ${rule.ruleName}`,
-            rule.ifCondition ? `IF ${rule.ifCondition}` : null,
-            rule.thenAction ? `THEN ${rule.thenAction}` : null,
-          ].filter(Boolean);
-          return lines.join("\n");
-        })
-        .join("\n\n")
-    : canonicalSummary;
+  const canonicalDefinition = canonicalIds
+    .map((canonicalId) => {
+      const canonical = findCanonicalRule(canonicalId);
+      const clause = findCanonicalRuleClause(canonicalId);
+      const usableClause = hasUsableClause(canonicalId);
+      const ruleName = usableClause
+        ? clause?.ruleName ?? canonical?.ruleName ?? canonicalId
+        : canonical?.ruleName ?? clause?.ruleName ?? canonicalId;
+      const ifCondition = usableClause
+        ? clause?.ifCondition ?? "Not available in clause registry."
+        : "Exact IF clause is not available from the extracted clause registry for this rule.";
+      const thenAction = usableClause
+        ? clause?.thenAction ?? "Not available in clause registry."
+        : "Exact THEN action is not available from the extracted clause registry for this rule.";
+      const outputDomain = getCanonicalOutputDomain(canonicalId);
+
+      return [
+        "Rule ID",
+        canonicalId,
+        "",
+        "Rule Name",
+        ruleName,
+        "",
+        "IF Condition",
+        ifCondition,
+        "",
+        "THEN Action",
+        thenAction,
+        "",
+        "Output / Domain",
+        outputDomain,
+      ].join("\n");
+    })
+    .join("\n\n");
   const runtimeMeaning =
     runtimeRule?.note ??
     `${moduleId} certification persisted this rule because the deterministic engine found a governed condition tied to ${canonicalSummary}.`;
@@ -999,7 +1071,8 @@ function describeRuleCitation(
         : "This row is shown in monetary findings because the stored engine output attributed non-zero dollar variance to this rule.";
 
   return {
-    ruleText: `Canonical Rule\n${canonicalRuleText}\n\nCurrent Result\n${outcomeLabel}\n${outcomeText}\n\nWhy This Row Appears\n${whyItAppears}\n\nRuntime Meaning\n${runtimeMeaning}`,
+    canonicalDefinition,
+    ruleText: `Current Result\n${outcomeLabel}\n${outcomeText}\n\nWhy This Row Appears\n${whyItAppears}\n\nRuntime Meaning\n${runtimeMeaning}`,
     calculation: buildRuleCalculation(ruleId, moduleId, sample, row.varianceDisplay, buildGenericCalculation(ruleId, moduleId)),
     evidence: buildRuleEvidence(ruleId, moduleId, sample, evidenceRows, buildGenericEvidence(ruleId, moduleId)),
     footer:
@@ -1009,7 +1082,7 @@ function describeRuleCitation(
   };
 }
 
-function buildGenericCalculation(ruleId: string, moduleId: "M01" | "M02") {
+function buildGenericCalculation(ruleId: string, moduleId: "M01" | "M02" | "M03") {
   if (ruleId.startsWith("MFR-") || moduleId === "M01") {
     return "The engine reconstructs expected merchant-fee behavior from the sealed contract terms and compares that governed expectation to observed processor and POS evidence. Any justified excess becomes attributed variance or a release-blocking control failure.";
   }
@@ -1021,13 +1094,17 @@ function buildGenericCalculation(ruleId: string, moduleId: "M01" | "M02") {
   return "The deterministic engine compares governed expected behavior to persisted observed evidence and stores the rule when the condition remains materially relevant to certification.";
 }
 
-function buildGenericEvidence(ruleId: string, moduleId: "M01" | "M02") {
+function buildGenericEvidence(ruleId: string, moduleId: "M01" | "M02" | "M03") {
   if (ruleId === "R135" || ruleId.startsWith("R12") || ruleId.startsWith("R13")) {
     return "Evidence comes from the persisted trust-gate, MQ6, and governed-state outputs stored with the certification run.";
   }
 
   if (moduleId === "M01") {
     return "Evidence comes from the governed processor statement, POS export, signed merchant agreement, bank evidence when required, sealed source-column bindings, and sealed contract terms.";
+  }
+
+  if (moduleId === "M03") {
+    return "Evidence comes from the governed royalty statement or report, POS sales export, signed royalty or franchise agreement, bank evidence when required, sealed source bindings, and sealed royalty contract terms.";
   }
 
   return "Evidence comes from the governed DSP settlement export, POS summary/export, signed DSP agreement, bank deposit evidence when required, sealed schema bindings, and sealed DSP contract terms.";
@@ -1064,7 +1141,7 @@ function buildPersistedInputs(sample: RuleCitationSample) {
 
 function buildRuleCalculation(
   ruleId: string,
-  moduleId: "M01" | "M02",
+  moduleId: "M01" | "M02" | "M03",
   sample: RuleCitationSample,
   varianceDisplay: string,
   fallback: string,
@@ -1165,12 +1242,16 @@ function buildRuleCalculation(
 
 function buildRuleEvidence(
   ruleId: string,
-  moduleId: "M01" | "M02",
+  moduleId: "M01" | "M02" | "M03",
   sample: RuleCitationSample,
   evidenceRows: CaarEvidenceTrace[],
   fallback: string,
 ) {
-  const processorSource = evidenceRows.find((row) => row.artifactKey.includes(moduleId === "M01" ? "processor" : "settlement"));
+  const processorSource = evidenceRows.find((row) =>
+    row.artifactKey.includes(
+      moduleId === "M01" ? "processor" : moduleId === "M02" ? "settlement" : "royalty",
+    ),
+  );
   const posSource = evidenceRows.find((row) => row.artifactKey.includes("pos"));
   const agreementSource = evidenceRows.find((row) => row.artifactKey.includes("agreement"));
   const bankSource = evidenceRows.find((row) => row.artifactKey.includes("bank"));
@@ -1203,7 +1284,8 @@ function buildRuleEvidence(
               )
             : null,
         ]
-      : [
+      : moduleId === "M02"
+        ? [
           artifactLine(
             "DSP Settlement source",
             processorSource,
@@ -1224,6 +1306,30 @@ function buildRuleEvidence(
                 "Bank Deposit Evidence",
                 bankSource,
                 "bank-side payout confirmation used by monthly final reconciliation",
+              )
+            : null,
+        ]
+        : [
+          artifactLine(
+            "Royalty Source Statement / Report",
+            processorSource,
+            "observed royalty totals, royalty basis metrics, period coverage, and adjustment-side inputs used by M03 rules",
+          ),
+          artifactLine(
+            "POS Sales Export",
+            posSource,
+            "restaurant-side sales and basis evidence used to verify royalty-base correctness",
+          ),
+          artifactLine(
+            "Signed Royalty / Franchise Agreement",
+            agreementSource,
+            "governed royalty rate, royalty basis, exclusions, and timing terms sealed into contract config",
+          ),
+          bankSource
+            ? artifactLine(
+                "Bank Deposit / Withdrawal Evidence",
+                bankSource,
+                "bank-side remittance evidence used by monthly final royalty reconciliation",
               )
             : null,
         ];
@@ -1257,7 +1363,7 @@ function buildExhibits({
   artifactIntakeState: Record<string, IntakeState>;
   evidence: CaarEvidenceTrace[];
   locationId: string;
-  moduleId: "M01" | "M02";
+  moduleId: "M01" | "M02" | "M03";
   modules: UploadModule[];
 }): ExhibitRow[] {
   if (evidence.length > 0) {
@@ -1273,7 +1379,9 @@ function buildExhibits({
   }
 
   const artifacts = modules.flatMap((module) => module.artifacts);
-  const csvArtifact = artifacts.find((artifact) => artifact.key.includes(moduleId === "M01" ? "processor" : "settlement"));
+  const csvArtifact = artifacts.find((artifact) =>
+    artifact.key.includes(moduleId === "M01" ? "processor" : moduleId === "M02" ? "settlement" : "royalty"),
+  );
   const posArtifact = artifacts.find((artifact) => artifact.key.includes("pos"));
   const statementArtifact = csvArtifact;
   const bankArtifact = artifacts.find((artifact) => artifact.key.includes("bank"));

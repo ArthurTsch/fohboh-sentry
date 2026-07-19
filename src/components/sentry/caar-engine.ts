@@ -38,7 +38,7 @@ export type ModuleAssessment = {
   >;
   findingClass: FindingClass;
   findings: string[];
-  moduleId: "M01" | "M02";
+  moduleId: "M01" | "M02" | "M03";
   mq6: Record<string, Mq6Score>;
   note: string;
   ready: boolean;
@@ -52,7 +52,7 @@ export type ModuleAssessment = {
 
 export type HistoricalCertificationSnapshot = {
   completedAt: string | null;
-  moduleId: "M01" | "M02";
+  moduleId: "M01" | "M02" | "M03";
   period: string;
   recoveryValue: number;
   ruleIds: string[];
@@ -65,12 +65,14 @@ export type LoopBFinding = {
   confidenceScore: number;
   detail: string;
   impactsCertification: boolean;
-  moduleId: "M01" | "M02" | "XMOD";
+  moduleId: "M01" | "M02" | "M03" | "XMOD";
   patternCode: string;
   ruleId:
     | "R154"
     | "R155"
+    | "R156"
     | "R157"
+    | "R158"
     | "R159"
     | "R160"
     | "R161"
@@ -93,7 +95,7 @@ export type CrossModuleSummary = {
   findings: string[];
   moduleWeightImbalance: boolean;
   reviewedFeeWeights: Array<{
-    moduleId: "M01" | "M02";
+    moduleId: "M01" | "M02" | "M03";
     pct: number;
   }>;
   totalRecoveryEligible: number;
@@ -226,7 +228,7 @@ export function buildCertificationResult({
 }): CertificationResult {
   const evaluationDate = runAt ?? new Date();
   const ruleSetVersion = getRuleSetVersion(cadence);
-  const modules = (["M01", "M02"] as const)
+  const modules = (["M01", "M02", "M03"] as const)
     .map((moduleId) =>
       assessModule({
         accountId: location.accountId,
@@ -242,7 +244,8 @@ export function buildCertificationResult({
     )
     .filter((module): module is ModuleAssessment => module !== null);
 
-  const activeModules = modules.length > 0 ? modules : [emptyModule("M01"), emptyModule("M02")];
+  const activeModules =
+    modules.length > 0 ? modules : [emptyModule("M01"), emptyModule("M02"), emptyModule("M03")];
   const overallDimensions = DIMENSION_ORDER.map((name) => ({
     name,
     score: clamp(
@@ -548,6 +551,17 @@ function buildOverallCanonicalRuleCitations({
       active_modules: activeModuleIds,
     }),
   );
+  if (activeModuleIds.includes("M02") && activeModuleIds.includes("M03")) {
+    citations.push(
+      buildOverallCitation("R167", {
+        active_modules: activeModuleIds,
+        conflict: crossModule.conflict,
+        detail:
+          "Cross-module royalty-to-DFR sales reconciliation executed between governed M02 settlement sales and governed M03 certified royalty sales.",
+        reviewed_fee_weights: crossModule.reviewedFeeWeights,
+      }),
+    );
+  }
   citations.push(
     buildOverallCitation("R168", {
       aggregate_variance: crossModule.aggregateVariance,
@@ -901,7 +915,7 @@ function assessModule({
   cadence: "monthly_final" | "weekly_preliminary";
   evaluationDate: Date;
   locationId: string;
-  moduleId: "M01" | "M02";
+  moduleId: "M01" | "M02" | "M03";
   systemHealthFlags: Array<"R186" | "R188" | "R191" | "R192">;
   uploadModules: UploadModule[];
 }): ModuleAssessment | null {
@@ -976,7 +990,7 @@ function resolveArtifactIntake(
   state: Record<string, IntakeState>,
   accountId: string,
   locationId: string,
-  moduleId: "M01" | "M02",
+  moduleId: "M01" | "M02" | "M03",
   artifactKey: string,
 ) {
   const prefix = `${accountId}:${locationId}:${moduleId}:${artifactKey}:`;
@@ -995,7 +1009,7 @@ function resolveContractValues(
   state: ContractState,
   accountId: string,
   locationId: string,
-  moduleId: "M01" | "M02",
+  moduleId: "M01" | "M02" | "M03",
   artifactKey: string,
 ) {
   const prefix = `${accountId}:${locationId}:${moduleId}:${artifactKey}:`;
@@ -1145,15 +1159,19 @@ function upsertEvidenceModule(
 }
 
 function buildModuleNote(
-  moduleId: "M01" | "M02",
+  moduleId: "M01" | "M02" | "M03",
   score: number,
   findings: string[],
   citationCount: number,
 ) {
   if (score >= 85 && citationCount === 0) {
-    return moduleId === "M01"
-      ? "Processor evidence, contract, and reconciliation gates are release-ready."
-      : "DSP settlement, contract, and reconciliation controls are release-ready.";
+    if (moduleId === "M01") {
+      return "Processor evidence, contract, and reconciliation gates are release-ready.";
+    }
+    if (moduleId === "M02") {
+      return "DSP settlement, contract, and reconciliation controls are release-ready.";
+    }
+    return "Royalty evidence, franchise terms, and governed sales reconciliation are release-ready.";
   }
   if (citationCount > 0) {
     return `${citationCount} deterministic ${moduleId} rule citation${citationCount === 1 ? "" : "s"} require review.`;
@@ -1161,7 +1179,7 @@ function buildModuleNote(
   return findings[0] ?? `${moduleId} still requires evidence remediation before release.`;
 }
 
-function emptyModule(moduleId: "M01" | "M02"): ModuleAssessment {
+function emptyModule(moduleId: "M01" | "M02" | "M03"): ModuleAssessment {
   return {
     artifactCoverage: 0,
     certificationZone: "UNVERIFIED",
@@ -1266,6 +1284,7 @@ function buildCrossModuleSummary(modules: ModuleAssessment[]): CrossModuleSummar
   const findings: string[] = [];
   const m01 = modules.find((module) => module.moduleId === "M01");
   const m02 = modules.find((module) => module.moduleId === "M02");
+  const m03 = modules.find((module) => module.moduleId === "M03");
   if (moduleWeightImbalance) {
     findings.push(
       "Cross-module reviewed-fee weighting is imbalanced because one module contributes more than 80% of the reviewed base.",
@@ -1290,6 +1309,20 @@ function buildCrossModuleSummary(modules: ModuleAssessment[]): CrossModuleSummar
       findings.push(
         "Cross-module order / channel reconciliation shows materially different confidence between active modules.",
       );
+    }
+  }
+
+  if (m02 && m03) {
+    const m02ReviewedBase = Math.max(m02.reviewedFeeVolume, 0);
+    const m03ReviewedBase = Math.max(m03.reviewedFeeVolume, 0);
+    if (m02ReviewedBase > 0 && m03ReviewedBase > 0) {
+      const mismatchPct = Math.abs(m02ReviewedBase - m03ReviewedBase) / Math.max(m02ReviewedBase, 1);
+      if (mismatchPct > 0.15) {
+        conflict = true;
+        findings.push(
+          "R167 cross-module royalty-to-DFR sales reconciliation detected a material mismatch between governed M02 settlement sales and governed M03 royalty sales basis.",
+        );
+      }
     }
   }
 
@@ -1392,6 +1425,10 @@ function buildLoopBResult({
     const priorAverage =
       moduleHistory.reduce((sum, entry) => sum + entry.recoveryValue, 0) /
       Math.max(moduleHistory.length, 1);
+    const squaredDrift =
+      moduleHistory.reduce((sum, entry) => sum + Math.pow(entry.recoveryValue - priorAverage, 2), 0) /
+      Math.max(moduleHistory.length, 1);
+    const baselineDeviation = Math.sqrt(Math.max(0, squaredDrift));
     if (module.recoveryValue > priorAverage * 1.5 && moduleHistory.length >= 3) {
       const confidenceScore = round(
         Math.min(1, 0.5 + moduleHistory.length / 10),
@@ -1406,6 +1443,46 @@ function buildLoopBResult({
         moduleId: module.moduleId,
         patternCode: "RE_CERTIFY_REQUIRED",
         ruleId: "R159",
+      });
+    }
+
+    if (
+      moduleHistory.length >= 4 &&
+      baselineDeviation > 0 &&
+      Math.abs(module.recoveryValue - priorAverage) > baselineDeviation * 1.5
+    ) {
+      const confidenceScore = round(
+        Math.min(1, Math.abs(module.recoveryValue - priorAverage) / Math.max(baselineDeviation * 2, 1)),
+      );
+      findings.push({
+        affectedPeriods: moduleHistory.slice(-4).map((entry) => entry.period),
+        caarEligible: confidenceScore >= 0.85 && trustScore >= 85,
+        confidenceScore,
+        detail:
+          "Current certified error behavior falls materially outside the recent merchant baseline and should be reviewed as a cluster-style outlier pattern.",
+        impactsCertification: confidenceScore >= 0.75,
+        moduleId: module.moduleId,
+        patternCode: "CLUSTER_OUTLIER",
+        ruleId: "R156",
+      });
+    }
+
+    if (
+      module.ruleCitations.length === 0 &&
+      module.recoveryValue > 0 &&
+      moduleHistory.length >= 2
+    ) {
+      const confidenceScore = round(Math.min(1, 0.55 + moduleHistory.length / 10));
+      findings.push({
+        affectedPeriods: moduleHistory.slice(-2).map((entry) => entry.period),
+        caarEligible: false,
+        confidenceScore,
+        detail:
+          "Historical recovery posture persists but the current certified package does not map it to a known active canonical finding, so it is recorded as an unclassified pattern for rule-registry review.",
+        impactsCertification: confidenceScore >= 0.75,
+        moduleId: module.moduleId,
+        patternCode: "UNCLASSIFIED_PATTERN",
+        ruleId: "R158",
       });
     }
   }
@@ -1498,7 +1575,7 @@ function buildOverallTrustGates(
   configuredModules: LocationModuleState[],
 ) {
   const activeConfiguredModules = configuredModules.filter(
-    (module) => module.label === "M01" || module.label === "M02",
+    (module) => module.label === "M01" || module.label === "M02" || module.label === "M03",
   ).length;
   const reviewedFeeTotal = Math.max(
     1,

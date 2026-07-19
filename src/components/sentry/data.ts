@@ -537,6 +537,42 @@ export const uploadModules: UploadModule[] = [
     ],
   },
   {
+    accountId: "C001",
+    id: "M03",
+    title: "Royalty Fee Recovery",
+    subtitle: "Franchise remittance, POS gross-sales support, agreement PDFs, and royalty contract data.",
+    artifacts: [
+      {
+        key: "m03-royalty",
+        label: "Royalty Remittance Source",
+        type: "CSV",
+        status: "Missing",
+        note: "Franchisee royalty and marketing-remittance source for the governed certification period.",
+      },
+      {
+        key: "m03-pos",
+        label: "POS Gross Sales Export",
+        type: "CSV",
+        status: "Missing",
+        note: "Restaurant-side gross-sales export used to certify the royalty base and exclusions.",
+      },
+      {
+        key: "m03-agreement",
+        label: "Signed Franchise Agreement",
+        type: "PDF",
+        status: "Missing",
+        note: "Executed franchise agreement establishing royalty rate, marketing fund rate, waivers, and effective dates.",
+      },
+      {
+        key: "m03-contract",
+        label: "Royalty Contract Config",
+        type: "Manual Entry",
+        status: "Missing",
+        note: "Governed royalty model sealed from the franchise agreement and supporting exhibits.",
+      },
+    ],
+  },
+  {
     accountId: "C002",
     id: "M02",
     title: "Delivery Fee Recovery",

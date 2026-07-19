@@ -915,7 +915,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   function getArtifactStateKey(
     accountId: string,
     locationId: string,
-    moduleId: "M01" | "M02",
+    moduleId: "M01" | "M02" | "M03",
     artifactKey: string,
     vendorKey?: string,
   ) {

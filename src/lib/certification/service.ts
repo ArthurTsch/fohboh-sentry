@@ -128,7 +128,7 @@ function parseModulesJson(value: unknown) {
 function getArtifactStateKey(
   accountId: string,
   locationId: string,
-  moduleId: "M01" | "M02",
+  moduleId: "M01" | "M02" | "M03",
   artifactKey: string,
   vendorKey?: string | null,
 ) {
@@ -152,7 +152,7 @@ function getActiveModuleIds(
 ) {
   const explicit = modules
     .map((module) => module.label)
-    .filter((label): label is "M01" | "M02" => label === "M01" || label === "M02");
+    .filter((label): label is "M01" | "M02" | "M03" => label === "M01" || label === "M02" || label === "M03");
 
   if (explicit.length > 0) {
     return [...new Set(explicit)];
@@ -160,12 +160,12 @@ function getActiveModuleIds(
 
   const inferred = [...uploadRows, ...contractRows, ...schemaRows]
     .map((row) => row.module)
-    .filter((module): module is "M01" | "M02" => module === "M01" || module === "M02");
+    .filter((module): module is "M01" | "M02" | "M03" => module === "M01" || module === "M02" || module === "M03");
 
   return [...new Set(inferred)];
 }
 
-function resolveUploadModulesForAccount(accountId: string, activeModules: Array<"M01" | "M02">) {
+function resolveUploadModulesForAccount(accountId: string, activeModules: Array<"M01" | "M02" | "M03">) {
   const baseTemplates = uploadModules.filter(
     (module) =>
       module.accountId === BASE_UPLOAD_TEMPLATE_ACCOUNT_ID && activeModules.includes(module.id),
@@ -270,8 +270,9 @@ function buildHistoricalSnapshots(
 
   return rows
     .filter(
-      (row): row is HistoricalRunRow & { module: "M01" | "M02"; trust_score: number } =>
-        (row.module === "M01" || row.module === "M02") && typeof row.trust_score === "number",
+      (row): row is HistoricalRunRow & { module: "M01" | "M02" | "M03"; trust_score: number } =>
+        (row.module === "M01" || row.module === "M02" || row.module === "M03") &&
+        typeof row.trust_score === "number",
     )
     .map((row) => ({
       completedAt: row.completed_at?.toISOString() ?? null,
@@ -539,7 +540,7 @@ function ensureGovernedModules({
   contractRows,
   schemaRows,
 }: {
-  activeModules: Array<"M01" | "M02">;
+  activeModules: Array<"M01" | "M02" | "M03">;
   contractRows: Array<{ module: string }>;
   schemaRows: Array<{ module: string }>;
 }) {
@@ -632,7 +633,7 @@ export async function executePersistedCertification({
 }: {
   cadence?: "monthly_final" | "weekly_preliminary";
   locationId: string;
-  modules?: Array<"M01" | "M02">;
+  modules?: Array<"M01" | "M02" | "M03">;
   session: SessionState;
 }): Promise<CertificationExecutionResult> {
   if (typeof session.managerId !== "number") {
@@ -781,7 +782,7 @@ export async function executePersistedCertification({
       getArtifactStateKey(
         restaurant.accountId,
         restaurant.locationId,
-        upload.module as "M01" | "M02",
+        upload.module as "M01" | "M02" | "M03",
         upload.artifact_key,
         upload.vendor,
       )
@@ -818,12 +819,17 @@ export async function executePersistedCertification({
     const manualValues = payload?.manualValues;
     if (!manualValues) continue;
 
-    const artifactKey = contract.module === "M01" ? "m01-contract" : "m02-contract";
+    const artifactKey =
+      contract.module === "M01"
+        ? "m01-contract"
+        : contract.module === "M02"
+          ? "m02-contract"
+          : "m03-contract";
     artifactContractState[
       getArtifactStateKey(
         restaurant.accountId,
         restaurant.locationId,
-        contract.module as "M01" | "M02",
+        contract.module as "M01" | "M02" | "M03",
         artifactKey,
         contract.vendor,
       )
@@ -1007,7 +1013,7 @@ export async function executePersistedCertification({
     const runRecords: Array<{
       assessment: (typeof certification.assessments)[number];
       id: number;
-      module: "M01" | "M02";
+      module: "M01" | "M02" | "M03";
       schemaRegistryIds: number[];
       uploadIds: number[];
       varianceCents: bigint;

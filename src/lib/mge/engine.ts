@@ -1,4 +1,4 @@
-type ModuleId = "M01" | "M02";
+type ModuleId = "M01" | "M02" | "M03";
 type Cadence = "monthly_final" | "weekly_preliminary";
 
 type Metrics = {
@@ -1289,12 +1289,75 @@ const M02_RULES: DeterministicRule[] = [
   },
 ];
 
+const M03_RULES: DeterministicRule[] = [
+  {
+    id: "R099",
+    module: "M03",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const pos = context.pos?.metrics;
+      const contract = context.contract;
+      if (!pos || !contract || residualVariance <= 1) return null;
+      const certifiedGrossSales = resolveM03CertifiedGrossSales(pos, contract);
+      const royaltyRate = numberValue(contract.royalty_rate_pct);
+      const reportedRoyalty = numberValue(context.statement?.metrics?.feeAmount);
+      if (certifiedGrossSales <= 0 || royaltyRate <= 0 || reportedRoyalty <= 0) return null;
+      const requiredRoyalty = computeExpectedM03Royalty(certifiedGrossSales, contract);
+      const variance = Math.min(
+        roundCurrency(Math.max(0, requiredRoyalty - reportedRoyalty)),
+        residualVariance,
+      );
+      if (variance <= 1) return null;
+      return buildCitation("R099", 1, variance, {
+        certified_gross_sales: certifiedGrossSales,
+        reported_remittance: reportedRoyalty,
+        required_royalty: requiredRoyalty,
+        royalty_rate_pct: royaltyRate,
+      });
+    },
+  },
+  {
+    id: "R101",
+    module: "M03",
+    version: RULE_VERSION,
+    evaluate: (context, residualVariance) => {
+      const pos = context.pos?.metrics;
+      const contract = context.contract;
+      if (!pos || !contract || residualVariance <= 1) return null;
+      const certifiedGrossSales = resolveM03CertifiedGrossSales(pos, contract);
+      const marketingRate = numberValue(contract.marketing_fund_rate_pct);
+      const reportedMarketing = numberValue(
+        context.statement?.metrics?.marketingFeeAmount || context.statement?.metrics?.otherFeeAmount,
+      );
+      if (certifiedGrossSales <= 0 || marketingRate <= 0 || reportedMarketing <= 0) return null;
+      const requiredMarketing = computeExpectedM03MarketingFund(certifiedGrossSales, contract);
+      const variance = Math.min(
+        roundCurrency(Math.max(0, requiredMarketing - reportedMarketing)),
+        residualVariance,
+      );
+      if (variance <= 1) return null;
+      return buildCitation("R101", 1, variance, {
+        certified_gross_sales: certifiedGrossSales,
+        marketing_fund_rate_pct: marketingRate,
+        reported_marketing_remittance: reportedMarketing,
+        required_marketing_fund: requiredMarketing,
+      });
+    },
+  },
+];
+
 export function getRuleSetVersion(cadence: Cadence) {
   return cadence === "weekly_preliminary" ? "mge-v1.0.0-weekly-prelim" : RULE_VERSION;
 }
 
 export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEngineResult {
-  const statement = resolveArtifact(input.artifacts, input.moduleId === "M01" ? "processor" : "settlement");
+  const statementToken =
+    input.moduleId === "M01"
+      ? "processor"
+      : input.moduleId === "M02"
+        ? "settlement"
+        : "royalty";
+  const statement = resolveArtifact(input.artifacts, statementToken);
   const pos = resolveArtifact(input.artifacts, "pos");
   const agreement = resolveArtifact(input.artifacts, "agreement");
   const bank = resolveArtifact(input.artifacts, "bank");
@@ -1332,7 +1395,9 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
   const recoveryValue = roundCurrency(
     input.moduleId === "M01"
       ? computeM01Recovery(statement?.metrics, contract)
-      : computeM02Recovery(statement?.metrics, pos?.metrics, contract),
+      : input.moduleId === "M02"
+        ? computeM02Recovery(statement?.metrics, pos?.metrics, contract)
+        : computeM03Recovery(statement?.metrics, pos?.metrics, contract),
   );
   const loopARuleCitations = runLoopA(context, recoveryValue);
   const reviewedFeeVolume = computeReviewedFeeVolume(context);
@@ -1407,9 +1472,13 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
 }
 
 function runLoopA(context: RuleContext, recoveryValue: number) {
-  const rules = [...(context.moduleId === "M01" ? M01_RULES : M02_RULES)].sort((left, right) =>
-    left.id.localeCompare(right.id),
-  );
+  const ruleSet =
+    context.moduleId === "M01"
+      ? M01_RULES
+      : context.moduleId === "M02"
+        ? M02_RULES
+        : M03_RULES;
+  const rules = [...ruleSet].sort((left, right) => left.id.localeCompare(right.id));
   const citations: RuleCitation[] = [];
   let residualVariance = Math.max(0, recoveryValue);
 
@@ -1507,6 +1576,7 @@ function buildCanonicalGovernanceCitations({
         tg10: trustGates.TG10.scorePct,
       }));
     }
+    citations.push(...buildSupplementalM01CanonicalCitations(context, recoveryValue));
   }
 
   if (context.moduleId === "M02") {
@@ -1565,6 +1635,158 @@ function buildCanonicalGovernanceCitations({
         tg10: trustGates.TG10.scorePct,
       }));
     }
+    citations.push(...buildSupplementalM02CanonicalCitations(context, recoveryValue));
+  }
+
+  if (context.moduleId === "M03") {
+    const certifiedGrossSales = resolveM03CertifiedGrossSales(context.pos?.metrics, context.contract);
+    const reportedRoyalty = numberValue(context.statement?.metrics?.feeAmount);
+    const reportedMarketing = numberValue(
+      context.statement?.metrics?.marketingFeeAmount || context.statement?.metrics?.otherFeeAmount,
+    );
+    const requiredRoyalty = computeExpectedM03Royalty(certifiedGrossSales, context.contract);
+    const requiredMarketing = computeExpectedM03MarketingFund(certifiedGrossSales, context.contract);
+    const royaltyVariance = roundCurrency(Math.max(0, requiredRoyalty - reportedRoyalty));
+    const marketingVariance = roundCurrency(Math.max(0, requiredMarketing - reportedMarketing));
+    const selfReportedGrossSales = numberValue(context.statement?.metrics?.basisAmount);
+    const basisDeltaPct =
+      certifiedGrossSales > 0 && selfReportedGrossSales > 0
+        ? relativeDelta(certifiedGrossSales, selfReportedGrossSales)
+        : 0;
+    const contractAgeDays = (() => {
+      const effectiveDate = parseDateValue(textValue(context.contract?.effective_date));
+      return effectiveDate === null
+        ? null
+        : Math.floor((context.evaluationDate.getTime() - effectiveDate.getTime()) / 86400000);
+    })();
+    const royaltyReady = requiredRoyalty > 0 && reportedRoyalty > 0;
+    const marketingReady =
+      numberValue(context.contract?.marketing_fund_rate_pct) <= 0 ||
+      (requiredMarketing > 0 && reportedMarketing > 0);
+
+    citations.push(buildNarrativeCitation("R096", {
+      detail: hasStatement
+        ? "Royalty remittance source was received for the governed period."
+        : "Royalty remittance source is still missing for the governed period.",
+      royalty_source_uploaded: hasStatement,
+    }));
+    citations.push(buildNarrativeCitation("R097", {
+      certified_gross_sales: certifiedGrossSales,
+      detail: certifiedGrossSales > 0
+        ? "Certified royalty gross-sales basis was reconstructed from the governed POS source."
+        : "Certified royalty gross-sales basis could not yet be reconstructed from the governed POS source.",
+    }));
+    citations.push(buildNarrativeCitation("R098", {
+      certified_gross_sales: certifiedGrossSales,
+      detail: "Royalty sales exclusions were applied from the sealed contract and governed POS basis.",
+      excluded_sales_amount: resolveM03ExcludedSales(context.pos?.metrics, context.contract),
+    }));
+    if (royaltyVariance > 0) {
+      citations.push(buildCitation("R100", 1, Math.min(royaltyVariance, Math.max(recoveryValue, royaltyVariance)), {
+        reported_remittance: reportedRoyalty,
+        required_royalty: requiredRoyalty,
+        royalty_variance: royaltyVariance,
+      }));
+    }
+    citations.push(buildNarrativeCitation("R102", {
+      detail:
+        marketingVariance > 0
+          ? "Marketing-fund remittance remains below the required governed amount."
+          : "Marketing-fund remittance is aligned or not active for this governed period.",
+      marketing_variance: marketingVariance,
+      reported_marketing_remittance: reportedMarketing,
+      required_marketing_fund: requiredMarketing,
+    }));
+    citations.push(buildNarrativeCitation("R103", {
+      detail:
+        basisDeltaPct > 0.01
+          ? "Self-reported royalty sales diverge from POS-certified gross sales."
+          : "Self-reported royalty sales are aligned with POS-certified gross sales within tolerance.",
+      pos_certified_gross_sales: certifiedGrossSales,
+      self_reported_gross_sales: selfReportedGrossSales,
+      variance_pct: roundCurrency(basisDeltaPct * 100),
+    }));
+    citations.push(buildNarrativeCitation("R104", {
+      chronic_underreport_pattern: basisDeltaPct >= 0.03,
+      detail:
+        basisDeltaPct >= 0.03
+          ? "Royalty underreporting pattern threshold was met for this governed period."
+          : "No chronic royalty underreporting pattern was promoted from the current governed period.",
+      variance_pct: roundCurrency(basisDeltaPct * 100),
+    }));
+    citations.push(buildNarrativeCitation("R105", {
+      contract_age_days: contractAgeDays,
+      detail:
+        contractAgeDays !== null && contractAgeDays >= 0
+          ? "Royalty effective-date period check was applied against the sealed contract."
+          : "Royalty rate period check could not confirm an effective-date lineage from the sealed contract.",
+    }));
+    citations.push(buildNarrativeCitation("R106", {
+      agreement_uploaded: hasAgreement,
+      detail: hasAgreement
+        ? "A signed franchise agreement is present for the governed royalty workspace."
+        : "No signed franchise agreement is present for the governed royalty workspace.",
+    }));
+    citations.push(buildNarrativeCitation("R107", {
+      detail: truthyContractFlag(context.contract, "grace_period_active")
+        ? "A governed franchise grace-period flag is active and was considered during royalty-rate validation."
+        : "No governed franchise grace-period override is active for this period.",
+      grace_period_active: truthyContractFlag(context.contract, "grace_period_active"),
+    }));
+    citations.push(buildNarrativeCitation("R108", {
+      detail: truthyContractFlag(context.contract, "multi_concept_allocation_required")
+        ? "Multi-concept allocation handling is required and remains in the governed royalty path."
+        : "No multi-concept allocation handling was required for this governed period.",
+      multi_concept_allocation_required: truthyContractFlag(context.contract, "multi_concept_allocation_required"),
+    }));
+    citations.push(buildNarrativeCitation("R109", {
+      detail: numberValue(context.contract?.transfer_fee_amount) > 0
+        ? "A governed transfer-fee schedule is present and available for royalty audit."
+        : "No governed transfer-fee schedule was active for the certified period.",
+      transfer_fee_amount: numberValue(context.contract?.transfer_fee_amount),
+    }));
+    citations.push(buildNarrativeCitation("R110", {
+      detail: truthyContractFlag(context.contract, "royalty_waiver_active")
+        ? "A governed royalty-waiver state is active and must remain documented."
+        : "No governed royalty-waiver state is active for this period.",
+      royalty_waiver_active: truthyContractFlag(context.contract, "royalty_waiver_active"),
+    }));
+    citations.push(buildNarrativeCitation("R111", {
+      detail:
+        recoveryValue > 0 && recoveryValue <= 250
+          ? "Royalty variance exists but remains below the release threshold."
+          : "Royalty variance is either absent or above threshold for certification routing.",
+      recovery_threshold: 250,
+      recovery_value: recoveryValue,
+    }));
+    citations.push(buildNarrativeCitation("R112", {
+      detail:
+        recoveryValue > 250
+          ? "Royalty variance exceeded the certification threshold and is eligible for release scoring."
+          : "Royalty variance did not exceed the certification threshold.",
+      recovery_threshold: 250,
+      recovery_value: recoveryValue,
+    }));
+    citations.push(buildNarrativeCitation("R113", {
+      detail: `Royalty TG07 fee-legitimacy contribution resolved at ${trustGates.TG07.scorePct}.`,
+      tg07_score: trustGates.TG07.scorePct,
+    }));
+    citations.push(buildNarrativeCitation("R114", {
+      auditability_score: dimensions.Auditability,
+      detail:
+        auditComplete
+          ? "Royalty audit-trail lineage is complete for the governed period."
+          : "Royalty audit-trail lineage remains incomplete for the governed period.",
+    }));
+    citations.push(buildNarrativeCitation("R115", {
+      detail:
+        royaltyReady && marketingReady && gateReady
+          ? "Royalty narrative token set is releasable from persisted governed inputs."
+          : "Royalty narrative token set remains blocked because one or more governed controls are incomplete.",
+      gate_ready: gateReady,
+      marketing_ready: marketingReady,
+      royalty_ready: royaltyReady,
+    }));
   }
 
   if (!systemHealth.healthy) {
@@ -1872,6 +2094,15 @@ function computeReviewedFeeVolume(context: RuleContext) {
     return Math.max(
       resolveM02ContractBase(context.statement?.metrics, context.pos?.metrics, context.contract),
       computeActualM02Commission(context.statement?.metrics ?? {}),
+    );
+  }
+
+  if (context.moduleId === "M03") {
+    const certifiedGrossSales = resolveM03CertifiedGrossSales(context.pos?.metrics, context.contract);
+    return Math.max(
+      certifiedGrossSales,
+      numberValue(context.statement?.metrics?.feeAmount),
+      numberValue(context.statement?.metrics?.marketingFeeAmount),
     );
   }
 
@@ -2238,8 +2469,9 @@ function scoreDataCompleteness(context: RuleContext): Mq6Score {
   const baseScore = roundInteger((satisfied / requiredArtifacts.length) * 100);
   const statementComplete = context.statement ? artifactSatisfiesCompleteness(context, context.statement) : false;
   const posComplete = context.pos ? artifactSatisfiesCompleteness(context, context.pos) : false;
+  const bankRequired = moduleRequiresBank(context);
   const bankComplete =
-    context.cadence === "weekly_preliminary"
+    !bankRequired || context.cadence === "weekly_preliminary"
       ? true
       : context.bank
         ? artifactSatisfiesCompleteness(context, context.bank)
@@ -2249,7 +2481,7 @@ function scoreDataCompleteness(context: RuleContext): Mq6Score {
   if (!statementComplete || !posComplete) {
     // A broken source or POS file means the package is present but not structurally certifiable.
     score = Math.min(score, 20);
-  } else if (!bankComplete) {
+  } else if (bankRequired && !bankComplete) {
     // Monthly-final runs without the governed bank artifact stay in the blocked middle band.
     score = Math.min(score, 40);
   }
@@ -2291,7 +2523,7 @@ function scoreSourceAuthenticity(context: RuleContext): Mq6Score {
       context.pos.schema &&
       context.pos.fields,
   );
-  const bankRequired = context.cadence === "monthly_final";
+  const bankRequired = moduleRequiresBank(context);
   const bankEvidence = bankRequired
     ? Boolean(context.bank?.uploaded && context.bank.hash)
     : statementEvidence;
@@ -2328,6 +2560,7 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
       context.pos.schema &&
       context.pos.fields,
   );
+  const bankRequired = moduleRequiresBank(context);
   const bankGoverned = Boolean(context.bank?.uploaded && context.bank.hash);
   const statementBasis = numberValue(context.statement?.metrics?.basisAmount);
   const posBasis = numberValue(context.pos?.metrics?.basisAmount);
@@ -2357,7 +2590,10 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
     detailParts.push("Contract or statement evidence was insufficient for shadow fee computation.");
   }
 
-  if (context.cadence === "weekly_preliminary") {
+  if (!bankRequired) {
+    score += 50;
+    detailParts.push("No governed bank tie-out is required for the active royalty module.");
+  } else if (context.cadence === "weekly_preliminary") {
     score += 50;
     detailParts.push("Monthly bank tie-out deferred by weekly preliminary cadence.");
   } else if (statementGoverned && bankGoverned && bankDeposit > 0 && payoutAmount > 0) {
@@ -2567,12 +2803,411 @@ function dedupeRuleCitations(citations: RuleCitation[]) {
   });
 }
 
+function buildSupplementalM01CanonicalCitations(
+  context: RuleContext,
+  recoveryValue: number,
+) {
+  const citations: RuleCitation[] = [];
+  const statement = context.statement?.metrics;
+  const contract = context.contract;
+  if (!statement || !contract) return citations;
+
+  const vendor = resolveVendorName(context);
+  const actualFees = numberValue(statement.feeAmount);
+  const basisAmount = numberValue(statement.basisAmount);
+  const otherFees = numberValue(statement.otherFeeAmount) + numberValue(statement.serviceFeeAmount);
+  const debitVolume = numberValue(statement.visaDebitAmount) + numberValue(statement.mcDebitAmount);
+  const duplicateTxnCount = numberValue(statement.duplicateTransactionCount);
+  const chargebackCount = numberValue(statement.chargebackCount);
+  const amexVolume = numberValue(statement.visaCreditAmount) + numberValue(statement.mcCreditAmount);
+  const transactionCount = Math.max(1, numberValue(statement.transactionCount));
+  const effectiveRatePct = basisAmount > 0 ? (actualFees / basisAmount) * 100 : 0;
+  const expectedTotal = computeExpectedM01Fees(statement, contract);
+  const keyedPressure = transactionCount > 0 ? roundCurrency((otherFees / transactionCount) * 100) : 0;
+  const markupVariance = Math.max(0, roundCurrency(actualFees - expectedTotal));
+  const surchargeRatePct = numberValue(contract.surcharge_rate_pct || contract.applied_surcharge_rate_pct);
+  const surchargeCapPct = Math.min(
+    4,
+    numberValue(contract.max_surcharge_rate_pct || contract.contract_surcharge_cap_pct || contract.surcharge_cap_pct) || 4,
+  );
+  const monthlyVolume = numberValue(contract.monthly_card_volume || contract.monthly_volume || contract.volume_amount);
+  const volumeDiscountThreshold = numberValue(contract.volume_discount_threshold || contract.discount_threshold_volume);
+  const expectedVolumeDiscountPct = numberValue(contract.volume_discount_pct || contract.discount_rate_pct);
+
+  if (debitVolume > 0 && markupVariance > 0) {
+    citations.push(buildCitation("R056", 1, Math.min(markupVariance, Math.max(recoveryValue, markupVariance)), {
+      debit_volume: debitVolume,
+      detail: "Observed interchange-side fee burden remains above the governed category expectation for debit mix.",
+      expected_fee_amount: expectedTotal,
+      observed_fee_amount: actualFees,
+      unexplained_fee_delta: markupVariance,
+    }));
+  }
+  if (textValue(contract.sic_code) && textValue(contract.certified_sic_code) && textValue(contract.sic_code) !== textValue(contract.certified_sic_code)) {
+    citations.push(buildNarrativeCitation("R057", {
+      certified_sic_code: textValue(contract.certified_sic_code),
+      detail: "Certified SIC code differs from the active processor contract SIC classification.",
+      processor_sic_code: textValue(contract.sic_code),
+    }));
+  }
+  if (effectiveRatePct > numberValue(contract.max_effective_rate_pct || contract.rate_ceiling_pct) && numberValue(contract.max_effective_rate_pct || contract.rate_ceiling_pct) > 0) {
+    citations.push(buildCitation("R058", 1, Math.max(0, recoveryValue), {
+      actual_effective_rate_pct: roundCurrency(effectiveRatePct),
+      basis_amount: basisAmount,
+      max_effective_rate_pct: numberValue(contract.max_effective_rate_pct || contract.rate_ceiling_pct),
+      observed_fee_amount: actualFees,
+    }));
+  }
+  if (otherFees > Math.max(5, numberValue(contract.monthly_fee)) && !truthyContractFlag(contract, "other_fees_authorized")) {
+    citations.push(buildCitation("R059", 1, Math.min(otherFees, Math.max(recoveryValue, otherFees)), {
+      authorized_monthly_fee: numberValue(contract.monthly_fee),
+      detail: "Observed non-interchange fee pool exceeds governed recurring fees without explicit authorization.",
+      observed_other_fee_pool: roundCurrency(otherFees),
+    }));
+  }
+  if (
+    truthyContractFlag(contract, "surcharge_enabled")
+    && surchargeRatePct > surchargeCapPct
+    && debitVolume + basisAmount > 0
+  ) {
+    const surchargedVolume = Math.max(debitVolume, basisAmount);
+    const excessRatePct = Math.max(0, surchargeRatePct - surchargeCapPct);
+    const surchargeVariance = roundCurrency((surchargedVolume * excessRatePct) / 100);
+    citations.push(buildCitation("R061", 1, Math.min(Math.max(surchargeVariance, otherFees), Math.max(recoveryValue, 0)), {
+      applied_surcharge_rate_pct: surchargeRatePct,
+      detail: "The governed surcharge rate exceeds the contractual or network cap.",
+      max_surcharge_rate_pct: surchargeCapPct,
+      surcharged_volume: surchargedVolume,
+    }));
+  }
+  if (debitVolume > 0 && otherFees > 0 && truthyContractFlag(contract, "surcharge_enabled")) {
+    citations.push(buildCitation("R062", 1, Math.min(otherFees, Math.max(recoveryValue, otherFees)), {
+      debit_volume: debitVolume,
+      detail: "Debit volume is present while surcharge-side fee pressure remains in the statement.",
+      surcharge_fee_pool: roundCurrency(otherFees),
+    }));
+  }
+  if (keyedPressure > 10 && truthyContractFlag(contract, "avs_required")) {
+    citations.push(buildNarrativeCitation("R065", {
+      avs_required: true,
+      detail: "Keyed or card-not-present pressure remains high despite governed AVS controls.",
+      keyed_fee_pressure_bps: keyedPressure,
+    }));
+  }
+  if (keyedPressure > 10 && truthyContractFlag(contract, "cvv_required")) {
+    citations.push(buildNarrativeCitation("R066", {
+      cvv_required: true,
+      detail: "Card-not-present fee pressure remains high despite governed CVV controls.",
+      keyed_fee_pressure_bps: keyedPressure,
+    }));
+  }
+  if (duplicateTxnCount > 0 && !truthyContractFlag(contract, "partial_auth_enabled")) {
+    citations.push(buildCitation("R067", Math.max(1, Math.round(duplicateTxnCount)), Math.min(actualFees, Math.max(recoveryValue, actualFees * 0.1)), {
+      detail: "Duplicate transaction behavior is inconsistent with a no-partial-auth governed profile.",
+      duplicate_transaction_count: duplicateTxnCount,
+      partial_auth_enabled: false,
+    }));
+  }
+  if (numberValue(contract.termination_fee_amount) > 0 && otherFees >= numberValue(contract.termination_fee_amount) && !truthyContractFlag(contract, "early_termination_triggered")) {
+    citations.push(buildCitation("R069", 1, numberValue(contract.termination_fee_amount), {
+      detail: "Termination-fee-sized charge appears without governed early termination trigger state.",
+      observed_other_fee_pool: roundCurrency(otherFees),
+      termination_fee_amount: numberValue(contract.termination_fee_amount),
+    }));
+  }
+  if (truthyContractFlag(contract, "surcharge_enabled") && surchargeRestrictedState(contract) && otherFees > 0) {
+    citations.push(buildCitation("R071", 1, Math.min(otherFees, Math.max(recoveryValue, otherFees)), {
+      detail: "Surcharge-side fee pressure appears in a surcharge-restricted jurisdiction.",
+      governed_state: textValue(contract.state || contract.jurisdiction),
+      surcharge_fee_pool: roundCurrency(otherFees),
+    }));
+  }
+  if (chargebackCount > 0 && numberValue(contract.chargeback_fee) > 0 && otherFees > 0) {
+    citations.push(buildCitation("R074", Math.max(1, Math.round(chargebackCount)), Math.min(roundCurrency(chargebackCount * numberValue(contract.chargeback_fee)), Math.max(recoveryValue, 0)), {
+      chargeback_count: chargebackCount,
+      chargeback_fee: numberValue(contract.chargeback_fee),
+      detail: "Chargeback-side fee pressure remains attributable to retrieval or representment handling.",
+    }));
+  }
+  if ((debitVolume > 0 || amexVolume > 0) && markupVariance > 0) {
+    citations.push(buildCitation("R076", 1, Math.min(markupVariance, Math.max(recoveryValue, markupVariance)), {
+      card_mix_volume: roundCurrency(debitVolume + amexVolume),
+      detail: "Observed statement fees remain above the governed interchange-table expectation for the active card mix.",
+      expected_fee_amount: expectedTotal,
+      observed_fee_amount: actualFees,
+    }));
+  }
+  if (vendor.includes("amex") || textValue(contract.amex_program).includes("optblue")) {
+    const feeShare = basisAmount > 0 ? roundCurrency((actualFees / basisAmount) * 100) : 0;
+    if (amexVolume > 0 && feeShare > 2.5) {
+      citations.push(buildCitation("R077", 1, Math.min(roundCurrency(actualFees * 0.12), Math.max(recoveryValue, 0)), {
+        amex_program: textValue(contract.amex_program) || "optblue",
+        amex_volume_proxy: amexVolume,
+        observed_effective_rate_pct: feeShare,
+      }));
+    }
+  }
+  if (truthyContractFlag(contract, "equipment_inactive") && otherFees > 0) {
+    citations.push(buildCitation("R080", 1, Math.min(otherFees, Math.max(recoveryValue, otherFees)), {
+      detail: "Fee pressure remains even though the governed contract marks inactive equipment.",
+      observed_other_fee_pool: roundCurrency(otherFees),
+    }));
+  }
+  if (truthyContractFlag(contract, "international_card_mix") && otherFees > 0) {
+    citations.push(buildCitation("R081", 1, Math.min(roundCurrency(otherFees * 0.35), Math.max(recoveryValue, 0)), {
+      detail: "International-card mix flag is active while extra fee pressure remains on the statement.",
+      observed_other_fee_pool: roundCurrency(otherFees),
+    }));
+  }
+  if (!truthyContractFlag(contract, "dcc_allowed") && otherFees > 0 && textValue(contract.currency_mode).includes("conversion")) {
+    citations.push(buildCitation("R082", 1, Math.min(roundCurrency(otherFees * 0.4), Math.max(recoveryValue, 0)), {
+      currency_mode: textValue(contract.currency_mode),
+      detail: "Dynamic currency conversion-style pressure appears without governed DCC permission.",
+      observed_other_fee_pool: roundCurrency(otherFees),
+    }));
+  }
+  if (numberValue(contract.annual_fee_amount) <= 0 && otherFees >= 99) {
+    citations.push(buildCitation("R084", 1, Math.min(otherFees, Math.max(recoveryValue, otherFees)), {
+      detail: "A material recurring/annual-style fee pool is present without a governed annual fee term.",
+      observed_other_fee_pool: roundCurrency(otherFees),
+    }));
+  }
+  if (
+    volumeDiscountThreshold > 0
+    && monthlyVolume >= volumeDiscountThreshold
+    && expectedVolumeDiscountPct > 0
+  ) {
+    const missedDiscount = roundCurrency((basisAmount * expectedVolumeDiscountPct) / 100);
+    citations.push(buildCitation("R079", 1, Math.min(Math.max(missedDiscount, 0), Math.max(recoveryValue, 0)), {
+      detail: "Governed monthly volume is above the discount threshold but no explicit discount relief is reflected in the observed fee burden.",
+      expected_volume_discount_pct: expectedVolumeDiscountPct,
+      monthly_card_volume: monthlyVolume,
+      volume_discount_threshold: volumeDiscountThreshold,
+    }));
+  }
+  if (recoveryValue >= 250) {
+    citations.push(buildNarrativeCitation("R089", {
+      detail: "Observed MFR recovery exceeds the certification threshold and remains eligible for release scoring.",
+      recovery_threshold: 250,
+      recovery_value: recoveryValue,
+    }));
+  }
+
+  return citations;
+}
+
+function buildSupplementalM02CanonicalCitations(
+  context: RuleContext,
+  recoveryValue: number,
+) {
+  const citations: RuleCitation[] = [];
+  const statement = context.statement?.metrics;
+  const pos = context.pos?.metrics;
+  const contract = context.contract;
+  if (!statement || !contract) return citations;
+
+  const vendor = resolveVendorName(context);
+  const actualCommission = computeActualM02Commission(statement);
+  const expectedRate = computeExpectedM02Rate(contract);
+  const basisAmount = resolveM02ContractBase(statement, pos, contract);
+  const statementBasis = numberValue(statement.basisAmount);
+  const posBasis = numberValue(pos?.basisAmount);
+  const pickupOrders = numberValue(statement.pickupOrderCount);
+  const orderCount = Math.max(1, numberValue(statement.orderCount) || numberValue(statement.transactionCount));
+  const refundCount = numberValue(statement.refundCount);
+  const promoOrders = numberValue(statement.promoOrderCount);
+  const marketingFee = numberValue(statement.marketingFeeAmount);
+  const adjustmentAmount = numberValue(statement.adjustmentAmount);
+  const taxRemitted = numberValue(statement.taxRemittedAmount);
+  const averageOrderValue = statementBasis > 0 ? roundCurrency(statementBasis / orderCount) : 0;
+  const observedRate = basisAmount > 0 ? roundCurrency((actualCommission / basisAmount) * 100) : 0;
+  const basisDeltaPct = posBasis > 0 && statementBasis > 0 ? relativeDelta(statementBasis, posBasis) : 0;
+
+  if (actualCommission > 0 && basisAmount > 0) {
+    citations.push(buildNarrativeCitation("R016", {
+      commission_base_amount: basisAmount,
+      detail: "Commission basis was reconstructed from governed settlement and POS source evidence.",
+      expected_rate_pct: expectedRate,
+      observed_commission: actualCommission,
+    }));
+  }
+  if (observedRate > expectedRate + 0.5 && expectedRate > 0) {
+    citations.push(buildCitation("R017", 1, Math.max(0, recoveryValue), {
+      contracted_rate_pct: expectedRate,
+      detail: "Observed settlement commission rate exceeds the governed DSP contract rate.",
+      observed_rate_pct: observedRate,
+    }));
+  }
+  if (promoOrders > 0 && marketingFee > 0) {
+    citations.push(buildCitation("R018", Math.max(1, Math.round(promoOrders)), Math.min(marketingFee, Math.max(recoveryValue, marketingFee)), {
+      detail: "Promotional order evidence is present and the period still carries promotional charge pressure.",
+      marketing_fee_amount: marketingFee,
+      promo_order_count: promoOrders,
+    }));
+  }
+  if (refundCount > 0 && adjustmentAmount <= 0) {
+    citations.push(buildCitation("R019", Math.max(1, Math.round(refundCount)), Math.min(roundCurrency(actualCommission * 0.08), Math.max(recoveryValue, 0)), {
+      detail: "Refund/cancellation pressure appears without compensating settlement credit behavior.",
+      refund_count: refundCount,
+      settlement_adjustment_amount: adjustmentAmount,
+    }));
+  }
+  if (refundCount > 0 && actualCommission > 0 && adjustmentAmount >= 0) {
+    citations.push(buildCitation("R020", Math.max(1, Math.round(refundCount)), Math.min(roundCurrency(actualCommission * 0.05), Math.max(recoveryValue, 0)), {
+      detail: "Commission remains present on pre-dispatch cancellation-style volume.",
+      refund_count: refundCount,
+      settlement_adjustment_amount: adjustmentAmount,
+    }));
+  }
+  if (basisDeltaPct > 0.05 && posBasis > 0 && statementBasis > 0) {
+    citations.push(buildCitation("R021", 1, Math.min(roundCurrency(Math.abs(statementBasis - posBasis) * (expectedRate / 100)), Math.max(recoveryValue, 0)), {
+      detail: "Settlement basis and POS basis still diverge beyond price/base tolerance.",
+      pos_basis_amount: posBasis,
+      settlement_basis_amount: statementBasis,
+    }));
+  }
+  if (basisDeltaPct > 0.08 && orderCount >= 3) {
+    citations.push(buildNarrativeCitation("R022", {
+      basis_delta_pct: roundCurrency(basisDeltaPct * 100),
+      detail: "Repeated price/base mismatch pattern remains present in the governed DFR package.",
+      order_count: orderCount,
+    }));
+  }
+  if (vendor.includes("doordash") && averageOrderValue > 40 && observedRate > expectedRate + 0.5) {
+    citations.push(buildCitation("R026", 1, Math.min(roundCurrency(actualCommission * 0.15), Math.max(recoveryValue, 0)), {
+      average_order_value: averageOrderValue,
+      detail: "DoorDash tier behavior appears inconsistent with governed high-value rate treatment.",
+      observed_rate_pct: observedRate,
+    }));
+  }
+  if (vendor.includes("uber") && textValue(contract.plan_name).includes("lite") && observedRate > expectedRate + 0.5) {
+    citations.push(buildCitation("R027", 1, Math.min(roundCurrency(actualCommission * 0.15), Math.max(recoveryValue, 0)), {
+      detail: "Uber Eats Lite plan marker is present while observed rate reflects full-rate pressure.",
+      observed_rate_pct: observedRate,
+      plan_name: textValue(contract.plan_name),
+    }));
+  }
+  if (vendor.includes("grubhub") && marketingFee > numberValue(contract.marketing_fee_pct) && marketingFee > 1) {
+    citations.push(buildCitation("R028", 1, Math.min(marketingFee, Math.max(recoveryValue, marketingFee)), {
+      detail: "Grubhub marketing allocation exceeds the governed marketing exhibit envelope.",
+      marketing_fee_amount: marketingFee,
+      marketing_fee_pct: numberValue(contract.marketing_fee_pct),
+    }));
+  }
+  if (pickupOrders > 0 && actualCommission > 0) {
+    citations.push(buildCitation("R029", Math.max(1, Math.round(pickupOrders)), Math.min(roundCurrency(actualCommission * (pickupOrders / orderCount) * 0.5), Math.max(recoveryValue, 0)), {
+      detail: "Pickup-order volume still carries delivery-rate commission pressure.",
+      pickup_order_count: pickupOrders,
+      total_order_count: orderCount,
+    }));
+  }
+  if (adjustmentAmount > 0) {
+    citations.push(buildCitation("R030", 1, Math.min(adjustmentAmount, Math.max(recoveryValue, adjustmentAmount)), {
+      adjustment_amount: adjustmentAmount,
+      detail: "Settlement adjustment credit remains unexplained by governed contract truth.",
+    }));
+  }
+  if (truthyContractFlag(contract, "alcohol_commission_exempt") && taxRemitted > 0 && actualCommission > 0) {
+    citations.push(buildCitation("R031", 1, Math.min(roundCurrency(actualCommission * 0.08), Math.max(recoveryValue, 0)), {
+      alcohol_commission_exempt: true,
+      detail: "Tax/exemptive signals are present while commission still appears to apply to excluded alcohol basis.",
+      tax_remitted_amount: taxRemitted,
+    }));
+  }
+  if (!truthyContractFlag(contract, "platform_delivered") && pickupOrders > 0 && actualCommission > 0) {
+    citations.push(buildCitation("R032", Math.max(1, Math.round(pickupOrders)), Math.min(roundCurrency(actualCommission * 0.06), Math.max(recoveryValue, 0)), {
+      detail: "Merchant-managed or third-party delivery profile still carries platform-delivered commission behavior.",
+      pickup_order_count: pickupOrders,
+      platform_delivered: false,
+    }));
+  }
+  if (averageOrderValue > 0 && averageOrderValue < numberValue(contract.minimum_order_threshold) && actualCommission > 0) {
+    citations.push(buildCitation("R033", 1, Math.min(roundCurrency(actualCommission * 0.12), Math.max(recoveryValue, 0)), {
+      average_order_value: averageOrderValue,
+      detail: "Minimum-order guarantee threshold was breached without protected commission treatment.",
+      minimum_order_threshold: numberValue(contract.minimum_order_threshold),
+    }));
+  }
+  if (refundCount > 0 && actualCommission > 0 && adjustmentAmount >= 0) {
+    citations.push(buildCitation("R037", Math.max(1, Math.round(refundCount)), Math.min(roundCurrency(actualCommission * 0.07), Math.max(recoveryValue, 0)), {
+      detail: "Refund volume is present but commission offset behavior remains incomplete.",
+      refund_count: refundCount,
+      settlement_adjustment_amount: adjustmentAmount,
+    }));
+  }
+  if (textValue(contract.billing_currency) && textValue(contract.billing_currency) !== "usd" && expectedRate > 0) {
+    citations.push(buildCitation("R039", 1, Math.min(roundCurrency(actualCommission * 0.04), Math.max(recoveryValue, 0)), {
+      billing_currency: textValue(contract.billing_currency),
+      detail: "Non-USD settlement profile requires governed FX validation and still shows commission variance pressure.",
+      observed_rate_pct: observedRate,
+    }));
+  }
+  const contractStartDate = parseDateValue(textValue(contract.location_start_date || contract.effective_date));
+  if (contractStartDate) {
+    const ageDays = Math.floor((context.evaluationDate.getTime() - contractStartDate.getTime()) / 86400000);
+    const onboardingRate = numberValue(contract.onboarding_rate_pct);
+    if (ageDays >= 0 && ageDays < 90 && onboardingRate > 0 && observedRate > onboardingRate + 0.5) {
+      citations.push(buildCitation("R040", 1, Math.min(roundCurrency(actualCommission * 0.12), Math.max(recoveryValue, 0)), {
+        age_days: ageDays,
+        detail: "Location is within onboarding window but charged above governed onboarding rate.",
+        onboarding_rate_pct: onboardingRate,
+        observed_rate_pct: observedRate,
+      }));
+    }
+  }
+  if (!truthyContractFlag(contract, "allow_peak_surcharge") && numberValue(statement.deliveryFeeAmount) > 0 && actualCommission > 0) {
+    citations.push(buildCitation("R042", 1, Math.min(roundCurrency(numberValue(statement.deliveryFeeAmount) * 0.15), Math.max(recoveryValue, 0)), {
+      delivery_fee_amount: numberValue(statement.deliveryFeeAmount),
+      detail: "Peak-hour or surge-like delivery surcharge pressure appears without governed authorization.",
+    }));
+  }
+  if (truthyContractFlag(contract, "bundled_order_discount_required") && orderCount > 1 && actualCommission > 0) {
+    citations.push(buildCitation("R043", 1, Math.min(roundCurrency(actualCommission * 0.08), Math.max(recoveryValue, 0)), {
+      bundled_order_discount_required: true,
+      detail: "Bundled-order discount requirement is governed but settlement still reflects full-fee pressure.",
+      total_order_count: orderCount,
+    }));
+  }
+  if (numberValue(statement.chargebackCount) > 0 && !truthyContractFlag(contract, "fraud_chargeback_supported")) {
+    citations.push(buildCitation("R044", Math.max(1, Math.round(numberValue(statement.chargebackCount))), Math.min(roundCurrency(numberValue(statement.chargebackCount) * 15), Math.max(recoveryValue, 0)), {
+      chargeback_count: numberValue(statement.chargebackCount),
+      detail: "Fraud/chargeback fee pressure appears without governed support for that charge class.",
+    }));
+  }
+  if (recoveryValue >= 250) {
+    citations.push(buildNarrativeCitation("R045", {
+      detail: "Observed DFR recovery exceeds the minimum certification threshold.",
+      recovery_threshold: 250,
+      recovery_value: recoveryValue,
+    }));
+  }
+  if (statementBasis > 0 && numberValue(statement.errorChargeAmount) > 0) {
+    const errorRatePct = roundCurrency((numberValue(statement.errorChargeAmount) / statementBasis) * 100);
+    if (errorRatePct > 2) {
+      citations.push(buildNarrativeCitation("R050", {
+        detail: "Period error rate materially exceeds the governed benchmark tolerance band.",
+        error_charge_amount: numberValue(statement.errorChargeAmount),
+        error_rate_pct: errorRatePct,
+      }));
+    }
+  }
+  if (truthyContractFlag(contract, "multi_location_account") && recoveryValue > 0) {
+    citations.push(buildNarrativeCitation("R053", {
+      detail: "This location is part of a multi-location DSP account and should participate in roll-up review.",
+      recovery_value: recoveryValue,
+    }));
+  }
+
+  return citations;
+}
+
 function isRequiredArtifact(context: RuleContext, artifact: ModuleArtifactState) {
   if (artifact.key.includes("bank")) {
-    return context.cadence === "monthly_final";
+    return moduleRequiresBank(context) && context.cadence === "monthly_final";
   }
   return artifact.key.includes("processor") ||
     artifact.key.includes("settlement") ||
+    artifact.key.includes("royalty") ||
     artifact.key.includes("pos") ||
     artifact.key.includes("agreement") ||
     artifact.key.includes("contract");
@@ -2599,6 +3234,10 @@ function artifactSatisfiesCompleteness(
 
 function resolveArtifact(artifacts: ModuleArtifactState[], token: string) {
   return artifacts.find((artifact) => artifact.key.includes(token)) ?? null;
+}
+
+function moduleRequiresBank(context: RuleContext) {
+  return context.moduleId !== "M03";
 }
 
 function computeExpectedM01Fees(metrics: Metrics, contract: Record<string, string>) {
@@ -2683,6 +3322,59 @@ function computeM02Recovery(
   return Math.max(0, roundCurrency(actualCommission - basisAmount * (expectedRate / 100)));
 }
 
+function resolveM03ExcludedSales(
+  pos?: Metrics,
+  contract?: Record<string, string> | null,
+) {
+  return Math.max(
+    0,
+    numberValue(pos?.taxRemittedAmount) +
+      numberValue(contract?.excluded_sales_amount) +
+      numberValue(contract?.gift_card_redemptions_amount) +
+      numberValue(contract?.bottle_deposit_amount),
+  );
+}
+
+function resolveM03CertifiedGrossSales(
+  pos?: Metrics,
+  contract?: Record<string, string> | null,
+) {
+  const grossSales = numberValue(pos?.basisAmount);
+  const exclusions = resolveM03ExcludedSales(pos, contract);
+  return Math.max(0, roundCurrency(grossSales - exclusions));
+}
+
+function computeExpectedM03Royalty(
+  certifiedGrossSales: number,
+  contract?: Record<string, string> | null,
+) {
+  return roundCurrency(certifiedGrossSales * (numberValue(contract?.royalty_rate_pct) / 100));
+}
+
+function computeExpectedM03MarketingFund(
+  certifiedGrossSales: number,
+  contract?: Record<string, string> | null,
+) {
+  return roundCurrency(certifiedGrossSales * (numberValue(contract?.marketing_fund_rate_pct) / 100));
+}
+
+function computeM03Recovery(
+  statement?: Metrics,
+  pos?: Metrics,
+  contract?: Record<string, string> | null,
+) {
+  if (!statement || !pos || !contract) return 0;
+  const certifiedGrossSales = resolveM03CertifiedGrossSales(pos, contract);
+  const requiredRoyalty = computeExpectedM03Royalty(certifiedGrossSales, contract);
+  const requiredMarketing = computeExpectedM03MarketingFund(certifiedGrossSales, contract);
+  const reportedRoyalty = numberValue(statement.feeAmount);
+  const reportedMarketing = numberValue(statement.marketingFeeAmount || statement.otherFeeAmount);
+  return Math.max(
+    0,
+    roundCurrency((requiredRoyalty - reportedRoyalty) + Math.max(0, requiredMarketing - reportedMarketing)),
+  );
+}
+
 function contractFieldCount(values: Record<string, string>) {
   return Object.entries(values).filter(([key, value]) => key !== "__entry_mode" && Boolean(value)).length;
 }
@@ -2721,6 +3413,34 @@ function parseDateValue(value: string | undefined | null) {
   if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function textValue(value: string | undefined | null) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function truthyContractFlag(contract: Record<string, string> | null | undefined, key: string) {
+  const value = textValue(contract?.[key]);
+  return value === "true" || value === "yes" || value === "1" || value === "enabled";
+}
+
+function resolveVendorName(context: RuleContext) {
+  return [
+    context.statement?.label,
+    context.statement?.key,
+    context.agreement?.label,
+    context.agreement?.key,
+    context.contract?.vendor,
+    context.contract?.processor,
+    context.contract?.dsp,
+  ]
+    .map((value) => textValue(value ?? ""))
+    .find((value) => value.length > 0) ?? "";
+}
+
+function surchargeRestrictedState(contract: Record<string, string> | null | undefined) {
+  const state = textValue(contract?.state || contract?.jurisdiction);
+  return ["ca", "co", "ct", "ma", "me", "ny", "ok"].some((token) => state === token || state.includes(token));
 }
 
 function roundCurrency(value: number) {

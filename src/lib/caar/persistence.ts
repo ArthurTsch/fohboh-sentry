@@ -12,7 +12,7 @@ type TxClient = PrismaClient | Prisma.TransactionClient;
 type RunRecord = {
   assessment: ModuleAssessment;
   id: number;
-  module: "M01" | "M02";
+  module: "M01" | "M02" | "M03";
   schemaRegistryIds: number[];
   uploadIds: number[];
   varianceCents: bigint;
@@ -134,7 +134,11 @@ function buildCanonicalPayload({
     trustScore: certification.trustScore,
   });
   const moduleLabel =
-    runRecords[0]?.module === "M01" ? "Merchant Fee Recovery" : "Delivery Fee Recovery";
+    runRecords[0]?.module === "M01"
+      ? "Merchant Fee Recovery"
+      : runRecords[0]?.module === "M02"
+        ? "Delivery Fee Recovery"
+        : "Royalty Recovery";
   const mq6Entries = Object.fromEntries(
     record.dimensions.map((dimension) => [
       normalizeMq6Label(dimension.name),
