@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import type {
   LocationRecord,
   SessionState,
@@ -20,8 +20,15 @@ const CATEGORY_OPTIONS: SupportTicketCategory[] = [
 ];
 
 const URGENCY_OPTIONS: SupportTicketUrgency[] = ["Low", "Medium", "High", "Critical"];
+const MAX_ATTACHMENTS = 5;
+
+type DraftAttachment = {
+  file: File;
+  id: string;
+};
 
 type FormState = {
+  attachments: DraftAttachment[];
   category: SupportTicketCategory;
   description: string;
   locationId: string;
@@ -31,6 +38,7 @@ type FormState = {
 
 function emptyForm(locations: LocationRecord[]): FormState {
   return {
+    attachments: [],
     category: "Certification",
     description: "",
     locationId: locations[0]?.id ?? "",
@@ -62,9 +70,23 @@ function formatTimestamp(value: string | null) {
   }).format(date);
 }
 
+function formatBytes(value: number) {
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${Math.round(value / 102.4) / 10} KB`;
+  }
+  return `${value} B`;
+}
+
 function locationLabel(id: string, locations: LocationRecord[]) {
   const match = locations.find((location) => location.id === id);
   return match ? `${match.name} (${match.id})` : id;
+}
+
+function attachmentHref(ticketId: string, attachmentId: string) {
+  return `/api/v1/support/tickets/${encodeURIComponent(ticketId)}/attachments/${encodeURIComponent(attachmentId)}`;
 }
 
 export function SupportTicketsView({
@@ -80,6 +102,7 @@ export function SupportTicketsView({
   onTicketCreated?: () => void | Promise<void>;
   session: SessionState;
 }) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [form, setForm] = useState<FormState>(() => emptyForm(locations));
   const [tickets, setTickets] = useState<SupportTicketRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,6 +139,36 @@ export function SupportTicketsView({
     );
   }, [locations]);
 
+  function handleAttachmentPick(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) {
+      return;
+    }
+
+    setForm((current) => {
+      const additions = files.map((file, index) => ({
+        file,
+        id: `${file.name}-${file.size}-${file.lastModified}-${index}`,
+      }));
+
+      return {
+        ...current,
+        attachments: [...current.attachments, ...additions].slice(0, MAX_ATTACHMENTS),
+      };
+    });
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  function removeAttachment(attachmentId: string) {
+    setForm((current) => ({
+      ...current,
+      attachments: current.attachments.filter((attachment) => attachment.id !== attachmentId),
+    }));
+  }
+
   async function handleSubmit() {
     if (!form.subject.trim()) {
       setError("Ticket subject is required.");
@@ -123,6 +176,10 @@ export function SupportTicketsView({
     }
     if (!form.description.trim()) {
       setError("Ticket description is required.");
+      return;
+    }
+    if (form.attachments.length > MAX_ATTACHMENTS) {
+      setError(`A support ticket can include at most ${MAX_ATTACHMENTS} attachments.`);
       return;
     }
 
@@ -133,21 +190,22 @@ export function SupportTicketsView({
     const selectedLocation = locations.find((location) => location.id === form.locationId);
 
     try {
+      const formData = new FormData();
+      formData.append("accountId", accountId ?? "");
+      formData.append("accountName", accountName);
+      formData.append("category", form.category);
+      formData.append("description", form.description.trim());
+      formData.append("locationId", selectedLocation?.id || "");
+      formData.append("locationName", selectedLocation?.name || "");
+      formData.append("subject", form.subject.trim());
+      formData.append("urgency", form.urgency);
+      for (const attachment of form.attachments) {
+        formData.append("attachments", attachment.file, attachment.file.name);
+      }
+
       const response = await fetch("/api/v1/support/tickets", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          accountId,
-          accountName,
-          category: form.category,
-          description: form.description.trim(),
-          locationId: selectedLocation?.id || null,
-          locationName: selectedLocation?.name || null,
-          subject: form.subject.trim(),
-          urgency: form.urgency,
-        }),
+        body: formData,
       });
 
       const payload = (await response.json().catch(() => ({}))) as {
@@ -161,6 +219,9 @@ export function SupportTicketsView({
 
       setTickets((current) => [payload.ticket!, ...current]);
       setForm(emptyForm(locations));
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       setMessage("Support ticket created. The WGS queue has been updated.");
       await onTicketCreated?.();
     } catch (nextError) {
@@ -186,7 +247,7 @@ export function SupportTicketsView({
                   },
                   {
                     label: "What It Does",
-                    text: "Creates a persisted support ticket with severity, location scope, and requester identity for the WGS team.",
+                    text: "Creates a persisted support ticket with severity, location scope, requester identity, and supporting attachments for the WGS team.",
                   },
                   {
                     label: "Email Path",
@@ -199,7 +260,7 @@ export function SupportTicketsView({
             </div>
             <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
               Submit a support request with the right operational context instead of sending a free-form
-              chat message. This creates a real ticket for the WGS queue and keeps the request traceable.
+              message. This creates a real ticket for the WGS queue and keeps the request traceable.
             </p>
           </div>
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
@@ -320,9 +381,62 @@ export function SupportTicketsView({
             />
           </label>
 
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+                  Attach files
+                </div>
+                <div className="mt-2 text-sm text-[var(--muted)]">
+                  Add screenshots, PDFs, CSVs, or office documents. Max 5 files, 10 MB each.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-semibold text-[var(--text)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              >
+                Add attachments
+              </button>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.csv,.txt,.png,.jpg,.jpeg,.webp,.gif,.doc,.docx,.xls,.xlsx"
+              onChange={handleAttachmentPick}
+              className="hidden"
+            />
+            {form.attachments.length > 0 ? (
+              <div className="mt-4 space-y-2">
+                {form.attachments.map((attachment) => (
+                  <div
+                    key={attachment.id}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--border)] px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-[var(--text)]">{attachment.file.name}</div>
+                      <div className="mt-1 text-xs text-[var(--muted)]">
+                        {attachment.file.type || "application/octet-stream"} · {formatBytes(attachment.file.size)}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(attachment.id)}
+                      className="rounded-full border border-[rgba(214,48,49,0.24)] px-3 py-1.5 text-xs font-semibold text-[var(--accent)] transition hover:bg-[rgba(214,48,49,0.06)]"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
           <div className="rounded-2xl border border-[rgba(0,97,255,0.14)] bg-[rgba(0,97,255,0.04)] px-4 py-4 text-sm leading-6 text-[var(--muted)]">
             Email delivery is not the primary workflow yet. The system already prepares the outbound
-            support email payload server-side so activation later does not require a new ticket UI.
+            support email payload server-side, including attachment metadata, so activation later does
+            not require a new ticket UI.
           </div>
 
           <div className="flex justify-end">
@@ -373,6 +487,24 @@ export function SupportTicketsView({
                       ) : null}
                     </div>
                     <div className="mt-3 text-sm leading-6 text-[var(--muted)]">{ticket.description}</div>
+                    {ticket.attachments.length > 0 ? (
+                      <div className="mt-4">
+                        <div className="mb-2 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+                          Attachments
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {ticket.attachments.map((attachment) => (
+                            <a
+                              key={attachment.id}
+                              href={attachmentHref(ticket.id, attachment.id)}
+                              className="rounded-full border border-[var(--border)] bg-white px-3 py-2 text-xs font-semibold text-[var(--text)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                            >
+                              {attachment.name} · {formatBytes(attachment.sizeBytes)}
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 ))}
               </div>

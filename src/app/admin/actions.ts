@@ -1141,6 +1141,79 @@ export async function deleteCaarReportAction(formData: FormData) {
   redirect("/superadmin/management?caar=deleted");
 }
 
+export async function updateSupportTicketStatusAction(formData: FormData) {
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
+
+  const ticketId = String(formData.get("ticketId") ?? "").trim();
+  const status = String(formData.get("status") ?? "").trim();
+
+  if (
+    !ticketId ||
+    (status !== "open" &&
+      status !== "in_review" &&
+      status !== "waiting_on_customer" &&
+      status !== "resolved")
+  ) {
+    redirect("/superadmin/tickets?ticket=invalid");
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.support_tickets_v2.findUnique({
+        where: {
+          external_id: ticketId,
+        },
+        select: {
+          external_id: true,
+          status: true,
+        },
+      });
+
+      if (!existing) {
+        throw new Error("not-found");
+      }
+
+      await tx.support_tickets_v2.update({
+        where: {
+          external_id: ticketId,
+        },
+        data: {
+          resolved_at: status === "resolved" ? new Date() : null,
+          resolved_by: status === "resolved" ? session.managerId ?? null : null,
+          status,
+          updated_at: new Date(),
+        },
+      });
+
+      await writeAuditLog(
+        {
+          action: "support_ticket_status_updated_superadmin",
+          actorUserId: session.managerId ?? null,
+          entityId: existing.external_id,
+          entityType: "support_tickets_v2",
+          ipAddress: requestContext.ipAddress,
+          metadata: {
+            nextStatus: status,
+            previousStatus: existing.status,
+            requestId: requestContext.requestId,
+          },
+          summary: `Updated support ticket ${existing.external_id} to ${status}.`,
+          userAgent: requestContext.userAgent,
+        },
+        tx,
+      );
+    });
+  } catch {
+    redirect("/superadmin/tickets?ticket=server-error");
+  }
+
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/tickets");
+  revalidatePath("/superadmin/tables");
+  redirect("/superadmin/tickets?ticket=updated");
+}
+
 export async function deleteSuperAdminTableRowAction(formData: FormData) {
   const session = await requireAdminSession();
   const requestContext = await getRequestContextFromHeaders();

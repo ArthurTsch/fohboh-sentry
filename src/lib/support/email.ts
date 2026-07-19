@@ -13,10 +13,20 @@ export type SupportTicketEmailDispatch = {
 
 export function buildSupportTicketEmailPayload(ticketId: string, draft: SupportTicketDraft) {
   const to = process.env.SUPPORT_INBOX_EMAIL?.trim() || "";
-  const subject = `[Sentry Support] ${ticketId} · ${draft.subject}`;
+  const subject = `[Sentry Support] ${ticketId} | ${draft.subject}`;
   const locationLine = draft.locationName
     ? `${draft.locationName}${draft.locationId ? ` (${draft.locationId})` : ""}`
     : "Portfolio / no specific location";
+  const attachmentLines = draft.attachments.length
+    ? [
+        "",
+        "Attachments:",
+        ...draft.attachments.map(
+          (attachment) =>
+            `- ${attachment.name} (${attachment.contentType}, ${formatBytes(attachment.sizeBytes)})`,
+        ),
+      ]
+    : [];
 
   const text = [
     `Ticket ID: ${ticketId}`,
@@ -31,7 +41,22 @@ export function buildSupportTicketEmailPayload(ticketId: string, draft: SupportT
     "",
     "Description:",
     draft.description,
+    ...attachmentLines,
   ].join("\n");
+
+  const attachmentHtml = draft.attachments.length
+    ? `
+      <p><strong>Attachments:</strong></p>
+      <ul>
+        ${draft.attachments
+          .map(
+            (attachment) =>
+              `<li>${escapeHtml(attachment.name)} (${escapeHtml(attachment.contentType)}, ${escapeHtml(formatBytes(attachment.sizeBytes))})</li>`,
+          )
+          .join("")}
+      </ul>
+    `
+    : "";
 
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
@@ -45,6 +70,7 @@ export function buildSupportTicketEmailPayload(ticketId: string, draft: SupportT
       <p><strong>Workflow:</strong> ${escapeHtml(draft.workflow || "General")}</p>
       <p><strong>Location:</strong> ${escapeHtml(locationLine)}</p>
       <p><strong>Subject:</strong> ${escapeHtml(draft.subject)}</p>
+      ${attachmentHtml}
       <hr style="margin:20px 0;border:none;border-top:1px solid #ddd" />
       <p style="white-space:pre-wrap">${escapeHtml(draft.description)}</p>
     </div>
@@ -110,4 +136,14 @@ function escapeHtml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function formatBytes(value: number) {
+  if (value >= 1024 * 1024) {
+    return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (value >= 1024) {
+    return `${Math.round(value / 102.4) / 10} KB`;
+  }
+  return `${value} B`;
 }

@@ -131,6 +131,7 @@ export function AdminShell({
     { href: "/superadmin/managers", label: "Managers" },
     { href: "/superadmin/restaurants", label: "Restaurants" },
     { href: "/superadmin/teams", label: "Teams" },
+    { href: "/superadmin/tickets", label: "Support Tickets" },
     { href: "/superadmin/management", label: "Management" },
     { href: "/superadmin/tables", label: "DB Tables Inspector" },
   ];

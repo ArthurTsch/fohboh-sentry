@@ -490,10 +490,19 @@ export type SupportTicketCategory =
 
 export type SupportTicketUrgency = "Low" | "Medium" | "High" | "Critical";
 
+export type SupportTicketAttachment = {
+  contentType: string;
+  id: string;
+  name: string;
+  objectKey?: string;
+  sizeBytes: number;
+};
+
 export type SupportTicketRecord = {
   id: string;
   accountId: string | null;
   accountName: string;
+  attachments: SupportTicketAttachment[];
   category: SupportTicketCategory;
   createdAt: string | null;
   description: string;
