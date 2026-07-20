@@ -128,6 +128,7 @@ export function AdminShell({
   const primaryNav = [
     { href: "/superadmin", label: "Overview" },
     { href: "/superadmin/engine", label: "Engine Doc" },
+    { href: "/superadmin/access-requests", label: "Access Requests" },
     { href: "/superadmin/managers", label: "Managers" },
     { href: "/superadmin/restaurants", label: "Restaurants" },
     { href: "/superadmin/teams", label: "Teams" },

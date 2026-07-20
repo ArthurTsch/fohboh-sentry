@@ -24,7 +24,7 @@ export async function GET(request: Request) {
   const requestContext = getRequestContextFromRequest(request);
   try {
     const session = await requireManagerSession();
-    if (session.role !== "WGS Manager" && session.role !== "SuperAdmin" && session.role !== "Admin") {
+    if (session.role !== "SuperAdmin") {
       return withRequestHeaders(
         NextResponse.json({ error: "This account cannot view access requests." }, { status: 403 }),
         requestContext,
@@ -56,6 +56,7 @@ export async function GET(request: Request) {
           account: item.company,
           id: item.external_id,
           summary: buildApprovalSummary(item),
+          status: "pending",
           type: "Access Request",
         })),
       }),

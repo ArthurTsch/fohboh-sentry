@@ -22,7 +22,7 @@ export async function PATCH(
   const requestContext = getRequestContextFromRequest(request);
   try {
     const session = await requireManagerSession();
-    if (session.role !== "WGS Manager" && session.role !== "SuperAdmin" && session.role !== "Admin") {
+    if (session.role !== "SuperAdmin") {
       return withRequestHeaders(
         NextResponse.json({ error: "This account cannot review access requests." }, { status: 403 }),
         requestContext,
@@ -30,6 +30,8 @@ export async function PATCH(
     }
 
     const { requestId } = await context.params;
+    const body = (await request.json().catch(() => ({}))) as { status?: string };
+    const nextStatus = body.status === "rejected" ? "rejected" : "reviewed";
     const updated = await prisma.access_requests_v2.update({
       where: {
         external_id: requestId,
@@ -37,17 +39,18 @@ export async function PATCH(
       data: {
         reviewed_at: new Date(),
         reviewed_by: session.managerId ?? null,
-        status: "reviewed",
+        status: nextStatus,
         updated_at: new Date(),
       },
       select: {
         company: true,
         external_id: true,
+        status: true,
       },
     });
 
     await writeAuditLog({
-      action: "access_request_reviewed",
+      action: nextStatus === "reviewed" ? "access_request_approved" : "access_request_rejected",
       actorUserId: session.managerId ?? null,
       entityId: updated.external_id,
       entityType: "access_requests_v2",
@@ -55,8 +58,12 @@ export async function PATCH(
       metadata: {
         company: updated.company,
         requestId: requestContext.requestId,
+        status: updated.status,
       },
-      summary: `Reviewed access request ${updated.external_id}.`,
+      summary:
+        nextStatus === "reviewed"
+          ? `Approved access request ${updated.external_id}.`
+          : `Rejected access request ${updated.external_id}.`,
       userAgent: requestContext.userAgent,
     });
 

@@ -203,6 +203,132 @@ export async function createManagerAction(formData: FormData) {
   redirect("/superadmin/managers?create=success");
 }
 
+export async function createManagerFromAccessRequestAction(formData: FormData) {
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
+
+  const requestId = String(formData.get("request_id") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  const fullName = String(formData.get("full_name") ?? "").trim();
+  const phoneNumber = String(formData.get("phone_number") ?? "").trim();
+  const address = String(formData.get("address") ?? "").trim();
+  const role = String(formData.get("role") ?? "Manager").trim();
+  const active = formData.get("active") === "on";
+  const emailVerified = formData.get("email_verified") === "on";
+
+  if (!requestId || !email || !password || !role) {
+    redirect(`/superadmin/access-requests?approve=${encodeURIComponent(requestId)}&create=missing-fields`);
+  }
+
+  const passwordHash = await hash(password, 12);
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const request = await tx.access_requests_v2.findUnique({
+        where: {
+          external_id: requestId,
+        },
+        select: {
+          company: true,
+          external_id: true,
+          requester_email: true,
+          status: true,
+        },
+      });
+
+      if (!request || request.status !== "pending") {
+        throw new Error("request-not-found");
+      }
+
+      const manager = await tx.managers.create({
+        data: {
+          active,
+          address: address || null,
+          email,
+          email_verified: emailVerified,
+          full_name: fullName || null,
+          password_hash: passwordHash,
+          phone_number: phoneNumber || null,
+          role,
+        },
+      });
+
+      await tx.access_requests_v2.update({
+        where: {
+          external_id: requestId,
+        },
+        data: {
+          reviewed_at: new Date(),
+          reviewed_by: session.managerId ?? null,
+          status: "reviewed",
+          updated_at: new Date(),
+        },
+      });
+
+      await writeAuditLog(
+        {
+          action: "manager_created_from_access_request",
+          actorUserId: session.managerId ?? null,
+          entityId: String(manager.id),
+          entityType: "managers",
+          ipAddress: requestContext.ipAddress,
+          metadata: {
+            accessRequestId: request.external_id,
+            company: request.company,
+            email,
+            requestId: requestContext.requestId,
+            role,
+          },
+          summary: `Created manager ${email} from access request ${request.external_id}.`,
+          userAgent: requestContext.userAgent,
+        },
+        tx,
+      );
+
+      await writeAuditLog(
+        {
+          action: "access_request_approved",
+          actorUserId: session.managerId ?? null,
+          entityId: request.external_id,
+          entityType: "access_requests_v2",
+          ipAddress: requestContext.ipAddress,
+          metadata: {
+            company: request.company,
+            createdManagerId: manager.id,
+            createdManagerEmail: email,
+            requestId: requestContext.requestId,
+          },
+          summary: `Approved access request ${request.external_id} and created manager ${email}.`,
+          userAgent: requestContext.userAgent,
+        },
+        tx,
+      );
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "request-not-found") {
+      redirect("/superadmin/access-requests?create=invalid-request");
+    }
+
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "P2002"
+    ) {
+      redirect(`/superadmin/access-requests?approve=${encodeURIComponent(requestId)}&create=duplicate-email`);
+    }
+
+    redirect(`/superadmin/access-requests?approve=${encodeURIComponent(requestId)}&create=server-error`);
+  }
+
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/access-requests");
+  revalidatePath("/superadmin/managers");
+  revalidatePath("/superadmin/tables");
+  redirect("/superadmin/access-requests?create=success");
+}
+
 export async function updateManagerAction(formData: FormData) {
   const session = await requireAdminSession();
   const requestContext = await getRequestContextFromHeaders();
@@ -495,6 +621,65 @@ export async function deleteRestaurantAction(formData: FormData) {
   revalidatePath("/superadmin/restaurants");
   revalidatePath("/superadmin/tables");
   redirect("/superadmin/restaurants?restaurant=deleted");
+}
+
+export async function updateAccessRequestReviewAction(formData: FormData) {
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
+
+  const requestId = String(formData.get("request_id") ?? "").trim();
+  const decisionRaw = String(formData.get("decision") ?? "").trim().toLowerCase();
+  const decision = decisionRaw === "reviewed" || decisionRaw === "rejected" ? decisionRaw : null;
+
+  if (!requestId || !decision) {
+    redirect("/superadmin/access-requests?review=invalid");
+  }
+
+  try {
+    const updated = await prisma.access_requests_v2.update({
+      where: {
+        external_id: requestId,
+      },
+      data: {
+        reviewed_at: new Date(),
+        reviewed_by: session.managerId ?? null,
+        status: decision,
+        updated_at: new Date(),
+      },
+      select: {
+        company: true,
+        external_id: true,
+        requester_email: true,
+        status: true,
+      },
+    });
+
+    await writeAuditLog({
+      action: decision === "reviewed" ? "access_request_approved" : "access_request_rejected",
+      actorUserId: session.managerId ?? null,
+      entityId: updated.external_id,
+      entityType: "access_requests_v2",
+      ipAddress: requestContext.ipAddress,
+      metadata: {
+        company: updated.company,
+        requestId: requestContext.requestId,
+        requesterEmail: updated.requester_email,
+        status: updated.status,
+      },
+      summary:
+        decision === "reviewed"
+          ? `Approved access request ${updated.external_id} for ${updated.company}.`
+          : `Rejected access request ${updated.external_id} for ${updated.company}.`,
+      userAgent: requestContext.userAgent,
+    });
+  } catch {
+    redirect("/superadmin/access-requests?review=server-error");
+  }
+
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/access-requests");
+  revalidatePath("/superadmin/tables");
+  redirect(`/superadmin/access-requests?review=${decision}`);
 }
 
 function normalizeTeamRoleValue(value: string) {
