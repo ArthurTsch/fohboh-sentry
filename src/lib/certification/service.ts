@@ -868,6 +868,7 @@ export async function executePersistedCertification({
     period: cadence === "weekly_preliminary" ? `${period} (Weekly Preliminary)` : period,
     recordId: `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${inputHash.slice(0, 8).toUpperCase()}`,
     runAt: evaluationDate,
+    scopeModules: requestedModules,
     uploadModules: resolveUploadModulesForAccount(restaurant.accountId, requestedModules),
   });
   const executionDurationMs = Date.now() - executionStartedAt;
@@ -923,6 +924,7 @@ export async function executePersistedCertification({
     period: cadence === "weekly_preliminary" ? `${period} (Weekly Preliminary)` : period,
     recordId: `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${inputHash.slice(0, 8).toUpperCase()}`,
     runAt: evaluationDate,
+    scopeModules: requestedModules,
     systemHealthFlags: impactingFlags,
     uploadModules: resolveUploadModulesForAccount(restaurant.accountId, requestedModules),
   });

@@ -689,15 +689,23 @@ function DetailCard({
 }
 
 function formatRecoveryCompact(value: string) {
-  const amount = parseCurrency(value);
-  return `$${(amount / 1000).toFixed(0)}K`;
+  return formatExactCurrency(parseCurrency(value));
 }
 
 function formatSplitRecovery(value: string, ratio: number) {
   const amount = parseCurrency(value);
-  return `$${((amount * ratio) / 1000).toFixed(1)}K`;
+  return formatExactCurrency(amount * ratio);
 }
 
 function parseCurrency(value: string) {
   return Number(value.replace(/[^0-9.-]/g, "")) || 0;
+}
+
+function formatExactCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
+    style: "currency",
+  }).format(value);
 }

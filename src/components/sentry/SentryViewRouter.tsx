@@ -133,7 +133,7 @@ export function SentryViewRouter({
   onAddLocation: () => void;
   onAddUser: () => void;
   onApprove: (approvalId: string) => void | Promise<void>;
-  onCompleteUploadSet: (locationId: string) => void;
+  onCompleteUploadSet: (locationId: string, moduleId: "M01" | "M02") => void;
   onManageUploadSources: (next: {
     m01Enabled: boolean;
     m01Vendors: string[];

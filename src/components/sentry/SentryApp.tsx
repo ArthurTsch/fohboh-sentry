@@ -1090,7 +1090,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     startTransition(() => setActiveViewOverride("diy"));
   }
 
-  function handleCompleteUploadSet(locationId: string) {
+  function handleCompleteUploadSet(locationId: string, moduleId: "M01" | "M02") {
     const location = visibleLocations.find((item) => item.id === locationId);
     if (!location) {
       return;
@@ -1103,18 +1103,18 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     });
 
     void recordClientActivity({
-      action: "location_upload_set_completed",
+      action: "module_upload_set_completed",
       entityId: location.id,
-      entityType: "location_upload_set",
+      entityType: "module_upload_set",
       immutable: false,
       locationId: location.id,
       locationName: location.name,
-      summary: `Completed upload intake for ${location.name}.`,
+      summary: `Completed ${moduleId} upload intake for ${location.name}.`,
     });
     setActiveUploadLocation(null);
     setUploadFeedback(null);
     startTransition(() => setActiveViewOverride("waterfall"));
-    showToast(`Upload set saved for ${location.name}.`);
+    showToast(`${moduleId} upload set saved for ${location.name}.`);
   }
 
   function toggleLocation(id: string) {
@@ -2406,9 +2406,20 @@ function handleCompleteOnboarding(locationId: string) {
       recovery: payload.location?.recovery ?? certification.updatedRecovery,
       status: payload.location?.status ?? certification.status,
     }));
+      const certifiedModule = certification.record.traceability?.module ?? null;
       setCaarState((current) => [
         certification.record,
-        ...current.filter((item) => item.locationId !== request.locationId),
+        ...current.filter((item) => {
+          if (item.locationId !== request.locationId) {
+            return true;
+          }
+
+          if (!certifiedModule) {
+            return false;
+          }
+
+          return item.traceability?.module !== certifiedModule;
+        }),
       ]);
       setActiveCertification({
         cadence: certification.cadence ?? cadence,

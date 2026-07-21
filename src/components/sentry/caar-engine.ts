@@ -212,6 +212,7 @@ export function buildCertificationResult({
   period,
   recordId,
   runAt,
+  scopeModules,
   systemHealthFlags = [],
   uploadModules,
 }: {
@@ -223,6 +224,7 @@ export function buildCertificationResult({
   period?: string;
   recordId?: string;
   runAt?: Date;
+  scopeModules?: Array<"M01" | "M02" | "M03">;
   systemHealthFlags?: Array<"R186" | "R188" | "R191" | "R192">;
   uploadModules: UploadModule[];
 }): CertificationResult {
@@ -258,7 +260,16 @@ export function buildCertificationResult({
     ),
     weight: DIMENSION_LABELS[name],
   }));
-  const overallTrustGates = buildOverallTrustGates(activeModules, location.modules);
+  const configuredRunModules =
+    scopeModules && scopeModules.length > 0
+      ? scopeModules
+      : location.modules
+          .map((module) => module.label)
+          .filter(
+            (label): label is "M01" | "M02" | "M03" =>
+              label === "M01" || label === "M02" || label === "M03",
+          );
+  const overallTrustGates = buildOverallTrustGates(activeModules, configuredRunModules);
   const overallSystemHealth = buildOverallSystemHealth(activeModules);
   const trustScore = clamp(
     computeOverallTrustScore(overallTrustGates) - overallSystemHealth.penaltyPoints,
@@ -279,7 +290,7 @@ export function buildCertificationResult({
     trustScore >= 85;
   const amountValue = Math.max(
     0,
-    round(activeModules.reduce((sum, module) => sum + module.recoveryValue, 0)),
+    roundMoney(activeModules.reduce((sum, module) => sum + module.recoveryValue, 0)),
   );
   const stamp = evaluationDate.toISOString().replace(/[-:TZ.]/g, "").slice(2, 14);
   const resolvedPeriod = period ?? `${MONTH_NAMES[evaluationDate.getUTCMonth()]} ${evaluationDate.getUTCFullYear()}`;
@@ -295,6 +306,23 @@ export function buildCertificationResult({
     narrative: buildNarrative(location.name, activeModules, cadence, trustScore, ready),
     period: resolvedPeriod,
     status: ready ? "Court Admissible" : "Needs Remediation",
+    traceability: {
+      certCompletedAt: null,
+      certRunId: null,
+      courtAdmissible: null,
+      evidence: [],
+      fieldAudit: [],
+      module:
+        configuredRunModules.length === 1
+          ? configuredRunModules[0]
+          : activeModules.length === 1
+            ? activeModules[0].moduleId
+            : null,
+      passedRuleCitations: [],
+      ruleCitations: [],
+      ruleSetVersion,
+      sealedAt: null,
+    },
     trustScore,
   };
 
@@ -380,7 +408,7 @@ function buildOverallCanonicalRuleCitations({
 }) {
   const citations: RuleCitation[] = [];
   const activeModuleIds = activeModules.map((module) => module.moduleId);
-  const totalRecovery = round(activeModules.reduce((sum, module) => sum + module.recoveryValue, 0));
+  const totalRecovery = roundMoney(activeModules.reduce((sum, module) => sum + module.recoveryValue, 0));
 
   citations.push(
     buildOverallCitation("R136", {
@@ -1277,7 +1305,7 @@ function buildCrossModuleSummary(modules: ModuleAssessment[]): CrossModuleSummar
     pct: round((Math.max(module.reviewedFeeVolume, 0) / reviewedFeeTotal) * 100),
   }));
   const moduleWeightImbalance = reviewedFeeWeights.some((entry) => entry.pct > 80);
-  const aggregateVariance = round(
+  const aggregateVariance = roundMoney(
     modules.reduce((sum, module) => sum + Math.max(module.recoveryValue, 0), 0),
   );
   const totalRecoveryEligible = aggregateVariance;
@@ -1572,11 +1600,9 @@ function buildWorkflowGovernanceSummary({
 
 function buildOverallTrustGates(
   modules: ModuleAssessment[],
-  configuredModules: LocationModuleState[],
+  configuredModules: Array<"M01" | "M02" | "M03">,
 ) {
-  const activeConfiguredModules = configuredModules.filter(
-    (module) => module.label === "M01" || module.label === "M02" || module.label === "M03",
-  ).length;
+  const activeConfiguredModules = configuredModules.length;
   const reviewedFeeTotal = Math.max(
     1,
     modules.reduce((sum, module) => sum + Math.max(module.reviewedFeeVolume, 0), 0),
@@ -1724,6 +1750,10 @@ function round(value: number) {
   return Math.round(value);
 }
 
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -1731,7 +1761,8 @@ function clamp(value: number, min: number, max: number) {
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     currency: "USD",
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
     style: "currency",
   }).format(value);
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import type { RefObject } from "react";
 import { LocationSourceSettingsModal } from "../overlays/LocationSourceSettingsModal";
 import { Badge } from "../ui/primitives";
@@ -81,7 +82,7 @@ export function UploadCenterView({
   contractState: Record<string, Record<string, string>>;
   intakeState: Record<string, IntakeState>;
   modules: UploadModule[];
-  onCompleteUploadSet: (locationId: string) => void;
+  onCompleteUploadSet: (locationId: string, moduleId: "M01" | "M02") => void;
   onManageSources: (next: {
     m01Enabled: boolean;
     m01Vendors: string[];
@@ -280,7 +281,7 @@ export function UploadCenterView({
 
     const summaryRows: Array<{ key: string; label: string; uploaded: boolean }> = [];
 
-    for (const moduleId of availableModules) {
+    for (const moduleId of [activeModule]) {
       const uploadModule = modules.find((item) => item.id === moduleId);
       if (!uploadModule) {
         continue;
@@ -332,10 +333,65 @@ export function UploadCenterView({
       totalCount: summaryRows.length,
       uploadedCount,
     };
-  }, [activeLocationId, activeSourceConfig, availableModules, intakeState, modules]);
+  }, [activeLocationId, activeModule, activeSourceConfig, intakeState, modules]);
 
   function getCardKey(moduleId: "M01" | "M02", artifactKey: string, vendorKey: string) {
     return `${activeLocationId ?? "global"}:${moduleId}:${artifactKey}:${vendorKey}`;
+  }
+
+  async function runDirectUpload(
+    target: {
+      moduleId: "M01" | "M02";
+      artifactKey: string;
+      vendor: { key: string; name: string };
+    },
+    file: File,
+  ) {
+    const uploadKey = getCardKey(target.moduleId, target.artifactKey, target.vendor.key);
+
+    setCardState((current) => ({
+      ...current,
+      [uploadKey]: {
+        phase: "uploading",
+        message: "Uploading file and validating schema.",
+      },
+    }));
+
+    try {
+      const receipt = await onDirectUpload(target.moduleId, target.artifactKey, file, target.vendor);
+
+      if (!receipt) {
+        setCardState((current) => ({
+          ...current,
+          [uploadKey]: {
+            phase: "error",
+            message: "Upload target could not be resolved for this location.",
+          },
+        }));
+        return;
+      }
+
+      setCardState((current) => ({
+        ...current,
+        [uploadKey]: {
+          phase: receipt.status === "ready" ? "success" : "review",
+          message:
+            receipt.status === "ready"
+              ? "Upload completed and passed intake checks."
+              : "Upload completed but still needs review.",
+          receipt,
+        },
+      }));
+    } catch (error) {
+      setCardState((current) => ({
+        ...current,
+        [uploadKey]: {
+          phase: "error",
+          message:
+            error instanceof Error ? error.message : "Upload failed. Try again with the raw file export.",
+        },
+      }));
+    }
   }
 
   return (
@@ -349,61 +405,7 @@ export function UploadCenterView({
           const input = event.currentTarget;
           const file = event.target.files?.[0];
           if (file && pendingUpload) {
-            const uploadKey = getCardKey(
-              pendingUpload.moduleId,
-              pendingUpload.artifactKey,
-              pendingUpload.vendor.key,
-            );
-
-            setCardState((current) => ({
-              ...current,
-              [uploadKey]: {
-                phase: "uploading",
-                message: "Uploading file and validating schema.",
-              },
-            }));
-
-            try {
-              const receipt = await onDirectUpload(
-                pendingUpload.moduleId,
-                pendingUpload.artifactKey,
-                file,
-                pendingUpload.vendor,
-              );
-
-              if (!receipt) {
-                setCardState((current) => ({
-                  ...current,
-                  [uploadKey]: {
-                    phase: "error",
-                    message: "Upload target could not be resolved for this location.",
-                  },
-                }));
-              } else {
-                setCardState((current) => ({
-                  ...current,
-                  [uploadKey]: {
-                    phase: receipt.status === "ready" ? "success" : "review",
-                    message:
-                      receipt.status === "ready"
-                        ? "Upload completed and passed intake checks."
-                        : "Upload completed but still needs review.",
-                    receipt,
-                  },
-                }));
-              }
-            } catch (error) {
-              setCardState((current) => ({
-                ...current,
-                [uploadKey]: {
-                  phase: "error",
-                  message:
-                    error instanceof Error
-                      ? error.message
-                      : "Upload failed. Try again with the raw file export.",
-                },
-              }));
-            }
+            await runDirectUpload(pendingUpload, file);
           }
           setPendingUpload(null);
           input.value = "";
@@ -644,6 +646,16 @@ export function UploadCenterView({
                       intake={settlementIntake}
                       hasUpload={settlementHasUpload}
                       uploadState={settlementCardState}
+                      onFileDrop={(file) =>
+                        void runDirectUpload(
+                          {
+                            moduleId: activeModule,
+                            artifactKey: settlementArtifactKey,
+                            vendor: { key: vendor.key, name: vendor.name },
+                          },
+                          file,
+                        )
+                      }
                       canViewExtractedText={Boolean(
                         settlementHasUpload &&
                           settlementIntake?.uploadId &&
@@ -701,6 +713,18 @@ export function UploadCenterView({
                       intake={posIntake ?? undefined}
                       hasUpload={posHasUpload}
                       uploadState={posCardState}
+                      onFileDrop={(file) =>
+                        posArtifactKey
+                          ? void runDirectUpload(
+                              {
+                                moduleId: activeModule,
+                                artifactKey: posArtifactKey,
+                                vendor: { key: vendor.key, name: vendor.name },
+                              },
+                              file,
+                            )
+                          : undefined
+                      }
                       canViewExtractedText={Boolean(
                         posHasUpload && posIntake?.uploadId && posIntake?.fileName?.toLowerCase().endsWith(".pdf"),
                       )}
@@ -754,6 +778,18 @@ export function UploadCenterView({
                       intake={agreementIntake ?? undefined}
                       hasUpload={agreementHasUpload}
                       uploadState={agreementCardState}
+                      onFileDrop={(file) =>
+                        agreementArtifactKey
+                          ? void runDirectUpload(
+                              {
+                                moduleId: activeModule,
+                                artifactKey: agreementArtifactKey,
+                                vendor: { key: vendor.key, name: vendor.name },
+                              },
+                              file,
+                            )
+                          : undefined
+                      }
                       canViewExtractedText={Boolean(
                         agreementHasUpload &&
                           agreementIntake?.uploadId &&
@@ -811,6 +847,18 @@ export function UploadCenterView({
                       intake={bankIntake ?? undefined}
                       hasUpload={bankHasUpload}
                       uploadState={bankCardState}
+                      onFileDrop={(file) =>
+                        bankArtifactKey
+                          ? void runDirectUpload(
+                              {
+                                moduleId: activeModule,
+                                artifactKey: bankArtifactKey,
+                                vendor: { key: vendor.key, name: vendor.name },
+                              },
+                              file,
+                            )
+                          : undefined
+                      }
                       canViewExtractedText={Boolean(
                         bankHasUpload && bankIntake?.uploadId && bankIntake?.fileName?.toLowerCase().endsWith(".pdf"),
                       )}
@@ -865,6 +913,16 @@ export function UploadCenterView({
                       intake={settlementIntake}
                       hasUpload={settlementHasUpload}
                       uploadState={settlementCardState}
+                      onFileDrop={(file) =>
+                        void runDirectUpload(
+                          {
+                            moduleId: activeModule,
+                            artifactKey: settlementArtifactKey,
+                            vendor: { key: vendor.key, name: vendor.name },
+                          },
+                          file,
+                        )
+                      }
                       canViewExtractedText={Boolean(
                         settlementHasUpload &&
                           settlementIntake?.uploadId &&
@@ -922,6 +980,18 @@ export function UploadCenterView({
                       intake={posIntake ?? undefined}
                       hasUpload={posHasUpload}
                       uploadState={posCardState}
+                      onFileDrop={(file) =>
+                        posArtifactKey
+                          ? void runDirectUpload(
+                              {
+                                moduleId: activeModule,
+                                artifactKey: posArtifactKey,
+                                vendor: { key: vendor.key, name: vendor.name },
+                              },
+                              file,
+                            )
+                          : undefined
+                      }
                       canViewExtractedText={Boolean(
                         posHasUpload && posIntake?.uploadId && posIntake?.fileName?.toLowerCase().endsWith(".pdf"),
                       )}
@@ -975,6 +1045,18 @@ export function UploadCenterView({
                       intake={agreementIntake ?? undefined}
                       hasUpload={agreementHasUpload}
                       uploadState={agreementCardState}
+                      onFileDrop={(file) =>
+                        agreementArtifactKey
+                          ? void runDirectUpload(
+                              {
+                                moduleId: activeModule,
+                                artifactKey: agreementArtifactKey,
+                                vendor: { key: vendor.key, name: vendor.name },
+                              },
+                              file,
+                            )
+                          : undefined
+                      }
                       canViewExtractedText={Boolean(
                         agreementHasUpload &&
                           agreementIntake?.uploadId &&
@@ -1032,6 +1114,18 @@ export function UploadCenterView({
                       intake={bankIntake ?? undefined}
                       hasUpload={bankHasUpload}
                       uploadState={bankCardState}
+                      onFileDrop={(file) =>
+                        bankArtifactKey
+                          ? void runDirectUpload(
+                              {
+                                moduleId: activeModule,
+                                artifactKey: bankArtifactKey,
+                                vendor: { key: vendor.key, name: vendor.name },
+                              },
+                              file,
+                            )
+                          : undefined
+                      }
                       canViewExtractedText={Boolean(
                         bankHasUpload && bankIntake?.uploadId && bankIntake?.fileName?.toLowerCase().endsWith(".pdf"),
                       )}
@@ -1077,7 +1171,7 @@ export function UploadCenterView({
                     Upload Set Review
                   </div>
                   <div className="mt-2 text-sm text-[var(--text)]">
-                    {uploadCompletionSummary.uploadedCount}/{uploadCompletionSummary.totalCount} required documents uploaded for{" "}
+                    {uploadCompletionSummary.uploadedCount}/{uploadCompletionSummary.totalCount} required {activeModule} documents uploaded for{" "}
                     <span className="font-semibold">{activeLocationName ?? "this location"}</span>.
                   </div>
                   {uploadCompletionSummary.missingRows.length > 0 ? (
@@ -1089,22 +1183,54 @@ export function UploadCenterView({
                     </div>
                   ) : (
                     <div className="mt-3 text-sm text-[var(--success)]">
-                      All required documents for this location are present. Finish intake to return to the Location Waterfall.
+                      All required {activeModule} documents for this location are present. Finish intake to return to the Location Waterfall.
                     </div>
                   )}
                 </div>
-                <button
-                  type="button"
-                  disabled={!uploadCompletionSummary.isComplete || !activeLocationId}
-                  onClick={() => {
-                    if (activeLocationId) {
-                      onCompleteUploadSet(activeLocationId);
+                <div className="min-w-[280px]">
+                  <button
+                    type="button"
+                    disabled={!uploadCompletionSummary.isComplete || !activeLocationId}
+                    onClick={() => {
+                      if (activeLocationId) {
+                        onCompleteUploadSet(activeLocationId, activeModule);
+                      }
+                    }}
+                    className="w-full rounded-xl bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                    title={
+                      !activeLocationId
+                        ? "Select a location first."
+                        : uploadCompletionSummary.isComplete
+                          ? "All required uploads are complete."
+                          : `Uploads are still missing: ${uploadCompletionSummary.missingRows
+                              .slice(0, 3)
+                              .map((row) => row.label)
+                              .join(" | ")}${uploadCompletionSummary.missingRows.length > 3 ? " | more remaining" : ""}`
                     }
-                  }}
-                  className="rounded-xl bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {activeLocationName ? `Finish Uploads for ${activeLocationName}` : "Finish Uploads"}
-                </button>
+                  >
+                    {activeLocationName ? `Finish ${activeModule} Uploads for ${activeLocationName}` : `Finish ${activeModule} Uploads`}
+                  </button>
+                  {!uploadCompletionSummary.isComplete ? (
+                    <div className="mt-2 text-xs leading-5 text-[var(--muted)]">
+                      Finish is locked until all required uploads for {activeModule} on this location are present.
+                      {uploadCompletionSummary.missingRows.length > 0 ? (
+                        <>
+                          {" "}Still missing:{" "}
+                          <span className="text-[var(--accent)]">
+                            {uploadCompletionSummary.missingRows.slice(0, 2).map((row) => row.label).join(" | ")}
+                            {uploadCompletionSummary.missingRows.length > 2
+                              ? ` | +${uploadCompletionSummary.missingRows.length - 2} more`
+                              : ""}
+                          </span>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs leading-5 text-[var(--success)]">
+                      All required {activeModule} uploads are present. You can finish this module now.
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   disabled={!activeLocationId}
@@ -1302,6 +1428,7 @@ function DocumentSection({
   intake,
   hasUpload,
   uploadState,
+  onFileDrop,
   emptyTitle,
   emptySub,
 }: {
@@ -1320,6 +1447,7 @@ function DocumentSection({
   intake?: IntakeState;
   hasUpload: boolean;
   uploadState?: UploadCardState;
+  onFileDrop?: (file: File) => void;
   emptyTitle: string;
   emptySub: string;
 }) {
@@ -1406,6 +1534,7 @@ function DocumentSection({
         emptyTitle={emptyTitle}
         emptySub={emptySub}
         onClick={onPrimary}
+        onFileDrop={onFileDrop}
         onOpenSchema={onOpenSchema}
         compact
       />
@@ -1419,6 +1548,7 @@ function UploadTile({
   emptyTitle,
   emptySub,
   onClick,
+  onFileDrop,
   onOpenSchema,
   compact = false,
 }: {
@@ -1427,6 +1557,7 @@ function UploadTile({
   emptyTitle: string;
   emptySub: string;
   onClick: () => void;
+  onFileDrop?: (file: File) => void;
   onOpenSchema?: () => void;
   compact?: boolean;
 }) {
@@ -1435,14 +1566,41 @@ function UploadTile({
   const reviewState = hasParseWarning || hasSchemaWarning;
   const schemaGatePassed = Boolean(intake?.schema) && !hasSchemaWarning;
   const fieldsGatePassed = Boolean(intake?.fields) && !reviewState;
+  const [dragActive, setDragActive] = useState(false);
+
+  function handleDragOver(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setDragActive(true);
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setDragActive(false);
+  }
+
+  function handleDrop(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setDragActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file && onFileDrop) {
+      onFileDrop(file);
+    }
+  }
 
   return (
     <>
       <button
         type="button"
         onClick={onClick}
-        className={`mt-4 flex w-full flex-col items-center justify-center rounded-2xl bg-[#F8F8FA] px-4 text-center transition hover:bg-[#F3F4F7] ${
-          compact ? "min-h-[110px] py-5" : "min-h-[140px] py-6"
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`mt-4 flex w-full flex-col items-center justify-center rounded-2xl px-4 text-center transition ${
+          dragActive
+            ? "bg-[rgba(214,48,49,0.08)] ring-2 ring-[rgba(214,48,49,0.2)]"
+            : "bg-[#F8F8FA] hover:bg-[#F3F4F7]"
+        } ${compact ? "min-h-[110px] py-5" : "min-h-[140px] py-6"
         }`}
       >
         {hasUpload ? (

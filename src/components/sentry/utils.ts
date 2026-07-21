@@ -39,7 +39,8 @@ export function getSupportReply(message: string) {
 export function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     currency: "USD",
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 2,
     style: "currency",
   }).format(value);
 }
