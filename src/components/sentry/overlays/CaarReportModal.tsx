@@ -1128,6 +1128,13 @@ function formatMoneyLike(value: string | number | boolean | null | undefined) {
   }).format(value);
 }
 
+function formatPlainNumber(value: string | number | boolean | null | undefined) {
+  if (typeof value !== "number") return formatMetricValue(value);
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 function humanizeMetricKey(key: string) {
   return key
     .replace(/_/g, " ")
@@ -1149,6 +1156,100 @@ function buildRuleCalculation(
   const detail = typeof sample.detail === "string" && sample.detail.trim().length > 0 ? sample.detail.trim() : null;
 
   if (ruleId === "MFR-BIL-15" || ruleId === "R083") {
+    const basisAmount = typeof sample.basis_amount === "number" ? sample.basis_amount : null;
+    const markupBps = typeof sample.contracted_markup_bps === "number" ? sample.contracted_markup_bps : null;
+    const txnFee = typeof sample.contracted_per_txn_fee === "number" ? sample.contracted_per_txn_fee : null;
+    const monthlyFee = typeof sample.contracted_monthly_fee === "number" ? sample.contracted_monthly_fee : null;
+    const transactionCount = typeof sample.transaction_count === "number" ? sample.transaction_count : null;
+    const markupComponent = typeof sample.expected_markup_component === "number" ? sample.expected_markup_component : null;
+    const txnComponent = typeof sample.expected_txn_component === "number" ? sample.expected_txn_component : null;
+    const monthlyComponent = typeof sample.expected_monthly_component === "number" ? sample.expected_monthly_component : null;
+    const explicitSubstitution =
+      basisAmount !== null &&
+      markupBps !== null &&
+      txnFee !== null &&
+      monthlyFee !== null &&
+      transactionCount !== null &&
+      markupComponent !== null &&
+      txnComponent !== null &&
+      monthlyComponent !== null &&
+      typeof sample.expected_fee_amount === "number"
+        ? [
+            "",
+            "Substituted formula",
+            `F_exp = (${formatMoneyLike(basisAmount)} x ${formatPlainNumber(markupBps / 100)}%) + (${formatPlainNumber(transactionCount)} x ${formatMoneyLike(txnFee)}) + ${formatMoneyLike(monthlyFee)}`,
+            `= ${formatMoneyLike(markupComponent)} + ${formatMoneyLike(txnComponent)} + ${formatMoneyLike(monthlyComponent)}`,
+            `= ${formatMoneyLike(sample.expected_fee_amount)}`,
+            "",
+            "Variance proof",
+            `${formatMoneyLike(sample.actual_fee_amount)} - ${formatMoneyLike(sample.expected_fee_amount)} = ${formatMoneyLike(sample.unexplained_fee_delta)}`,
+          ]
+        : [];
+    const missingOperandProof =
+      explicitSubstitution.length === 0
+        ? [
+            "",
+            "Stored operand status",
+            `basis_amount = ${formatMoneyLike(sample.basis_amount)}`,
+            `contracted_markup_bps = ${formatMetricValue(sample.contracted_markup_bps)}`,
+            `contracted_per_txn_fee = ${formatMoneyLike(sample.contracted_per_txn_fee)}`,
+            `contracted_monthly_fee = ${formatMoneyLike(sample.contracted_monthly_fee)}`,
+            `transaction_count = ${formatPlainNumber(sample.transaction_count)}`,
+            "",
+            "The exact substituted proof cannot be rendered because one or more operands were not persisted on this citation row. Rerun certification after resealing the workspace so the engine stores the full fee-proof payload.",
+          ]
+        : [];
+
+    return [
+      "Formula",
+      "Delta = max(0, F_obs - F_exp)",
+      "Variance_attributed = min(Delta, residual_variance_pool)",
+      "",
+      "Operands",
+      `F_obs (observed processor fee total from statement) = ${formatMoneyLike(sample.actual_fee_amount)}`,
+      `F_exp (expected governed fee total from sealed pricing terms) = ${formatMoneyLike(sample.expected_fee_amount)}`,
+      `Delta stored on citation row as unexplained_fee_delta = ${formatMoneyLike(sample.unexplained_fee_delta)}`,
+      `Variance_attributed = ${varianceDisplay}`,
+      ...explicitSubstitution,
+      ...missingOperandProof,
+      "",
+      sample.actual_fee_amount === null || sample.actual_fee_amount === undefined || sample.expected_fee_amount === null || sample.expected_fee_amount === undefined
+        ? "This persisted citation row stores the final variance but does not store one or more intermediate operands. The engine therefore proved the variance at run time, but this specific row cannot reproduce every operand numerically."
+        : "This row contains the actual operands used by the engine for the fee-gap comparison.",
+    ].join("\n");
+  }
+
+  if (ruleId === "MFR-BIL-15" || ruleId === "R083") {
+    const basisAmount = typeof sample.basis_amount === "number" ? sample.basis_amount : null;
+    const markupBps = typeof sample.contracted_markup_bps === "number" ? sample.contracted_markup_bps : null;
+    const txnFee = typeof sample.contracted_per_txn_fee === "number" ? sample.contracted_per_txn_fee : null;
+    const monthlyFee = typeof sample.contracted_monthly_fee === "number" ? sample.contracted_monthly_fee : null;
+    const transactionCount = typeof sample.transaction_count === "number" ? sample.transaction_count : null;
+    const markupComponent = typeof sample.expected_markup_component === "number" ? sample.expected_markup_component : null;
+    const txnComponent = typeof sample.expected_txn_component === "number" ? sample.expected_txn_component : null;
+    const monthlyComponent = typeof sample.expected_monthly_component === "number" ? sample.expected_monthly_component : null;
+    const explicitSubstitution =
+      basisAmount !== null &&
+      markupBps !== null &&
+      txnFee !== null &&
+      monthlyFee !== null &&
+      transactionCount !== null &&
+      markupComponent !== null &&
+      txnComponent !== null &&
+      monthlyComponent !== null &&
+      typeof sample.expected_fee_amount === "number"
+        ? [
+            "",
+            "Substituted formula",
+            `F_exp = (${formatMoneyLike(basisAmount)} x ${formatPlainNumber(markupBps / 100)}%) + (${formatPlainNumber(transactionCount)} x ${formatMoneyLike(txnFee)}) + ${formatMoneyLike(monthlyFee)}`,
+            `= ${formatMoneyLike(markupComponent)} + ${formatMoneyLike(txnComponent)} + ${formatMoneyLike(monthlyComponent)}`,
+            `= ${formatMoneyLike(sample.expected_fee_amount)}`,
+            "",
+            "Variance proof",
+            `${formatMoneyLike(sample.actual_fee_amount)} - ${formatMoneyLike(sample.expected_fee_amount)} = ${formatMoneyLike(sample.unexplained_fee_delta)}`,
+          ]
+        : [];
+
     return [
       "Formula",
       "Δ = max(0, F_obs - F_exp)",
@@ -1159,6 +1260,7 @@ function buildRuleCalculation(
       `F_exp (expected governed fee total from sealed pricing terms) = ${formatMoneyLike(sample.expected_fee_amount)}`,
       `Δ stored on citation row as unexplained_fee_delta = ${formatMoneyLike(sample.unexplained_fee_delta)}`,
       `Variance_attributed = ${varianceDisplay}`,
+      ...explicitSubstitution,
       "",
       sample.actual_fee_amount === null || sample.actual_fee_amount === undefined || sample.expected_fee_amount === null || sample.expected_fee_amount === undefined
         ? "This persisted citation row stores the final variance but does not store one or more intermediate operands. The engine therefore proved the variance at run time, but this specific row cannot reproduce every operand numerically."
@@ -1256,11 +1358,34 @@ function buildRuleEvidence(
   const agreementSource = evidenceRows.find((row) => row.artifactKey.includes("agreement"));
   const bankSource = evidenceRows.find((row) => row.artifactKey.includes("bank"));
 
+  function detectArtifactMismatch(row: CaarEvidenceTrace | undefined) {
+    if (!row?.fileName) return null;
+    const fileName = row.fileName.toLowerCase();
+    const artifactKey = row.artifactKey.toLowerCase();
+
+    if (artifactKey.includes("agreement") && (fileName.includes("statement") || fileName.includes("bank"))) {
+      return "Warning: the file currently stored in the agreement slot looks like a statement or bank document. Verify the correct agreement PDF was uploaded.";
+    }
+    if (artifactKey.includes("bank") && fileName.includes("agreement")) {
+      return "Warning: the file currently stored in the bank slot looks like an agreement PDF. Verify the correct bank evidence was uploaded.";
+    }
+    if (artifactKey.includes("processor") && fileName.includes("agreement")) {
+      return "Warning: the file currently stored in the processor-source slot looks like an agreement PDF. Verify the correct processor source file was uploaded.";
+    }
+    if (artifactKey.includes("pos") && fileName.includes("agreement")) {
+      return "Warning: the file currently stored in the POS slot looks like an agreement PDF. Verify the correct POS export was uploaded.";
+    }
+
+    return null;
+  }
+
   function artifactLine(label: string, row: CaarEvidenceTrace | undefined, whatItSupplies: string) {
     if (!row) {
       return `${label}: no persisted upload row was linked to this CAAR for this source.`;
     }
-    return `${label}: ${row.fileName ?? row.label} (${row.trace}) -> ${whatItSupplies}`;
+    const mismatch = detectArtifactMismatch(row);
+    const base = `${label} slot: ${row.fileName ?? row.label} (${row.trace}) -> ${whatItSupplies}`;
+    return mismatch ? `${base}\n${mismatch}` : base;
   }
 
   const lines =

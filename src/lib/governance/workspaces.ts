@@ -26,15 +26,19 @@ export function computeWorkspaceHash(payload: unknown) {
 export function toContractManualValues(workspace: SchemaWorkspace) {
   if (workspace.module === "M01") {
     const pricingModel = findContractValue(workspace.contract, "Pricing Model");
-    const markup = findContractValue(workspace.contract, "Processor Markup");
-    const txnFee = findContractValue(workspace.contract, "Per Transaction Fee");
-    const effectiveDate = findContractValue(workspace.contract, "Effective Date");
+    const markup = findContractValue(workspace.contract, ["Processor Markup", "Processor Markup (basis pts)"]);
+    const txnFee = findContractValue(workspace.contract, ["Per Transaction Fee", "Per-Transaction Fee", "Per Transaction Fee ($)"]);
+    const monthlyFee = findContractValue(workspace.contract, ["Monthly Statement Fee", "Monthly Statement Fee ($)", "Monthly Fee"]);
+    const chargebackFee = findContractValue(workspace.contract, ["Chargeback Fee", "Chargeback Fee ($)"]);
+    const effectiveDate = findContractValue(workspace.contract, ["Effective Date", "Contract Effective Date"]);
 
     return {
       __entry_mode: "manual",
+      chargeback_fee: extractCurrency(chargebackFee),
       contract_type: pricingModel,
       effective_date: effectiveDate,
       markup_bps: extractNumber(markup),
+      monthly_fee: extractCurrency(monthlyFee),
       pricing_model: pricingModel,
       processor_name: workspace.vendor,
       txn_fee: extractCurrency(txnFee),
@@ -144,8 +148,15 @@ export function normalizeWorkspaceFromRecords({
   };
 }
 
-function findContractValue(contract: ContractField[], label: string) {
-  return contract.find((field) => field.label === label)?.value?.trim() ?? "";
+function findContractValue(contract: ContractField[], labels: string | string[]) {
+  const candidates = Array.isArray(labels) ? labels : [labels];
+  for (const label of candidates) {
+    const value = contract.find((field) => field.label === label)?.value?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return "";
 }
 
 function extractNumber(value: string) {

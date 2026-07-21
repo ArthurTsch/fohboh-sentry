@@ -262,6 +262,7 @@ function extractProcessorStatementMetrics(text: string): PdfMetricExtraction {
   const totalBlock = findProcessorTotalBlock(lines);
   const basisAmount = totalBlock?.basisAmount ?? 0;
   const payoutAmount = totalBlock?.payoutAmount ?? basisAmount;
+  const transactionCount = totalBlock?.transactionCount ?? 0;
   const feeAmount =
     totalBlock?.feeAmount ??
     (findAmountNearSequence(lines, ["Card Processing", "Fees"]) ||
@@ -280,6 +281,7 @@ function extractProcessorStatementMetrics(text: string): PdfMetricExtraction {
       basisAmount,
       feeAmount: feeAmount > 0 ? feeAmount : undefined,
       payoutAmount,
+      transactionCount: transactionCount > 0 ? transactionCount : undefined,
     },
     warnings: feeAmount > 0 ? [] : ["Processor fee total was not detected automatically from this PDF."],
   };
@@ -291,6 +293,7 @@ function findProcessorTotalBlock(lines: string[]) {
         basisAmount: number;
         feeAmount: number;
         payoutAmount: number;
+        transactionCount?: number;
         score: number;
       }
     | undefined;
@@ -312,6 +315,8 @@ function findProcessorTotalBlock(lines: string[]) {
 
     if (numericValues.length < 3) continue;
 
+    const transactionCount = extractProcessorTotalTransactionCount(lines[index]);
+
     const basisAmount = numericValues[0];
     const feeAmount = numericValues.length >= 3 ? numericValues[numericValues.length - 2] : 0;
     const payoutAmount = numericValues[numericValues.length - 1];
@@ -325,12 +330,21 @@ function findProcessorTotalBlock(lines: string[]) {
         basisAmount,
         feeAmount,
         payoutAmount,
+        transactionCount,
         score,
       };
     }
   }
 
   return bestBlock;
+}
+
+function extractProcessorTotalTransactionCount(line: string) {
+  const normalized = line.replace(/\s+/g, " ").trim();
+  const match = normalized.match(/^total\s*(\d{1,6})(?=\$|\s+\$)/i);
+  if (!match) return undefined;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function findAmountNearSequence(lines: string[], labels: string[]) {

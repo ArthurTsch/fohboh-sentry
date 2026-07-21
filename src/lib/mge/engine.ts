@@ -272,11 +272,7 @@ const M01_RULES: DeterministicRule[] = [
         firedCount: 1,
         ruleId: "MFR-BIL-15",
         ruleVersion: RULE_VERSION,
-        sampleEvidence: [{
-          actual_fee_amount: actualFees,
-          expected_fee_amount: expectedTotal,
-          unexplained_fee_delta: variance,
-        }],
+        sampleEvidence: [buildM01FeeGapSample(statement, contract, actualFees, expectedTotal, variance)],
         varianceCents: dollarsToCents(variance),
       };
     },
@@ -748,11 +744,7 @@ const M01_RULES: DeterministicRule[] = [
       const unexplained = roundCurrency(actualFees - expectedTotal);
       if (unexplained <= 1) return null;
       const variance = Math.min(unexplained, residualVariance);
-      return buildCitation("R083", 1, variance, {
-        actual_fee_amount: actualFees,
-        expected_fee_amount: expectedTotal,
-        unexplained_fee_delta: variance,
-      });
+      return buildCitation("R083", 1, variance, buildM01FeeGapSample(statement, contract, actualFees, expectedTotal, variance));
     },
   },
   {
@@ -3249,6 +3241,30 @@ function computeExpectedM01Fees(metrics: Metrics, contract: Record<string, strin
   return roundCurrency(
     basisAmount * (markupBps / 10000) + (transactionCount * txnFee) + monthlyFee,
   );
+}
+
+function buildM01FeeGapSample(metrics: Metrics, contract: Record<string, string>, actualFees: number, expectedTotal: number, variance: number) {
+  const basisAmount = numberValue(metrics.basisAmount);
+  const markupBps = numberValue(contract.markup_bps);
+  const txnFee = numberValue(contract.txn_fee);
+  const monthlyFee = numberValue(contract.monthly_fee);
+  const transactionCount = Math.max(0, roundInteger(numberValue(metrics.transactionCount)));
+  const markupComponent = roundCurrency(basisAmount * (markupBps / 10000));
+  const txnComponent = roundCurrency(transactionCount * txnFee);
+
+  return {
+    actual_fee_amount: actualFees,
+    basis_amount: basisAmount,
+    contracted_markup_bps: markupBps,
+    contracted_monthly_fee: monthlyFee,
+    contracted_per_txn_fee: txnFee,
+    expected_fee_amount: expectedTotal,
+    expected_markup_component: markupComponent,
+    expected_monthly_component: monthlyFee,
+    expected_txn_component: txnComponent,
+    transaction_count: transactionCount,
+    unexplained_fee_delta: variance,
+  };
 }
 
 function getM01RateTable(contract?: Record<string, string> | null) {

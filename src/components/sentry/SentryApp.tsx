@@ -3013,11 +3013,19 @@ function mapM01WorkspaceContractToArtifactValues(workspace: SchemaWorkspace) {
   return {
     __entry_mode: "manual",
     contract_type: getContractValue(workspace.contract, "Pricing Model"),
-    effective_date: getContractValue(workspace.contract, "Effective Date"),
-    markup_bps: extractNumericValue(getContractValue(workspace.contract, "Processor Markup")),
+    effective_date: getContractValue(workspace.contract, ["Effective Date", "Contract Effective Date"]),
+    chargeback_fee: extractNumericValue(getContractValue(workspace.contract, ["Chargeback Fee", "Chargeback Fee ($)"])),
+    markup_bps: extractNumericValue(
+      getContractValue(workspace.contract, ["Processor Markup", "Processor Markup (basis pts)"]),
+    ),
+    monthly_fee: extractNumericValue(
+      getContractValue(workspace.contract, ["Monthly Statement Fee", "Monthly Statement Fee ($)", "Monthly Fee"]),
+    ),
     pricing_model: getContractValue(workspace.contract, "Pricing Model"),
     processor_name: workspace.vendor,
-    txn_fee: extractNumericValue(getContractValue(workspace.contract, "Per Transaction Fee")),
+    txn_fee: extractNumericValue(
+      getContractValue(workspace.contract, ["Per Transaction Fee", "Per-Transaction Fee", "Per Transaction Fee ($)"]),
+    ),
   };
 }
 
@@ -3038,8 +3046,15 @@ function mapM02WorkspaceContractToArtifactValues(workspace: SchemaWorkspace) {
   };
 }
 
-function getContractValue(contract: SchemaWorkspace["contract"], label: string) {
-  return contract.find((field) => field.label === label)?.value?.trim() ?? "";
+function getContractValue(contract: SchemaWorkspace["contract"], labels: string | string[]) {
+  const candidates = Array.isArray(labels) ? labels : [labels];
+  for (const label of candidates) {
+    const value = contract.find((field) => field.label === label)?.value?.trim();
+    if (value) {
+      return value;
+    }
+  }
+  return "";
 }
 
 function extractNumericValue(value: string) {
