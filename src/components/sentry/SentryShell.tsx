@@ -27,11 +27,21 @@ const navHelp: Record<
     title: "Sidebar / Recovery",
     sections: [
       { label: "What It Is", text: "A per-location grid showing M01 and M02 Trust Scores, certified recovery amounts, IUM, and module status side by side." },
-      { label: "What It Does", text: "Lets you compare all locations at a glance, expand any row to see the detail, and launch data uploads or CAAR generation from each row." },
+      { label: "What It Does", text: "Lets you compare all locations at a glance and open a dedicated workspace for any restaurant directly from its row." },
       { label: "Why It Matters", text: "The primary operational view. If a location has a Trust Score gap or a recovery opportunity, it shows up here first." },
     ],
     footerLabel: "Coverage",
     footerValue: "All enrolled locations",
+  },
+  location: {
+    title: "Sidebar / Location",
+    sections: [
+      { label: "What It Is", text: "A scoped workspace for one location only, with its own dashboard, CAAR history, and governed vault flow." },
+      { label: "What It Does", text: "Keeps uploads, certification review, and vault governance focused on a single restaurant instead of the whole portfolio." },
+      { label: "Why It Matters", text: "Location-level operations are cleaner when operators stay inside one restaurant’s evidence and certification context at a time." },
+    ],
+    footerLabel: "Scope",
+    footerValue: "One location / one workspace",
   },
   caars: {
     title: "Sidebar / Recovery",

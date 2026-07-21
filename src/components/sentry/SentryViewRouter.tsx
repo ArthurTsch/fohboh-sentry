@@ -24,6 +24,7 @@ import { DashboardView } from "./views/DashboardView";
 import { DiyAccessView } from "./views/DiyAccessView";
 import { FaqView } from "./views/FaqView";
 import { LogView } from "./views/LogView";
+import { LocationWorkspaceView } from "./views/LocationWorkspaceView";
 import { OnboardingView } from "./views/OnboardingView";
 import { PermissionsView } from "./views/PermissionsView";
 import { ProfileView } from "./views/ProfileView";
@@ -44,6 +45,7 @@ export function SentryViewRouter({
   activeUploadLocationName,
   activeSupportAccountId,
   activeSupportAccountName,
+  activeWorkspaceLocationId,
   activeUploadSourceConfig,
   activeUploadVendorKeyHint,
   activeUploadVendorNameHint,
@@ -75,6 +77,7 @@ export function SentryViewRouter({
   onExpandAll,
   onFilterChange,
   onOpenCaar,
+  onOpenLocation,
   onDownloadPdf,
   onOpenDiy,
   onOpenOnboarding,
@@ -112,6 +115,7 @@ export function SentryViewRouter({
   activeUploadLocationName: string | null;
   activeSupportAccountId: string | null;
   activeSupportAccountName: string;
+  activeWorkspaceLocationId: string | null;
   activeUploadSourceConfig: LocationSourceConfig | null;
   activeUploadVendorKeyHint?: string | null;
   activeUploadVendorNameHint?: string | null;
@@ -157,6 +161,7 @@ export function SentryViewRouter({
   onExpandAll: () => void;
   onFilterChange: (filter: "all" | "immutable" | "editable") => void;
   onOpenCaar: Dispatch<SetStateAction<CaarRecord | null>>;
+  onOpenLocation: (locationId: string) => void;
   onDownloadPdf: (record: CaarRecord) => void;
   onOpenOnboarding: (locationId: string) => void;
   onOpenSchemaEditor: Dispatch<SetStateAction<SchemaWorkspace | null>>;
@@ -202,22 +207,51 @@ export function SentryViewRouter({
   if (activeView === "waterfall") {
     return (
       <WaterfallView
-        caars={caars}
-        expandedLocations={expandedLocations}
         hasTeamAccount={hasTeamAccount}
         locations={locations}
         onAddLocation={onAddLocation}
         onGoToTeamAccess={onGoToTeamAccess}
-        onExpandAll={onExpandAll}
-        onOpenCaar={onOpenCaar}
-        onOpenDiy={onOpenDiy}
-        onOpenOnboarding={onOpenOnboarding}
-        onOpenSchema={() => onViewChange("schema")}
-        onRunCertification={onRunCertification}
-        onToggleLocation={onToggleLocation}
-        onOpenUploads={onOpenUploads}
+        onOpenLocation={onOpenLocation}
         role={role}
         workflowByLocation={workflowByLocation}
+      />
+    );
+  }
+
+  if (activeView === "location") {
+    const activeLocation =
+      (activeWorkspaceLocationId
+        ? locations.find((location) => location.id === activeWorkspaceLocationId)
+        : null) ?? locations[0] ?? null;
+
+    if (!activeLocation) {
+      return (
+        <WaterfallView
+          hasTeamAccount={hasTeamAccount}
+          locations={locations}
+          onAddLocation={onAddLocation}
+          onGoToTeamAccess={onGoToTeamAccess}
+          onOpenLocation={onOpenLocation}
+          role={role}
+          workflowByLocation={workflowByLocation}
+        />
+      );
+    }
+
+    return (
+      <LocationWorkspaceView
+        caars={caars}
+        location={activeLocation}
+        onEditWorkspace={onOpenSchemaEditor}
+        onInitializeWorkspace={onInitializeWorkspace}
+        onOpenCaar={onOpenCaar}
+        onOpenOnboarding={onOpenOnboarding}
+        onOpenUploads={onOpenUploads}
+        onRunCertification={onRunCertification}
+        onSealWorkspace={onSealWorkspace}
+        role={role}
+        workflow={workflowByLocation[activeLocation.id]}
+        workspaces={schemaWorkspaces}
       />
     );
   }

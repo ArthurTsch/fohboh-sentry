@@ -5,6 +5,7 @@ export type TeamAccessScope = "all_locations" | "selected_locations";
 export type ViewId =
   | "dashboard"
   | "waterfall"
+  | "location"
   | "caars"
   | "billing"
   | "log"

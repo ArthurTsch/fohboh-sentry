@@ -11,6 +11,11 @@ export const viewMeta: Record<ViewId, { eyebrow: string; title: string; sub: str
     title: "Location Waterfall",
     sub: "Per-location Trust Score, certified recovery, and evidence readiness side by side.",
   },
+  location: {
+    eyebrow: "Location",
+    title: "Location Workspace",
+    sub: "Scoped dashboard, CAAR history, and governed vault workflow for a single location.",
+  },
   caars: {
     eyebrow: "Recovery",
     title: "CAARs",

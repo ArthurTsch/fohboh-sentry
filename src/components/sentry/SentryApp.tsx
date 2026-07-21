@@ -230,6 +230,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [activeViewOverride, setActiveViewOverride] = useState<ViewId | null>(null);
   const [expandedLocations, setExpandedLocations] = useState<string[]>(["LOC-104"]);
+  const [activeWorkspaceLocationId, setActiveWorkspaceLocationId] = useState<string | null>(null);
   const [selectedCaar, setSelectedCaar] = useState<CaarRecord | null>(null);
   const [logFilter, setLogFilter] = useState<"all" | "immutable" | "editable">("all");
   const [faqQuery, setFaqQuery] = useState("");
@@ -1018,6 +1019,11 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     startTransition(() => setActiveViewOverride(view));
   }
 
+  function handleOpenLocationWorkspace(locationId: string) {
+    setActiveWorkspaceLocationId(locationId);
+    startTransition(() => setActiveViewOverride("location"));
+  }
+
   async function handleOpenAddLocation() {
     if (!effectiveSession?.accountId && effectiveSession?.role !== "WGS Manager") {
       showToast("Set a real team account in Team & Access before creating a location.");
@@ -1074,6 +1080,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
+    setActiveWorkspaceLocationId(locationId);
     setActiveUploadLocation({
       accountId: location.accountId,
       id: location.id,
@@ -1113,7 +1120,8 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     });
     setActiveUploadLocation(null);
     setUploadFeedback(null);
-    startTransition(() => setActiveViewOverride("waterfall"));
+    setActiveWorkspaceLocationId(locationId);
+    startTransition(() => setActiveViewOverride("location"));
     showToast(`${moduleId} upload set saved for ${location.name}.`);
   }
 
@@ -1247,6 +1255,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     }));
     void syncAssignedRestaurants();
     setShowAddLocation(false);
+    setActiveWorkspaceLocationId(location.id);
     setActiveViewOverride("onboarding");
     setActiveOnboardingLocation(location.id);
     void persistLocationState(location, {
@@ -2046,6 +2055,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       ...current,
       [locationId]: current[locationId] ?? createWgsOnboardingProgress(),
     }));
+    setActiveWorkspaceLocationId(locationId);
     setActiveOnboardingLocation(locationId);
   }
 
@@ -2546,6 +2556,7 @@ function handleCompleteOnboarding(locationId: string) {
         <SentryViewRouter
           accounts={wgsAccountState}
           activeView={activeView}
+          activeWorkspaceLocationId={activeWorkspaceLocationId}
           activeUploadLocationId={activeUploadLocation?.id ?? visibleLocations[0]?.id ?? null}
           activeUploadArtifactHint={activeUploadLocation?.preferredArtifactKey ?? null}
           activeUploadModuleHint={activeUploadLocation?.preferredModule ?? null}
@@ -2589,6 +2600,7 @@ function handleCompleteOnboarding(locationId: string) {
           onDownloadPdf={handleDownloadCaarPdf}
           onOpenCaar={setSelectedCaar}
           onOpenDiy={handleOpenDiy}
+          onOpenLocation={handleOpenLocationWorkspace}
           onOpenOnboarding={handleOpenOnboarding}
           onOpenSchemaEditor={setEditingWorkspace}
           onOpenUploads={handleOpenLocationUploads}
