@@ -408,9 +408,13 @@ export function SchemaEditorModal({
                           ),
                         }))
                       }
-                      className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] disabled:opacity-50"
+                      className={`rounded-lg border px-4 py-2 text-sm transition disabled:opacity-50 ${
+                        posSchemaValidated
+                          ? "border-[rgba(0,200,83,0.22)] bg-[rgba(0,200,83,0.08)] font-semibold text-[var(--success)]"
+                          : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--text)] hover:text-[var(--text)]"
+                      }`}
                     >
-                      Validate Extracted Mapping
+                      {posSchemaValidated ? "Extracted Mapping Validated" : "Validate Extracted Mapping"}
                     </button>
                   </div>
 
@@ -894,7 +898,10 @@ export function SchemaEditorModal({
                 <div>Verified fields: {verifiedFields.length}</div>
                 <div>Review items: {reviewFields.length}</div>
                 <div>Missing fields: {missingFields.length}</div>
-                <div>Comparison schema: {posSchemaValidated ? `${posSchema.validatedHeaders.length} validated headers` : "Not validated yet"}</div>
+                <div className={posSchemaValidated ? "font-medium text-[var(--success)]" : undefined}>
+                  Comparison schema:{" "}
+                  {posSchemaValidated ? `${posSchema.validatedHeaders.length} validated headers` : "Not validated yet"}
+                </div>
                 <div>Upload gate: {uploadReady ? "Release Ready" : "Blocked / Review"}</div>
               </div>
             </div>
@@ -903,7 +910,9 @@ export function SchemaEditorModal({
               <div className="font-medium">Verification flow</div>
               <div className="mt-3 space-y-2 text-sm text-[var(--muted)]">
                 <div>1. Confirm native headers against canonical fields.</div>
-                <div>2. Validate the governed comparison-source header bindings.</div>
+                <div className={posSchemaValidated ? "font-medium text-[var(--success)]" : undefined}>
+                  2. Validate the governed comparison-source header bindings.
+                </div>
                 <div>3. Verify contract terms against the signed agreement.</div>
                 <div>4. Resolve all amber or missing controls.</div>
                 <div>5. Seal only when the workspace reflects evidentiary truth.</div>
