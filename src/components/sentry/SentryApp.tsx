@@ -1778,9 +1778,15 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
+    const savedSourceConfig = getLocationSourceConfig(locationId);
+    const configuredVendorName =
+      module === "M01"
+        ? savedSourceConfig?.m01Vendors?.[0]?.name
+        : savedSourceConfig?.m02Vendors?.[0]?.name;
     const vendorName =
-      vendor ??
-      (module === "M01" ? wgsM01Vendors[0]?.name : wgsM02Vendors[0]?.name) ??
+      vendor?.trim() ||
+      configuredVendorName?.trim() ||
+      (module === "M01" ? wgsM01Vendors[0]?.name : wgsM02Vendors[0]?.name) ||
       (module === "M01" ? "Heartland" : "DoorDash");
     const template =
       schemaWorkspaces.find((workspace) => workspace.module === module && workspace.vendor === vendorName) ??

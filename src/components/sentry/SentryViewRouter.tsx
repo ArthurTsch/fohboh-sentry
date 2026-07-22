@@ -242,6 +242,7 @@ export function SentryViewRouter({
       <LocationWorkspaceView
         caars={caars}
         location={activeLocation}
+        locationSourceConfig={diyLocationSourceConfigs[activeLocation.id] ?? null}
         onEditWorkspace={onOpenSchemaEditor}
         onInitializeWorkspace={onInitializeWorkspace}
         onOpenCaar={onOpenCaar}

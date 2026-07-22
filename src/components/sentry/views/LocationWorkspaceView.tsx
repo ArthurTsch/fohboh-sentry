@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type {
   CaarRecord,
   LocationRecord,
+  LocationSourceConfig,
   LocationWorkflowState,
   Role,
   SchemaWorkspace,
@@ -14,6 +15,7 @@ type LocationWorkspaceTab = "dashboard" | "caars" | "vault";
 export function LocationWorkspaceView({
   caars,
   location,
+  locationSourceConfig,
   onOpenCaar,
   onOpenOnboarding,
   onOpenUploads,
@@ -27,6 +29,7 @@ export function LocationWorkspaceView({
 }: {
   caars: CaarRecord[];
   location: LocationRecord;
+  locationSourceConfig: LocationSourceConfig | null;
   onOpenCaar: (record: CaarRecord) => void;
   onOpenOnboarding: (locationId: string) => void;
   onOpenUploads: (locationId: string) => void;
@@ -46,6 +49,13 @@ export function LocationWorkspaceView({
   const locationWorkspaces = useMemo(
     () => workspaces.filter((workspace) => workspace.locationId === location.id),
     [location.id, workspaces],
+  );
+  const defaultVendorByModule = useMemo(
+    () => ({
+      M01: locationSourceConfig?.m01Vendors?.[0]?.name,
+      M02: locationSourceConfig?.m02Vendors?.[0]?.name,
+    }),
+    [locationSourceConfig],
   );
 
   return (
@@ -300,7 +310,13 @@ export function LocationWorkspaceView({
                     <button
                       key={`${location.id}:init:${module.label}`}
                       type="button"
-                      onClick={() => onInitializeWorkspace(location.id, module.label as "M01" | "M02")}
+                      onClick={() =>
+                        onInitializeWorkspace(
+                          location.id,
+                          module.label as "M01" | "M02",
+                          defaultVendorByModule[module.label as "M01" | "M02"],
+                        )
+                      }
                       className="rounded-lg bg-[var(--text)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
                     >
                       Initialize {module.label} Vault
