@@ -8,6 +8,7 @@ type UploadMetrics = {
   chargebackCount?: number;
   commissionRateAppliedAvg?: number;
   depositAmount?: number;
+  depositReferenceRows?: UploadReferenceRow[];
   deliveryFeeAmount?: number;
   deliveryOrderCount?: number;
   duplicateOrderCount?: number;
@@ -24,6 +25,7 @@ type UploadMetrics = {
   otherFeeAmount?: number;
   orderCount?: number;
   payoutAmount?: number;
+  payoutReferenceRows?: UploadReferenceRow[];
   pickupOrderCount?: number;
   promoOrderCount?: number;
   refundCount?: number;
@@ -37,6 +39,14 @@ type UploadMetrics = {
   visaCreditFeeAmount?: number;
   visaDebitAmount?: number;
   visaDebitFeeAmount?: number;
+};
+
+type UploadReferenceRow = {
+  amount: number;
+  externalRefId: string;
+  rowNumber?: number;
+  settledDate?: string;
+  type?: string;
 };
 
 export type PersistedUploadValidation = {
@@ -199,6 +209,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     chargebackCount: 0,
     commissionRateAppliedAvg: 0,
     depositAmount: 0,
+    depositReferenceRows: [],
     deliveryFeeAmount: 0,
     deliveryOrderCount: 0,
     duplicateOrderCount: 0,
@@ -215,6 +226,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     otherFeeAmount: 0,
     orderCount: 0,
     payoutAmount: 0,
+    payoutReferenceRows: [],
     pickupOrderCount: 0,
     promoOrderCount: 0,
     refundCount: 0,
@@ -284,13 +296,14 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     metrics.adjustmentAmount += read("adjustment_amount", "adjustment", "external");
     metrics.errorChargeAmount += read("error_charge");
     metrics.deliveryFeeAmount += read("delivery_fee", "consumer_fee");
-    metrics.payoutAmount += read(
+    const payoutAmount = read(
       "payout_amount",
       "net_payout",
       "platform_net_sales",
       "bank_deposit_amount",
       "payout",
     );
+    metrics.payoutAmount += payoutAmount;
     metrics.depositAmount += read(
       "bank_deposit_amount",
       "total_dsp_deposits",
@@ -299,6 +312,24 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "payout_amount",
       "payout",
     );
+
+    const externalRefIdIndex = valueFor("external_ref_id", "external ref. id", "reference_id");
+    const typeIndex = valueFor("type");
+    const settledDateIndex = valueFor("settled_date", "settled date", "settlement_date");
+    const externalRefId =
+      externalRefIdIndex >= 0 ? normalizeReferenceId(String(row[externalRefIdIndex] ?? "")) : "";
+    const rowType = typeIndex >= 0 ? String(row[typeIndex] ?? "").trim().toUpperCase() : "";
+    const settledDate = settledDateIndex >= 0 ? String(row[settledDateIndex] ?? "").trim() : "";
+
+    if (artifactKey === "m01-pos" && externalRefId && payoutAmount > 0) {
+      metrics.payoutReferenceRows.push({
+        amount: roundTo2(payoutAmount),
+        externalRefId,
+        rowNumber: metrics.payoutReferenceRows.length + 1,
+        settledDate,
+        type: rowType || "PAYOUT",
+      });
+    }
 
     const commissionRateApplied = read("commission_rate_applied", "dd_commission_rate");
     if (commissionRateApplied > 0) {
@@ -412,7 +443,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     metrics.payoutAmount = metrics.depositAmount;
   }
 
-  if (artifactKey.includes("pos")) {
+  if (artifactKey === "m02-pos" || artifactKey === "m03-pos") {
     metrics.payoutAmount = 0;
     metrics.depositAmount = 0;
   }
@@ -441,6 +472,11 @@ function parseNumber(value: string | number | undefined | null) {
   const cleaned = value.replace(/[^0-9.-]/g, "");
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeReferenceId(value: string) {
+  const normalized = value.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+  return normalized.replace(/^0+/, "");
 }
 
 function round(value: number) {

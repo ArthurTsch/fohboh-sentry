@@ -18,10 +18,33 @@ function parseCurrencyToCents(value: string) {
 function formatCentsToCurrency(cents: number) {
   return new Intl.NumberFormat("en-US", {
     currency: "USD",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
     style: "currency",
   }).format(cents / 100);
 }
+
+function formatAmount(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    style: "currency",
+  }).format(value);
+}
+
+type ReferenceRow = {
+  amount?: number;
+  candidateAmounts?: number[];
+  externalRefId?: string;
+  rowNumber?: number;
+  settledDate?: string;
+};
+
+type UploadMetricsLike = {
+  depositReferenceRows?: ReferenceRow[];
+  payoutReferenceRows?: ReferenceRow[];
+};
 
 function isCaarDimensionArray(value: unknown): value is CaarRecord["dimensions"] {
   return Array.isArray(value);
@@ -79,6 +102,150 @@ function normalizeCitationSamples(value: unknown) {
       Object.entries(entry).map(([key, sampleValue]) => [key, normalizeCitationSampleValue(sampleValue)]),
     ),
   );
+}
+
+function normalizeReferenceId(value: string | undefined | null) {
+  const normalized = String(value ?? "")
+    .replace(/[^0-9A-Za-z]/g, "")
+    .toUpperCase();
+  return normalized.replace(/^0+/, "");
+}
+
+function amountsMatch(left: number, right: number) {
+  return Math.abs(left - right) <= 0.01;
+}
+
+function referenceIdsMatch(left: string, right: string) {
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const leftTrimmed = left.replace(/^0+/, "");
+  const rightTrimmed = right.replace(/^0+/, "");
+  return (
+    leftTrimmed === rightTrimmed ||
+    left.endsWith(rightTrimmed) ||
+    right.endsWith(leftTrimmed) ||
+    leftTrimmed.endsWith(rightTrimmed) ||
+    rightTrimmed.endsWith(leftTrimmed)
+  );
+}
+
+function referenceRowSupportsAmount(row: ReferenceRow, targetAmount: number) {
+  return resolveReferenceRowMatchedAmount(row, targetAmount) !== null;
+}
+
+function resolveReferenceRowMatchedAmount(row: ReferenceRow, targetAmount: number) {
+  if (typeof row.amount === "number" && amountsMatch(row.amount, targetAmount)) {
+    return row.amount;
+  }
+
+  const candidateMatch = (row.candidateAmounts ?? []).find(
+    (candidate) => typeof candidate === "number" && amountsMatch(candidate, targetAmount),
+  );
+  if (candidateMatch !== undefined) {
+    return targetAmount;
+  }
+
+  return null;
+}
+
+function parseUploadMetrics(value: unknown): UploadMetricsLike | null {
+  if (!value || typeof value !== "object") return null;
+  const metrics = (value as { metrics?: unknown }).metrics;
+  return metrics && typeof metrics === "object" ? (metrics as UploadMetricsLike) : null;
+}
+
+function deriveReconciliationExceptions({
+  moduleId,
+  uploads,
+}: {
+  moduleId: "M01" | "M02";
+  uploads: Array<{
+    artifact_key: string;
+    file_name: string;
+    id: number;
+    location_id: number;
+    module: string;
+    page_count: number | null;
+    row_count: number | null;
+    sha256: string;
+    uploaded_at: Date | null;
+    validation_summary: unknown;
+    vendor: string | null;
+  }>;
+}) {
+  const posUpload = uploads.find((upload) => upload.artifact_key.endsWith("pos"));
+  const bankUpload = uploads.find((upload) => upload.artifact_key.endsWith("bank"));
+  if (!posUpload || !bankUpload) {
+    return [];
+  }
+
+  const posMetrics = parseUploadMetrics(posUpload.validation_summary);
+  const bankMetrics = parseUploadMetrics(bankUpload.validation_summary);
+  const payoutRows = posMetrics?.payoutReferenceRows ?? [];
+  const depositRows = bankMetrics?.depositReferenceRows ?? [];
+  if (payoutRows.length === 0 && depositRows.length === 0) {
+    return [];
+  }
+
+  const exceptions: string[] = [];
+  const usedDepositIndexes = new Set<number>();
+
+  for (const payoutRow of payoutRows) {
+    const payoutRef = normalizeReferenceId(payoutRow.externalRefId);
+    const payoutAmount = typeof payoutRow.amount === "number" ? payoutRow.amount : 0;
+    if (!payoutRef || payoutAmount <= 0) continue;
+
+    const matchingDepositIndexes = depositRows
+      .map((depositRow, index) => ({ depositRow, index }))
+      .filter(({ depositRow, index }) => {
+        if (usedDepositIndexes.has(index)) return false;
+        return referenceIdsMatch(payoutRef, normalizeReferenceId(depositRow.externalRefId));
+      });
+
+    if (matchingDepositIndexes.length === 0) {
+      exceptions.push(
+        `${moduleId} payout ID ${payoutRef} for ${formatAmount(payoutAmount)} is missing in bank statement evidence.`,
+      );
+      continue;
+    }
+
+    const exactAmountMatch = matchingDepositIndexes.find(({ depositRow }) =>
+      resolveReferenceRowMatchedAmount(depositRow, payoutAmount) !== null,
+    );
+
+    if (exactAmountMatch) {
+      usedDepositIndexes.add(exactAmountMatch.index);
+      continue;
+    }
+
+    const unresolvedButPresent = matchingDepositIndexes.find(
+      ({ depositRow }) =>
+        (depositRow.amount ?? 0) <= 0 ||
+        ((depositRow.candidateAmounts?.length ?? 0) > 0 && typeof depositRow.amount !== "number"),
+    );
+    if (unresolvedButPresent) {
+      usedDepositIndexes.add(unresolvedButPresent.index);
+      continue;
+    }
+
+    const firstMismatch = matchingDepositIndexes[0];
+    usedDepositIndexes.add(firstMismatch.index);
+    exceptions.push(
+      `${moduleId} payout ID ${payoutRef} amount mismatch: payout export shows ${formatAmount(payoutAmount)} but bank statement shows ${formatAmount(firstMismatch.depositRow.amount ?? 0)}.`,
+    );
+  }
+
+  depositRows.forEach((depositRow, index) => {
+    if (usedDepositIndexes.has(index)) return;
+    const depositRef = normalizeReferenceId(depositRow.externalRefId);
+    const depositAmount = typeof depositRow.amount === "number" ? depositRow.amount : 0;
+    if (!depositRef || depositAmount <= 0) return;
+    exceptions.push(
+      `${moduleId} deposit ID ${depositRef} for ${formatAmount(depositAmount)} appears in bank statement evidence but not in the payout export.`,
+    );
+  });
+
+  return [...new Set(exceptions)];
 }
 
 function sampleSignalsProblem(sample: Record<string, unknown>) {
@@ -615,6 +782,8 @@ export async function GET(request: Request) {
           uploadLocationId && moduleId
             ? uploads.filter((upload) => upload.location_id === uploadLocationId && upload.module === moduleId)
             : [];
+        const reconciliationExceptions =
+          moduleId ? deriveReconciliationExceptions({ moduleId, uploads: moduleUploads }) : [];
         const sealedSchema =
           persistedCaar && moduleId
             ? sealedSchemas.find((row) => row.location_id === persistedCaar.location_id && row.module === moduleId) ?? null
@@ -665,6 +834,7 @@ export async function GET(request: Request) {
             }),
             module: moduleId,
             passedRuleCitations: buildRuleCitationSummaries(passedCitations),
+            reconciliationExceptions,
             ruleCitations: buildRuleCitationSummaries(problemCitations),
             ruleSetVersion: certRun?.rule_set_version ?? null,
             sealedAt: persistedCaar?.sealed_at?.toISOString() ?? null,

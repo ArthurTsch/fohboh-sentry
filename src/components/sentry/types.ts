@@ -111,6 +111,7 @@ export type CaarTraceability = {
   fieldAudit: CaarFieldAudit[];
   module: "M01" | "M02" | "M03" | null;
   passedRuleCitations: CaarRuleCitationSummary[];
+  reconciliationExceptions: string[];
   ruleCitations: CaarRuleCitationSummary[];
   ruleSetVersion: string | null;
   sealedAt: string | null;

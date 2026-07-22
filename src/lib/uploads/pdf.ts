@@ -2,12 +2,21 @@ type PdfMetricExtraction = {
   metrics?: {
     basisAmount?: number;
     depositAmount?: number;
+    depositReferenceRows?: PdfReferenceRow[];
     feeAmount?: number;
     orderCount?: number;
     payoutAmount?: number;
     transactionCount?: number;
   };
   warnings: string[];
+};
+
+type PdfReferenceRow = {
+  amount: number;
+  candidateAmounts?: number[];
+  externalRefId: string;
+  lineText?: string;
+  postedDate?: string;
 };
 
 type ExtractedPdfDocument = {
@@ -170,6 +179,33 @@ function estimatePdfPageCountFromBuffer(buffer: Buffer) {
 
 function extractBankMetrics(artifactKey: string, text: string): PdfMetricExtraction {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const toastDepositRefs = artifactKey === "m01-bank" ? extractToastBankDepositRows(lines) : [];
+  const depositMatches =
+    toastDepositRefs.length > 0 ? toastDepositRefs.map((row) => row.amount) : extractLegacyBankDepositMatches(artifactKey, lines);
+
+  const fallbackSummary = extractSummaryFallback(artifactKey, text);
+  const depositAmount = roundCurrency(sum(depositMatches)) || fallbackSummary;
+
+  if (depositAmount <= 0) {
+    return {
+      warnings: [
+        "Bank deposits could not be derived from this PDF automatically. Upload a machine-readable bank statement PDF for automated reconciliation.",
+      ],
+    };
+  }
+
+  return {
+    metrics: {
+      depositAmount,
+      depositReferenceRows: toastDepositRefs.length > 0 ? toastDepositRefs : undefined,
+      payoutAmount: depositAmount,
+      transactionCount: depositMatches.length || undefined,
+    },
+    warnings: [],
+  };
+}
+
+function extractLegacyBankDepositMatches(artifactKey: string, lines: string[]) {
   const descriptors =
     artifactKey === "m01-bank"
       ? [/toast/i, /processor/i]
@@ -195,25 +231,63 @@ function extractBankMetrics(artifactKey: string, text: string): PdfMetricExtract
     }
   }
 
-  const fallbackSummary = extractSummaryFallback(artifactKey, text);
-  const depositAmount = roundCurrency(sum(depositMatches)) || fallbackSummary;
+  return depositMatches;
+}
 
-  if (depositAmount <= 0) {
-    return {
-      warnings: [
-        "Bank deposits could not be derived from this PDF automatically. Upload a machine-readable bank statement PDF for automated reconciliation.",
-      ],
-    };
+function extractToastBankDepositRows(lines: string[]): PdfReferenceRow[] {
+  const rows: PdfReferenceRow[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!/external deposit\s+toast\s*-\s*dep/i.test(line)) continue;
+    if (/withdrawal/i.test(line)) continue;
+
+    const externalRefId = extractToastDepositReferenceId(line);
+    if (!externalRefId) continue;
+
+    let amount = extractCurrencyFromLine(line);
+    const candidateAmounts = collectNearbyCurrencyCandidates(lines, index);
+    if (amount <= 0) {
+      amount = 0;
+    }
+
+    rows.push({
+      amount: roundCurrency(amount),
+      candidateAmounts,
+      externalRefId: normalizeReferenceId(externalRefId),
+      lineText: line,
+      postedDate: extractPostedDate(line) ?? extractPostedDate(lines[index - 1] ?? ""),
+    });
   }
 
-  return {
-    metrics: {
-      depositAmount,
-      payoutAmount: depositAmount,
-      transactionCount: depositMatches.length || undefined,
-    },
-    warnings: [],
-  };
+  return rows;
+}
+
+function extractToastDepositReferenceId(line: string) {
+  const explicit = line.match(/DEP\s+[A-Z]{3}\s+\d{2}\s+([A-Z0-9]{8,}?)(?=\d{2}\/\d{2}\/\d{4}\b|[^A-Z0-9]|$)/i);
+  if (explicit?.[1]) return explicit[1];
+
+  const fallback = [...line.matchAll(/\b([A-Z0-9]{10,})\b/gi)].map((match) => match[1]);
+  return fallback.at(-1) ?? "";
+}
+
+function extractPostedDate(line: string) {
+  const match = line.match(/\b(\d{2}\/\d{2}\/\d{4})\b/);
+  return match?.[1];
+}
+
+function collectNearbyCurrencyCandidates(lines: string[], index: number) {
+  const candidates = new Set<number>();
+
+  for (let cursor = Math.max(0, index - 4); cursor <= Math.min(lines.length - 1, index + 10); cursor += 1) {
+    for (const amount of extractCurrencyValuesFromLine(lines[cursor])) {
+      if (amount > 0) {
+        candidates.add(roundCurrency(Math.abs(amount)));
+      }
+    }
+  }
+
+  return [...candidates];
 }
 
 function extractSummaryFallback(artifactKey: string, text: string) {
@@ -255,6 +329,11 @@ function extractCurrencyFromLine(line: string) {
   }
 
   return 0;
+}
+
+function normalizeReferenceId(value: string) {
+  const normalized = value.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+  return normalized.replace(/^0+/, "");
 }
 
 function extractProcessorStatementMetrics(text: string): PdfMetricExtraction {

@@ -7,6 +7,7 @@ type Metrics = {
   chargebackCount?: number;
   commissionRateAppliedAvg?: number;
   depositAmount?: number;
+  depositReferenceRows?: ReferenceRow[];
   deliveryFeeAmount?: number;
   deliveryOrderCount?: number;
   duplicateOrderCount?: number;
@@ -25,6 +26,7 @@ type Metrics = {
   pickupOrderCount?: number;
   promoOrderCount?: number;
   payoutAmount?: number;
+  payoutReferenceRows?: ReferenceRow[];
   refundCount?: number;
   serviceFeeAmount?: number;
   settlementLagDaysAvg?: number;
@@ -36,6 +38,16 @@ type Metrics = {
   visaCreditFeeAmount?: number;
   visaDebitAmount?: number;
   visaDebitFeeAmount?: number;
+};
+
+type ReferenceRow = {
+  amount: number;
+  candidateAmounts?: number[];
+  externalRefId: string;
+  postedDate?: string;
+  rowNumber?: number;
+  settledDate?: string;
+  type?: string;
 };
 
 export type Mq6DimensionName =
@@ -2557,8 +2569,13 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
   const statementBasis = numberValue(context.statement?.metrics?.basisAmount);
   const posBasis = numberValue(context.pos?.metrics?.basisAmount);
   const statementFees = numberValue(context.statement?.metrics?.feeAmount);
-  const bankDeposit = numberValue(context.bank?.metrics?.depositAmount);
-  const payoutAmount = numberValue(context.statement?.metrics?.payoutAmount);
+  const matchedToastDeposits = context.moduleId === "M01" ? reconcileToastBankDeposits(context) : null;
+  const bankDeposit = numberValue(matchedToastDeposits?.matchedDepositAmount ?? context.bank?.metrics?.depositAmount);
+  const payoutAmount = numberValue(
+    matchedToastDeposits?.matchedPayoutAmount ??
+      context.pos?.metrics?.payoutAmount ??
+      context.statement?.metrics?.payoutAmount,
+  );
 
   if (statementGoverned && posGoverned && statementBasis > 0 && posBasis > 0) {
     const delta = relativeDelta(statementBasis, posBasis);
@@ -2592,18 +2609,114 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
     const delta = relativeDelta(bankDeposit, payoutAmount);
     if (delta <= 0.05) {
       score += 50;
-      detailParts.push("Settlement-to-bank tie-out cleared within 5%.");
+      detailParts.push(
+        matchedToastDeposits
+          ? `Toast payout-reference bank tie-out cleared within 5% across ${matchedToastDeposits.matchCount} matched deposits.`
+          : "Settlement-to-bank tie-out cleared within 5%.",
+      );
     } else if (delta <= 0.12) {
       score += 25;
-      detailParts.push("Settlement-to-bank tie-out remains outside final tolerance.");
+      detailParts.push(
+        matchedToastDeposits
+          ? `Toast payout-reference bank tie-out remains outside final tolerance across ${matchedToastDeposits.matchCount} matched deposits.`
+          : "Settlement-to-bank tie-out remains outside final tolerance.",
+      );
     } else {
-      detailParts.push("Settlement-to-bank tie-out failed.");
+      detailParts.push(
+        matchedToastDeposits
+          ? "Toast payout-reference bank tie-out failed."
+          : "Settlement-to-bank tie-out failed.",
+      );
     }
   } else {
     detailParts.push("Bank reconciliation evidence missing.");
   }
 
   return scoreDetail(score, detailParts.join(" "));
+}
+
+function reconcileToastBankDeposits(context: RuleContext) {
+  const payoutRows = context.pos?.metrics?.payoutReferenceRows ?? [];
+  const depositRows = context.bank?.metrics?.depositReferenceRows ?? [];
+
+  if (!payoutRows.length || !depositRows.length) {
+    return null;
+  }
+
+  const usedDeposits = new Set<number>();
+  let matchedDepositAmount = 0;
+  let matchedPayoutAmount = 0;
+  let matchCount = 0;
+
+  for (const payoutRow of payoutRows) {
+    const payoutRef = normalizeReferenceId(payoutRow.externalRefId);
+    if (!payoutRef || payoutRow.amount <= 0) continue;
+
+    const depositIndex = depositRows.findIndex((depositRow, index) => {
+      if (usedDeposits.has(index)) return false;
+      if (!referenceIdsMatch(payoutRef, normalizeReferenceId(depositRow.externalRefId))) return false;
+      return resolveReferenceRowMatchedAmount(depositRow, payoutRow.amount) !== null;
+    });
+
+    if (depositIndex === -1) continue;
+
+    usedDeposits.add(depositIndex);
+    matchedPayoutAmount += payoutRow.amount;
+    matchedDepositAmount += resolveReferenceRowMatchedAmount(depositRows[depositIndex], payoutRow.amount) ?? 0;
+    matchCount += 1;
+  }
+
+  if (matchCount === 0) {
+    return null;
+  }
+
+  return {
+    matchCount,
+    matchedDepositAmount: roundCurrency(matchedDepositAmount),
+    matchedPayoutAmount: roundCurrency(matchedPayoutAmount),
+  };
+}
+
+function referenceIdsMatch(left: string, right: string) {
+  if (!left || !right) return false;
+  if (left === right) return true;
+  const leftTrimmed = left.replace(/^0+/, "");
+  const rightTrimmed = right.replace(/^0+/, "");
+  return (
+    leftTrimmed === rightTrimmed ||
+    left.endsWith(rightTrimmed) ||
+    right.endsWith(leftTrimmed) ||
+    leftTrimmed.endsWith(rightTrimmed) ||
+    rightTrimmed.endsWith(leftTrimmed)
+  );
+}
+
+function amountsMatch(left: number, right: number) {
+  return Math.abs(numberValue(left) - numberValue(right)) <= 0.01;
+}
+
+function referenceRowSupportsAmount(row: ReferenceRow, targetAmount: number) {
+  return resolveReferenceRowMatchedAmount(row, targetAmount) !== null;
+}
+
+function resolveReferenceRowMatchedAmount(row: ReferenceRow, targetAmount: number) {
+  if (amountsMatch(row.amount, targetAmount)) {
+    return row.amount;
+  }
+
+  const candidateMatch = (row.candidateAmounts ?? []).find((candidate) => amountsMatch(candidate, targetAmount));
+  if (candidateMatch !== undefined) {
+    return targetAmount;
+  }
+
+  return null;
+}
+
+function normalizeReferenceId(value: string | undefined | null) {
+  const normalized = String(value ?? "")
+    .replace(/[^0-9A-Za-z]/g, "")
+    .toUpperCase();
+  return normalized.replace(/^0+/, "");
 }
 
 function scoreRuleIntegrity(context: RuleContext): Mq6Score {

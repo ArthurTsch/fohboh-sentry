@@ -319,6 +319,7 @@ export function buildCertificationResult({
             ? activeModules[0].moduleId
             : null,
       passedRuleCitations: [],
+      reconciliationExceptions: [],
       ruleCitations: [],
       ruleSetVersion,
       sealedAt: null,

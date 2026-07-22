@@ -69,6 +69,7 @@ export function CaarReportModal({
   const evidenceRows = traceability?.evidence ?? [];
   const fieldAudit = traceability?.fieldAudit ?? [];
   const passedRuleCitations = traceability?.passedRuleCitations ?? [];
+  const reconciliationExceptions = traceability?.reconciliationExceptions ?? [];
   const ruleCitations = traceability?.ruleCitations ?? [];
   const hasPersistedTraceability =
     Boolean(traceability?.certRunId) &&
@@ -86,6 +87,7 @@ export function CaarReportModal({
   const missingEvidence = evidenceRows.filter((row) => row.status === "missing");
   const reviewEvidence = evidenceRows.filter((row) => row.status === "review");
   const remediationSteps = [
+    ...reconciliationExceptions,
     ...missingEvidence.map((row) => `Upload ${row.label} and persist it for this ${moduleId} certification package.`),
     ...reviewEvidence.map((row) => `Resolve review blockers on ${row.label} before treating it as governed evidence.`),
     ...unsupportedFieldAudit.map((row) => `Backfill ${row.field} from a persisted upload, sealed config, or stored engine output.`),
@@ -435,6 +437,25 @@ export function CaarReportModal({
             ])}
           />
         </ReportCard>
+
+        {reconciliationExceptions.length > 0 ? (
+          <ReportCard
+            eyebrow="Reconciliation Exceptions"
+            title="Persisted payout vs bank mismatches"
+            sub="These exceptions come from the saved payout-export rows and saved bank-statement deposit rows used by this CAAR."
+          >
+            <div className="space-y-3">
+              {reconciliationExceptions.map((item, index) => (
+                <div
+                  key={`reconciliation-exception:${index}`}
+                  className="rounded-2xl border border-[rgba(214,48,49,0.18)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]"
+                >
+                  {item}
+                </div>
+              ))}
+            </div>
+          </ReportCard>
+        ) : null}
 
         <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
           <ReportCard
