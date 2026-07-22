@@ -104,6 +104,7 @@ export function SchemaEditorModal({
     () => mergeHeaderBindings(comparisonFieldDefinitions, posSchema.headerBindings ?? [], comparisonCandidateHeaders),
     [comparisonCandidateHeaders, comparisonFieldDefinitions, posSchema.headerBindings],
   );
+  const extractedSampleReady = posSchema.extractedHeaders.length > 0;
   const headerAttentionNeeded =
     !posSchemaValidated || missingFields.length > 0 || reviewFields.length > 0;
   const sourceLabel =
@@ -396,7 +397,7 @@ export function SchemaEditorModal({
                     </button>
                     <button
                       type="button"
-                      disabled={posSchema.extractedHeaders.length === 0}
+                      disabled={!extractedSampleReady}
                       onClick={() =>
                         setDraft((current) => ({
                           ...current,
@@ -411,6 +412,8 @@ export function SchemaEditorModal({
                       className={`rounded-lg border px-4 py-2 text-sm transition disabled:opacity-50 ${
                         posSchemaValidated
                           ? "border-[rgba(0,200,83,0.22)] bg-[rgba(0,200,83,0.08)] font-semibold text-[var(--success)]"
+                          : extractedSampleReady
+                            ? "border-[rgba(0,200,83,0.18)] bg-[rgba(0,200,83,0.05)] font-medium text-[var(--success)] hover:border-[rgba(0,200,83,0.28)]"
                           : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--text)] hover:text-[var(--text)]"
                       }`}
                     >
