@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import type { RefObject } from "react";
-import { LocationSourceSettingsModal } from "../overlays/LocationSourceSettingsModal";
 import { Badge } from "../ui/primitives";
-import type { IntakeState, LocationSourceConfig, UploadModule, UploadReceipt } from "../types";
+import type {
+  IntakeState,
+  LocationSourceConfig,
+  SchemaWorkspace,
+  UploadModule,
+  UploadReceipt,
+} from "../types";
 import { getVendorCatalog } from "../vendor-catalog";
 import { getTemplateHeaders } from "@/lib/uploads/definitions";
 
@@ -59,15 +64,15 @@ export function UploadCenterView({
   activeSourceConfig,
   activeVendorKeyHint,
   activeVendorNameHint,
-  canManageSources,
   intakeState,
   modules,
   onCompleteUploadSet,
-  onManageSources,
   onDirectUpload,
+  onOpenLocationDashboard,
   onRemoveUpload,
   onResetLocationUploads,
   onOpenSchema,
+  schemaWorkspaces,
   uploadFeedback,
 }: {
   activeArtifactHint?: string | null;
@@ -78,23 +83,17 @@ export function UploadCenterView({
   activeSourceConfig: LocationSourceConfig | null;
   activeVendorKeyHint?: string | null;
   activeVendorNameHint?: string | null;
-  canManageSources: boolean;
   contractState: Record<string, Record<string, string>>;
   intakeState: Record<string, IntakeState>;
   modules: UploadModule[];
   onCompleteUploadSet: (locationId: string, moduleId: "M01" | "M02") => void;
-  onManageSources: (next: {
-    m01Enabled: boolean;
-    m01Vendors: string[];
-    m02Enabled: boolean;
-    m02Vendors: string[];
-  }) => void;
   onDirectUpload: (
     moduleId: "M01" | "M02",
     artifactKey: string,
     file: File,
     vendor?: { key: string; name: string },
   ) => Promise<UploadReceipt | null>;
+  onOpenLocationDashboard: (locationId: string) => void;
   onRemoveUpload: (
     moduleId: "M01" | "M02",
     artifactKey: string,
@@ -102,10 +101,10 @@ export function UploadCenterView({
   ) => Promise<void>;
   onResetLocationUploads: (locationId: string) => Promise<void>;
   onOpenSchema: () => void;
+  schemaWorkspaces: SchemaWorkspace[];
   uploadFeedback: UploadReceipt | null;
 }) {
   const [activeModule, setActiveModule] = useState<"M01" | "M02">("M01");
-  const [showManageSources, setShowManageSources] = useState(false);
   const [cardState, setCardState] = useState<Record<string, UploadCardState>>({});
   const [pendingUpload, setPendingUpload] = useState<{
     moduleId: "M01" | "M02";
@@ -266,6 +265,38 @@ export function UploadCenterView({
     const selectedKeys = new Set(selected.map((vendor) => vendor.key));
     return activeMeta.vendors.filter((vendor) => selectedKeys.has(vendor.key));
   }, [activeMeta.vendors, activeModule, activeSourceConfig]);
+  const sealedWorkspaceKeys = useMemo(() => {
+    const keys = new Set<string>();
+
+    for (const workspace of schemaWorkspaces) {
+      if (workspace.vault.state !== "sealed" && workspace.status !== "sealed") {
+        continue;
+      }
+
+      keys.add(
+        `${workspace.locationId}:${workspace.module}:${normalizeProviderIdentity(workspace.vendor)}`,
+      );
+    }
+
+    return keys;
+  }, [schemaWorkspaces]);
+  const isVaultSealedForProvider = (
+    moduleId: "M01" | "M02",
+    vendor: { key: string; name: string },
+  ) => {
+    if (!activeLocationId) {
+      return false;
+    }
+
+    return (
+      sealedWorkspaceKeys.has(
+        `${activeLocationId}:${moduleId}:${normalizeProviderIdentity(vendor.name)}`,
+      ) ||
+      sealedWorkspaceKeys.has(
+        `${activeLocationId}:${moduleId}:${normalizeProviderIdentity(vendor.key)}`,
+      )
+    );
+  };
   const uploadArtifactKeyFor = (baseKey: string) =>
     activeUploadModule?.artifacts.find((artifact) => artifact.key.startsWith(baseKey))?.key ?? baseKey;
   const recentReceipt = useMemo(() => {
@@ -334,6 +365,9 @@ export function UploadCenterView({
       uploadedCount,
     };
   }, [activeLocationId, activeModule, activeSourceConfig, intakeState, modules]);
+  const activeModuleVaultLocked =
+    visibleVendors.length > 0 &&
+    visibleVendors.every((vendor) => !isVaultSealedForProvider(activeModule, vendor));
 
   function getCardKey(moduleId: "M01" | "M02", artifactKey: string, vendorKey: string) {
     return `${activeLocationId ?? "global"}:${moduleId}:${artifactKey}:${vendorKey}`;
@@ -348,6 +382,18 @@ export function UploadCenterView({
     file: File,
   ) {
     const uploadKey = getCardKey(target.moduleId, target.artifactKey, target.vendor.key);
+
+    if (!isVaultSealedForProvider(target.moduleId, target.vendor)) {
+      setCardState((current) => ({
+        ...current,
+        [uploadKey]: {
+          phase: "error",
+          message:
+            `Upload locked. Seal the ${target.moduleId} ${target.vendor.name} vault before uploading certification evidence.`,
+        },
+      }));
+      return;
+    }
 
     setCardState((current) => ({
       ...current,
@@ -423,15 +469,6 @@ export function UploadCenterView({
                 : "Upload native CSV statements exactly as downloaded - no reformatting, no Excel re-save"}
             </div>
           </div>
-          {canManageSources && activeLocationName && activeSourceConfig ? (
-            <button
-              type="button"
-              onClick={() => setShowManageSources(true)}
-              className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
-            >
-              Manage Sources
-            </button>
-          ) : null}
         </div>
         {activeArtifactHint && activeLocationName ? (
           <div className="mt-4 rounded-2xl border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)] px-4 py-3">
@@ -525,6 +562,28 @@ export function UploadCenterView({
 
       <div className="px-5 pt-5">
         {recentReceipt ? <RecentUploadBanner receipt={recentReceipt} /> : null}
+        {activeModuleVaultLocked ? (
+          <div className="mb-5 rounded-2xl border border-[var(--border)] bg-[var(--panel-soft)] px-4 py-4">
+            <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">
+              Upload Data Locked
+            </div>
+            <div className="mt-2 text-sm leading-7 text-[var(--muted)]">
+              Certification evidence cannot be uploaded for{" "}
+              <span className="font-semibold text-[var(--text)]">{activeLocationName ?? "this location"}</span>{" "}
+              until the {activeModule} vault is sealed. Go to the restaurant dashboard, use{" "}
+              <span className="font-semibold text-[var(--text)]">Seal Vault</span>, then return here.
+            </div>
+            {activeLocationId ? (
+              <button
+                type="button"
+                onClick={() => onOpenLocationDashboard(activeLocationId)}
+                className="mt-4 rounded-xl bg-[var(--text)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+              >
+                Open Restaurant Dashboard
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <div className="mb-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-4">
           <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
             Saved Evidence For This Location
@@ -553,19 +612,15 @@ export function UploadCenterView({
               <div className="mx-auto mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">
                 This location does not currently have any active {activeModule === "M01" ? "card processors" : "DSPs"} configured for {activeModule}. Uploads are blocked until a source is explicitly selected for this location.
               </div>
-              {canManageSources && activeSourceConfig ? (
-                <button
-                  type="button"
-                  onClick={() => setShowManageSources(true)}
-                  className="mt-5 rounded-xl bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
-                >
-                  Configure Active Sources
-                </button>
-              ) : null}
+              <div className="mx-auto mt-4 max-w-2xl rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm leading-7 text-[var(--muted)]">
+                Configure this from the restaurant dashboard under Active Sources. Upload Data is reserved for evidence files only.
+              </div>
             </div>
           </div>
         ) : null}
         {visibleVendors.map((vendor) => {
+          const vaultSealed = isVaultSealedForProvider(activeModule, vendor);
+          const vaultLockMessage = `Certification evidence upload is unavailable until the ${activeModule} ${vendor.name} vault is sealed. Use Seal Vault from the restaurant dashboard, then return here.`;
           const settlementArtifactKey = uploadArtifactKeyFor(activeMeta.uploadArtifactKey);
           const posArtifactKey = activeModule === "M02" ? uploadArtifactKeyFor("m02-pos") : uploadArtifactKeyFor("m01-pos");
           const agreementArtifactKey =
@@ -643,6 +698,11 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
+                      locked={!vaultSealed}
+                      lockMessage={vaultLockMessage}
+                      onOpenVault={
+                        activeLocationId ? () => onOpenLocationDashboard(activeLocationId) : undefined
+                      }
                       intake={settlementIntake}
                       hasUpload={settlementHasUpload}
                       uploadState={settlementCardState}
@@ -710,6 +770,11 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
+                      locked={!vaultSealed}
+                      lockMessage={vaultLockMessage}
+                      onOpenVault={
+                        activeLocationId ? () => onOpenLocationDashboard(activeLocationId) : undefined
+                      }
                       intake={posIntake ?? undefined}
                       hasUpload={posHasUpload}
                       uploadState={posCardState}
@@ -775,6 +840,11 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
+                      locked={!vaultSealed}
+                      lockMessage={vaultLockMessage}
+                      onOpenVault={
+                        activeLocationId ? () => onOpenLocationDashboard(activeLocationId) : undefined
+                      }
                       intake={agreementIntake ?? undefined}
                       hasUpload={agreementHasUpload}
                       uploadState={agreementCardState}
@@ -844,6 +914,11 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
+                      locked={!vaultSealed}
+                      lockMessage={vaultLockMessage}
+                      onOpenVault={
+                        activeLocationId ? () => onOpenLocationDashboard(activeLocationId) : undefined
+                      }
                       intake={bankIntake ?? undefined}
                       hasUpload={bankHasUpload}
                       uploadState={bankCardState}
@@ -910,6 +985,11 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
+                      locked={!vaultSealed}
+                      lockMessage={vaultLockMessage}
+                      onOpenVault={
+                        activeLocationId ? () => onOpenLocationDashboard(activeLocationId) : undefined
+                      }
                       intake={settlementIntake}
                       hasUpload={settlementHasUpload}
                       uploadState={settlementCardState}
@@ -977,6 +1057,11 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
+                      locked={!vaultSealed}
+                      lockMessage={vaultLockMessage}
+                      onOpenVault={
+                        activeLocationId ? () => onOpenLocationDashboard(activeLocationId) : undefined
+                      }
                       intake={posIntake ?? undefined}
                       hasUpload={posHasUpload}
                       uploadState={posCardState}
@@ -1042,6 +1127,11 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
+                      locked={!vaultSealed}
+                      lockMessage={vaultLockMessage}
+                      onOpenVault={
+                        activeLocationId ? () => onOpenLocationDashboard(activeLocationId) : undefined
+                      }
                       intake={agreementIntake ?? undefined}
                       hasUpload={agreementHasUpload}
                       uploadState={agreementCardState}
@@ -1111,6 +1201,11 @@ export function UploadCenterView({
                         });
                         fileInputRef.current?.click();
                       }}
+                      locked={!vaultSealed}
+                      lockMessage={vaultLockMessage}
+                      onOpenVault={
+                        activeLocationId ? () => onOpenLocationDashboard(activeLocationId) : undefined
+                      }
                       intake={bankIntake ?? undefined}
                       hasUpload={bankHasUpload}
                       uploadState={bankCardState}
@@ -1248,18 +1343,6 @@ export function UploadCenterView({
           ) : null}
         </div>
       </div>
-
-      {showManageSources && activeSourceConfig && activeLocationName ? (
-        <LocationSourceSettingsModal
-          initialConfig={activeSourceConfig}
-          locationName={activeLocationName}
-          onClose={() => setShowManageSources(false)}
-          onSave={(next) => {
-            onManageSources(next);
-            setShowManageSources(false);
-          }}
-        />
-      ) : null}
 
       {pdfViewer ? (
         <div className="fixed inset-0 z-[220] flex items-center justify-center bg-[rgba(15,23,42,0.42)] px-4 py-6">
@@ -1429,6 +1512,9 @@ function DocumentSection({
   hasUpload,
   uploadState,
   onFileDrop,
+  locked = false,
+  lockMessage,
+  onOpenVault,
   emptyTitle,
   emptySub,
 }: {
@@ -1448,6 +1534,9 @@ function DocumentSection({
   hasUpload: boolean;
   uploadState?: UploadCardState;
   onFileDrop?: (file: File) => void;
+  locked?: boolean;
+  lockMessage?: string;
+  onOpenVault?: () => void;
   emptyTitle: string;
   emptySub: string;
 }) {
@@ -1477,11 +1566,13 @@ function DocumentSection({
           type="button"
           onClick={onPrimary}
           className={`rounded-lg px-3 py-2 text-[13px] font-semibold text-white transition ${
-            uploadState?.phase === "uploading"
+            locked
+              ? "cursor-not-allowed bg-[var(--panel-soft)] text-[var(--muted)]"
+              : uploadState?.phase === "uploading"
               ? "cursor-wait bg-[var(--info)]"
               : "bg-[var(--text)] hover:bg-[var(--accent)]"
           }`}
-          disabled={uploadState?.phase === "uploading"}
+          disabled={locked || uploadState?.phase === "uploading"}
         >
           {uploadState?.phase === "uploading" ? "Uploading..." : primaryLabel}
         </button>
@@ -1528,6 +1619,21 @@ function DocumentSection({
           {uploadState.message}
         </div>
       ) : null}
+      {locked ? (
+        <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--panel-soft)] px-4 py-3 text-[12px] leading-6 text-[var(--muted)]">
+          <div className="font-semibold text-[var(--text)]">Upload locked until vault is sealed.</div>
+          <div>{lockMessage}</div>
+          {onOpenVault ? (
+            <button
+              type="button"
+              onClick={onOpenVault}
+              className="mt-3 rounded-lg bg-[var(--text)] px-3 py-2 text-[12px] font-semibold text-white transition hover:bg-[var(--accent)]"
+            >
+              Open Restaurant Dashboard
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <UploadTile
         intake={intake}
         hasUpload={hasUpload}
@@ -1536,6 +1642,7 @@ function DocumentSection({
         onClick={onPrimary}
         onFileDrop={onFileDrop}
         onOpenSchema={onOpenSchema}
+        locked={locked}
         compact
       />
     </div>
@@ -1550,6 +1657,7 @@ function UploadTile({
   onClick,
   onFileDrop,
   onOpenSchema,
+  locked = false,
   compact = false,
 }: {
   intake?: IntakeState;
@@ -1559,6 +1667,7 @@ function UploadTile({
   onClick: () => void;
   onFileDrop?: (file: File) => void;
   onOpenSchema?: () => void;
+  locked?: boolean;
   compact?: boolean;
 }) {
   const hasParseWarning = Boolean(intake?.parseWarnings?.length);
@@ -1570,6 +1679,10 @@ function UploadTile({
 
   function handleDragOver(event: DragEvent<HTMLButtonElement>) {
     event.preventDefault();
+    if (locked) {
+      event.dataTransfer.dropEffect = "none";
+      return;
+    }
     event.dataTransfer.dropEffect = "copy";
     setDragActive(true);
   }
@@ -1582,6 +1695,9 @@ function UploadTile({
   function handleDrop(event: DragEvent<HTMLButtonElement>) {
     event.preventDefault();
     setDragActive(false);
+    if (locked) {
+      return;
+    }
     const file = event.dataTransfer.files?.[0];
     if (file && onFileDrop) {
       onFileDrop(file);
@@ -1596,8 +1712,11 @@ function UploadTile({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        disabled={locked}
         className={`mt-4 flex w-full flex-col items-center justify-center rounded-2xl px-4 text-center transition ${
-          dragActive
+          locked
+            ? "cursor-not-allowed bg-[#F3F4F7] opacity-70"
+            : dragActive
             ? "bg-[rgba(214,48,49,0.08)] ring-2 ring-[rgba(214,48,49,0.2)]"
             : "bg-[#F8F8FA] hover:bg-[#F3F4F7]"
         } ${compact ? "min-h-[110px] py-5" : "min-h-[140px] py-6"
@@ -1636,11 +1755,13 @@ function UploadTile({
           </>
         ) : (
           <>
-            <span className="text-[18px] font-semibold text-[var(--muted)]">DROP</span>
+            <span className="text-[18px] font-semibold text-[var(--muted)]">{locked ? "LOCKED" : "DROP"}</span>
             <span className={`${compact ? "mt-2 text-[15px]" : "mt-3 text-[24px]"} leading-none text-[var(--text)]`}>
-              {emptyTitle}
+              {locked ? "Seal the vault before uploading evidence" : emptyTitle}
             </span>
-            <span className="mt-3 font-[family-name:var(--font-mono)] text-[10px] text-[var(--muted)]">{emptySub}</span>
+            <span className="mt-3 font-[family-name:var(--font-mono)] text-[10px] text-[var(--muted)]">
+              {locked ? "governance seal required" : emptySub}
+            </span>
           </>
         )}
       </button>
@@ -1707,6 +1828,10 @@ function downloadTemplate(vendorKey: string, module: "M01" | "M02", vendorName: 
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+function normalizeProviderIdentity(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function formatBytes(bytes: number) {

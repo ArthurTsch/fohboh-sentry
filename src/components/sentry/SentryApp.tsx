@@ -2181,6 +2181,11 @@ function handleCompleteOnboarding(locationId: string) {
     const completedStatus: "Certified" | "At Risk" =
       Math.round((location.m01 + location.m02) / 2) >= 85 ? "Certified" : "At Risk";
     setActiveOnboardingLocation(null);
+    setActiveWorkspaceLocationId(locationId);
+    setActiveUploadLocation(null);
+    setActiveArtifact(null);
+    setUploadFeedback(null);
+    startTransition(() => setActiveViewOverride("location"));
     const persistedLocation = {
       ...location,
       lastCertified: new Date().toISOString().slice(0, 10),

@@ -7,6 +7,7 @@ import type {
   Role,
   SchemaWorkspace,
 } from "../types";
+import { LocationSourceSettingsModal } from "../overlays/LocationSourceSettingsModal";
 import { HelpTip, SectionCard } from "../ui/primitives";
 import { formatCurrency } from "../utils";
 
@@ -22,6 +23,7 @@ export function LocationWorkspaceView({
   onRunCertification,
   onEditWorkspace,
   onInitializeWorkspace,
+  onManageSources,
   onSealWorkspace,
   role,
   workspaces,
@@ -36,12 +38,20 @@ export function LocationWorkspaceView({
   onRunCertification: (locationId: string) => void;
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
   onInitializeWorkspace: (locationId: string, module: "M01" | "M02", vendor?: string) => void;
+  onManageSources: (next: {
+    m01Enabled: boolean;
+    m01Vendors: string[];
+    m02Enabled: boolean;
+    m02Vendors: string[];
+  }) => void;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   role: Role;
   workspaces: SchemaWorkspace[];
   workflow: LocationWorkflowState;
 }) {
   const [tab, setTab] = useState<LocationWorkspaceTab>("dashboard");
+  const [showManageSources, setShowManageSources] = useState(false);
+  const canManageSources = role === "Admin" || role === "SuperAdmin" || role === "WGS Manager";
   const locationCaars = useMemo(
     () => caars.filter((record) => record.locationId === location.id),
     [caars, location.id],
@@ -57,6 +67,41 @@ export function LocationWorkspaceView({
     }),
     [locationSourceConfig],
   );
+  const governedModules = location.modules
+    .map((module) => module.label)
+    .filter((label): label is "M01" | "M02" => label === "M01" || label === "M02");
+  const governanceRequirement = workflow.requirements.find(
+    (requirement) => requirement.key === "governance",
+  );
+  const uploadLockedByVault = governanceRequirement?.status === "action_required";
+  const firstDraftWorkspace = locationWorkspaces.find(
+    (workspace) => workspace.status !== "sealed" && workspace.vault.state !== "sealed",
+  );
+  const firstMissingWorkspaceModule = governedModules.find(
+    (module) =>
+      !locationWorkspaces.some(
+        (workspace) =>
+          workspace.module === module &&
+          (workspace.status === "sealed" || workspace.vault.state === "sealed"),
+      ),
+  );
+
+  function openSealVaultWorkflow() {
+    setTab("vault");
+
+    if (firstDraftWorkspace) {
+      onEditWorkspace(firstDraftWorkspace);
+      return;
+    }
+
+    if (firstMissingWorkspaceModule) {
+      onInitializeWorkspace(
+        location.id,
+        firstMissingWorkspaceModule,
+        defaultVendorByModule[firstMissingWorkspaceModule],
+      );
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -110,11 +155,31 @@ export function LocationWorkspaceView({
                 ? "This location is ready for its next certification cycle."
                 : workflow.blockers[0] ?? "This location still needs setup before the next certification cycle."}
             </div>
+            {uploadLockedByVault ? (
+              <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--panel-soft)] px-4 py-3 text-sm leading-7 text-[var(--muted)]">
+                <span className="font-semibold text-[var(--text)]">Upload Data is locked.</span> Seal the governed vault
+                for the active module/vendor before uploading certification evidence.
+              </div>
+            ) : null}
             <div className="mt-4 flex flex-wrap gap-2">
+              {uploadLockedByVault ? (
+                <button
+                  type="button"
+                  onClick={openSealVaultWorkflow}
+                  className="rounded-lg bg-[var(--text)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+                >
+                  Seal Vault
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => onOpenUploads(location.id)}
-                className="rounded-lg bg-[var(--text)] px-3 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+                disabled={uploadLockedByVault}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  uploadLockedByVault
+                    ? "cursor-not-allowed bg-[var(--panel-soft)] text-[var(--muted)]"
+                    : "bg-[var(--text)] text-white hover:bg-[var(--accent)]"
+                }`}
               >
                 Open Upload Data
               </button>
@@ -155,6 +220,65 @@ export function LocationWorkspaceView({
               help="Governed schema / contract workspaces linked to this location."
             />
           </div>
+
+          <SectionCard>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+                    Active Sources
+                  </div>
+                  <HelpTip
+                    title="Location / Active Sources"
+                    sections={[
+                      {
+                        label: "What It Is",
+                        text: "The card processor and delivery platforms configured for this restaurant.",
+                      },
+                      {
+                        label: "What It Controls",
+                        text: "Only these sources appear in Upload Data, DIY Access, Vault setup, and certification workflows for this location.",
+                      },
+                      {
+                        label: "Where To Change It",
+                        text: "Change sources from this location dashboard so Upload Data remains focused on evidence upload only.",
+                      },
+                    ]}
+                  />
+                </div>
+                <div className="mt-1 text-sm text-[var(--muted)]">
+                  Source configuration is location-scoped and reused by Upload Data, Vault, and CAAR runs.
+                </div>
+              </div>
+              {canManageSources && locationSourceConfig ? (
+                <button
+                  type="button"
+                  onClick={() => setShowManageSources(true)}
+                  className="rounded-xl bg-[var(--text)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+                >
+                  Manage Sources
+                </button>
+              ) : null}
+            </div>
+            {locationSourceConfig ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                <SourceSummaryCard
+                  enabled={locationSourceConfig.m01Enabled}
+                  label="M01 Card Processor"
+                  sources={locationSourceConfig.m01Vendors.map((vendor) => vendor.name)}
+                />
+                <SourceSummaryCard
+                  enabled={locationSourceConfig.m02Enabled}
+                  label="M02 Delivery Platforms"
+                  sources={locationSourceConfig.m02Vendors.map((vendor) => vendor.name)}
+                />
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)] p-5 text-sm leading-7 text-[var(--text)]">
+                No source configuration is saved for this location yet. Configure active sources here before uploading evidence.
+              </div>
+            )}
+          </SectionCard>
 
           <SectionCard>
             <div className="mb-4 flex items-center gap-2">
@@ -368,6 +492,18 @@ export function LocationWorkspaceView({
           )}
         </SectionCard>
       ) : null}
+
+      {showManageSources && locationSourceConfig ? (
+        <LocationSourceSettingsModal
+          initialConfig={locationSourceConfig}
+          locationName={location.name}
+          onClose={() => setShowManageSources(false)}
+          onSave={(next) => {
+            onManageSources(next);
+            setShowManageSources(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -423,6 +559,45 @@ function MetricCard({
       </div>
       <div className="mt-3 font-[family-name:var(--font-display)] text-3xl font-bold tracking-[-0.04em] text-[var(--text)]">
         {value}
+      </div>
+    </div>
+  );
+}
+
+function SourceSummaryCard({
+  enabled,
+  label,
+  sources,
+}: {
+  enabled: boolean;
+  label: string;
+  sources: string[];
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-semibold text-[var(--text)]">{label}</div>
+        <span
+          className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${
+            enabled ? "bg-[rgba(0,200,83,0.08)] text-[var(--success)]" : "bg-[var(--panel-soft)] text-[var(--muted)]"
+          }`}
+        >
+          {enabled ? "Active" : "Off"}
+        </span>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {enabled && sources.length > 0 ? (
+          sources.map((source) => (
+            <span
+              key={source}
+              className="rounded-full border border-[var(--border)] bg-white px-3 py-1 text-xs font-medium text-[var(--text)]"
+            >
+              {source}
+            </span>
+          ))
+        ) : (
+          <span className="text-sm text-[var(--muted)]">No active source selected.</span>
+        )}
       </div>
     </div>
   );

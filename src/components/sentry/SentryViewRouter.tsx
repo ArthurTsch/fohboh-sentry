@@ -245,6 +245,7 @@ export function SentryViewRouter({
         locationSourceConfig={diyLocationSourceConfigs[activeLocation.id] ?? null}
         onEditWorkspace={onOpenSchemaEditor}
         onInitializeWorkspace={onInitializeWorkspace}
+        onManageSources={onManageUploadSources}
         onOpenCaar={onOpenCaar}
         onOpenOnboarding={onOpenOnboarding}
         onOpenUploads={onOpenUploads}
@@ -330,16 +331,16 @@ export function SentryViewRouter({
         activeSourceConfig={activeUploadSourceConfig}
         activeVendorKeyHint={activeUploadVendorKeyHint}
         activeVendorNameHint={activeUploadVendorNameHint}
-        canManageSources={role === "Admin" || role === "SuperAdmin" || role === "WGS Manager"}
         contractState={artifactContractState}
         intakeState={artifactIntakeState}
         modules={uploadModules}
         onCompleteUploadSet={onCompleteUploadSet}
-        onManageSources={onManageUploadSources}
         onDirectUpload={onDirectUpload}
+        onOpenLocationDashboard={onOpenLocation}
         onRemoveUpload={onRemoveUpload}
         onResetLocationUploads={onResetLocationUploads}
         onOpenSchema={() => onViewChange("schema")}
+        schemaWorkspaces={schemaWorkspaces}
         uploadFeedback={uploadFeedback}
       />
     );

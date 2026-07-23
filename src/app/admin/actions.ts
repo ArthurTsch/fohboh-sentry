@@ -3,6 +3,7 @@
 import { hash } from "bcryptjs";
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { redirect } from "next/navigation";
 import { Prisma } from "@/app/generated/prisma/client";
 import prisma from "@/lib/prisma";
@@ -103,6 +104,10 @@ export async function loginAdminAction(formData: FormData) {
 
     redirect("/superadmin");
   } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+
     await writeAuditLog({
       action: "superadmin_login_error",
       entityId: email.toLowerCase() || "unknown",
