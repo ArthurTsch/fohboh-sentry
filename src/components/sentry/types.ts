@@ -125,7 +125,7 @@ export type CaarRecord = {
   period: string;
   trustScore: number;
   amount: string;
-  status: "Court Admissible" | "Needs Remediation";
+  status: "Certified" | "Needs Remediation";
   exhibits: number;
   narrative: string;
   findings: string[];

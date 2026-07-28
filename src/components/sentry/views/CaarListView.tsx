@@ -11,9 +11,9 @@ export function CaarListView({
   records: CaarRecord[];
 }) {
   const total = records.length;
-  const certified = records.filter((record) => record.status === "Court Admissible").length;
+  const certified = records.filter((record) => record.status === "Certified").length;
   const filed = Math.max(0, certified - 1);
-  const courtAdmissible = certified;
+  const remediation = total - certified;
 
   return (
     <div className="space-y-5">
@@ -21,7 +21,7 @@ export function CaarListView({
         <StatCard label="Total CAARs" tone="accent" value={String(total)} />
         <StatCard label="Certified" tone="success" value={String(certified)} />
         <StatCard label="Filed with Processor" tone="info" value={String(filed)} />
-        <StatCard label="Court-Admissible" tone="success" value={String(courtAdmissible)} />
+        <StatCard label="Needs Remediation" tone="accent" value={String(remediation)} />
       </div>
 
       <SectionCard className="overflow-hidden p-0">
@@ -32,11 +32,11 @@ export function CaarListView({
             sections={[
               {
                 label: "What It Is",
-                text: "Unique identifier for this Certified Audit and Analysis Report. Formatted as CAAR-[PERIOD]-[LOC]-[SEQ].",
+                text: "Unique identifier for this Certified Automated Audit & Recovery report. Formatted as CAAR-[PERIOD]-[LOC]-[SEQ].",
               },
               {
                 label: "What It Does",
-                text: "Use this ID to reference the report in legal filings, vendor dispute letters, and communications with your WGS Advisor.",
+                text: "Use this ID to reference the report in recovery reviews, vendor communications, and discussions with your WGS Advisor.",
               },
               {
                 label: "Why It Matters",
@@ -88,24 +88,24 @@ export function CaarListView({
           />
           <span>Description</span>
           <HeaderWithTip
-            label="Court Adm."
+            label="Certified"
             title="CAARs / Col"
             sections={[
               {
                 label: "What It Is",
-                text: "Whether this CAAR meets FRE 803(6), 902(11), and 1002, the standards required for court admissibility.",
+                text: "Whether this report completed all required evidence, reconciliation, governance, and release checks.",
               },
               {
                 label: "How To Use It",
-                text: "Only present court-admissible CAARs as evidence. Non-admissible reports are useful for internal tracking only.",
+                text: "Use Certified CAARs for finalized recovery workflows. Reports needing remediation remain operational drafts.",
               },
               {
                 label: "Why It Matters",
-                text: "A court-admissible CAAR self-authenticates and does not require live witness testimony. The SHA-256 hash chain is the proof.",
+                text: "Certification confirms that the report, source evidence, calculations, and audit trail are complete and traceable.",
               },
             ]}
-            footerLabel="Legal Standard"
-            footerValue="FRE 803(6) / 902(11) / 1002"
+            footerLabel="Release Gate"
+            footerValue="Evidence + rules + reconciliation"
           />
           <span>Seal Hash</span>
           <span>Action</span>
@@ -113,7 +113,7 @@ export function CaarListView({
 
         <div>
           {records.map((record) => {
-            const courtReady = record.status === "Court Admissible";
+            const courtReady = record.status === "Certified";
             const sealHash = buildSealHash(record.id);
 
             return (

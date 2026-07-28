@@ -121,7 +121,7 @@ export function useSentryDerivedState({
   const totalRecovery = formatCurrency(
     visibleCaars.reduce((sum, record) => sum + parseCurrency(record.amount), 0),
   );
-  const totalCaars = visibleCaars.filter((record) => record.status === "Court Admissible").length;
+  const totalCaars = visibleCaars.filter((record) => record.status === "Certified").length;
 
   const filteredLogs = useMemo(() => {
     const scoped = session ? logState : [];

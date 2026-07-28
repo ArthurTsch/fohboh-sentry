@@ -143,7 +143,7 @@ export function LandingPage({
           </h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-[var(--muted)]">
             FohBoh Sentry certifies delivery-platform and processor fee overcharges using
-            deterministic rules, sealed evidence chains, and court-admissible CAAR output built for
+            deterministic rules, sealed evidence chains, and Certified Automated Audit & Recovery reports built for
             real recovery operations.
           </p>
 
@@ -163,7 +163,7 @@ export function LandingPage({
             <p className="mt-4 max-w-3xl text-base leading-8 text-[var(--muted)]">
               The platform is built around a strict evidence model: native uploads or signed feeds,
               hashed intake, governed schema mapping, sealed contract terms, deterministic rule
-              execution, and a Court-Admissible Analysis Report generated only when the Trust Score
+              execution, and a Certified Automated Audit & Recovery report generated only when the Trust Score
               clears the certification gate.
             </p>
             <div className="mt-6 grid gap-4 md:grid-cols-3">

@@ -112,7 +112,7 @@ export default async function SuperAdminPage({
             eyebrow="CAAR Output"
             label="Saved CAARs"
             value={formatInteger(totalCaars)}
-            detail={`${formatInteger(certifiedCaars)} court-admissible reports`}
+            detail={`${formatInteger(certifiedCaars)} certified CAAR reports`}
             tone="red"
           />
           <KpiCard
@@ -212,7 +212,7 @@ export default async function SuperAdminPage({
             detail="Restaurant records currently persisted in production."
           />
           <MiniInsightCard
-            label="Court-Admissible CAARs"
+            label="Certified CAARs"
             value={formatInteger(certifiedCaars)}
             detail="CAARs that cleared the final release gate."
           />

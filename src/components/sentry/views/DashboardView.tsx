@@ -91,7 +91,7 @@ export function DashboardView({
             sections: [
               {
                 label: "What It Is",
-                text: "Count of court-admissible CAAR packages visible in the current account scope.",
+                text: "Count of Certified Automated Audit & Recovery packages visible in the current account scope.",
               },
               {
                 label: "How To Use It",

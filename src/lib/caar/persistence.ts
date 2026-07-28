@@ -104,7 +104,7 @@ function deriveCertificationClass({
 function normalizeFindingClass(record: CaarRecord, amountValue: number) {
   if (amountValue > 100) return "BREACH_OVERCHARGE";
   if (amountValue < -100) return "BREACH_UNDERCHARGE";
-  return record.status === "Court Admissible" ? "NO_FINDING" : "INCONCLUSIVE";
+  return record.status === "Certified" ? "NO_FINDING" : "INCONCLUSIVE";
 }
 
 function normalizeMq6Label(name: string) {
@@ -230,7 +230,7 @@ function buildCanonicalPayload({
       },
       {
         assessment: certification.ready
-          ? "Court-admissible package completed."
+          ? "Certified Automated Audit & Recovery package completed."
           : "Certification completed with unresolved release gates.",
         event: "Certification Complete",
         status: certification.ready ? "COMPLETE" : "PENDING",
@@ -445,14 +445,14 @@ function buildTextPdfBuffer(
 function buildPdfLines(payload: ReturnType<typeof buildCanonicalPayload>) {
   const mq6Rows = Object.entries(payload.mq6 as Record<string, { badge: string; detail: string; score_pct: number }>);
   const lines = [
-    `Court-Admissible Analysis Report`,
+    `Certified Automated Audit & Recovery Report`,
     `CAAR ID: ${payload.caar_external_id}`,
     `Module: ${payload.module_label}`,
     `Location: ${payload.location.name}`,
     `Period: ${payload.period}`,
     `Trust Score: ${payload.composite_trust_score}`,
     `Certification Class: ${payload.certification_class}`,
-    `Court Admissible: ${payload.court_admissible ? "YES" : "NO"}`,
+    `Certified Release: ${payload.court_admissible ? "YES" : "NO"}`,
     `Recoverable Variance Cents: ${payload.recoverable_variance_cents}`,
     `Seal Timestamp: ${payload.sealed_at}`,
     `Integrity Hash: ${payload.attestation.integrity_hash}`,
@@ -735,7 +735,7 @@ export async function persistGeneratedCaar(
     Producer: "Sentry CAAR Renderer",
     SEALED_AT: canonicalPayload.sealed_at,
     SHA256_SEAL: canonicalSha,
-    Subject: `Court-Admissible Analysis Report - ${record.period}`,
+    Subject: `Certified Automated Audit & Recovery Report - ${record.period}`,
     Title: `CAAR ${record.id} - ${canonicalPayload.module_label}`,
     VAULT_VERSION: "v1.0.0",
   });
@@ -753,7 +753,7 @@ export async function persistGeneratedCaar(
     objectKey: pdfObjectKey,
   });
 
-  const findingClass = record.status === "Court Admissible" ? "court_admissible" : "needs_remediation";
+  const findingClass = record.status === "Certified" ? "certified" : "needs_remediation";
   const caar = existing
     ? await tx.caars_v2.update({
         where: {
@@ -762,7 +762,7 @@ export async function persistGeneratedCaar(
         data: {
           canonical_payload_s3_key: canonicalObjectKey,
           cert_run_id: primaryRun.id,
-          court_admissible: record.status === "Court Admissible",
+          court_admissible: record.status === "Certified",
           finding_class: findingClass,
           location_id: locationId,
           module: primaryRun.module,
@@ -772,7 +772,7 @@ export async function persistGeneratedCaar(
           recoverable_variance_cents: BigInt(Math.round(certification.amountValue * 100)),
           sealed_at: sealedAt,
           sha256: canonicalSha,
-          status: record.status === "Court Admissible" ? "active" : "review",
+          status: record.status === "Certified" ? "active" : "review",
           superseded_by: null,
           superseded_reason: null,
           trust_score: record.trustScore,
@@ -787,7 +787,7 @@ export async function persistGeneratedCaar(
           canonical_payload_s3_key: canonicalObjectKey,
           caar_external_id: record.id,
           cert_run_id: primaryRun.id,
-          court_admissible: record.status === "Court Admissible",
+          court_admissible: record.status === "Certified",
           finding_class: findingClass,
           location_id: locationId,
           module: primaryRun.module,
@@ -797,7 +797,7 @@ export async function persistGeneratedCaar(
           recoverable_variance_cents: BigInt(Math.round(certification.amountValue * 100)),
           sha256: canonicalSha,
           sealed_at: sealedAt,
-          status: record.status === "Court Admissible" ? "active" : "review",
+          status: record.status === "Certified" ? "active" : "review",
           trust_score: record.trustScore,
         },
         select: {
@@ -877,7 +877,7 @@ export async function persistGeneratedCaar(
       metadata: toJsonValue({
         caarExternalId: record.id,
         certRunIds: runRecords.map((run) => run.id),
-        courtAdmissible: record.status === "Court Admissible",
+        certifiedRelease: record.status === "Certified",
       }),
       summary: `Generated CAAR ${record.id} from persisted certification runs.`,
     },
@@ -921,7 +921,7 @@ export async function generateClaimPackForCaar(
   }
 
   if (!caar.court_admissible || !caar.pdf_s3_key) {
-    throw new Error("Claim pack generation is blocked until the CAAR is court-admissible.");
+    throw new Error("ExportPack generation is blocked until the CAAR has passed certified release.");
   }
 
   const canonicalBuffer = await readArtifactBlob(caar.canonical_payload_s3_key);

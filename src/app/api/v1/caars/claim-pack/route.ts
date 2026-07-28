@@ -69,7 +69,7 @@ export async function POST(request: Request) {
       if (
         error.message === "CAAR not found." ||
         error.message.includes("Claim pack generation is blocked until") ||
-        error.message.includes("court-admissible")
+        error.message.includes("certified release")
       ) {
         return NextResponse.json({ error: error.message }, { status: 409 });
       }

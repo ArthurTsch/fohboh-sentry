@@ -46,8 +46,8 @@ const navHelp: Record<
   caars: {
     title: "Sidebar / Recovery",
     sections: [
-      { label: "What It Is", text: "Court-Admissible Analysis Reports: every sealed, SHA-256-hashed evidence package your portfolio has produced." },
-      { label: "What It Does", text: "Shows CAAR status, certified variance amounts, legal admissibility flags, and download links for the full ExportPack." },
+      { label: "What It Is", text: "Certified Automated Audit & Recovery reports: every sealed, SHA-256-hashed evidence package your portfolio has produced." },
+      { label: "What It Does", text: "Shows certification status, verified recovery amounts, evidence readiness, and download links for the full ExportPack." },
       { label: "Why It Matters", text: "A CAAR is certified evidence that self-authenticates under FRE 803(6), 902(11), and 1002." },
     ],
     footerLabel: "Legal Standard",

@@ -22,7 +22,7 @@ export function getSupportReply(message: string) {
   }
 
   if (lower.includes("caar")) {
-    return "A CAAR is the sealed Court-Admissible Analysis Report. It is released when the location clears the Trust Score gate and all evidence controls are ready.";
+    return "A CAAR is a Certified Automated Audit & Recovery report. It documents verified reconciliation findings and the certified recovery amount after all evidence controls pass.";
   }
 
   if (lower.includes("trust score") || lower.includes("low")) {

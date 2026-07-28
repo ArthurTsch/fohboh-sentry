@@ -54,7 +54,7 @@ export default async function SuperAdminManagementPage({
   ]);
 
   const caarState = getSearchParam(resolvedSearchParams, "caar");
-  const certifiedCount = reports.filter((report) => report.status === "Court Admissible").length;
+  const certifiedCount = reports.filter((report) => report.status === "Certified").length;
 
   return (
     <AdminShell
@@ -64,7 +64,7 @@ export default async function SuperAdminManagementPage({
     >
       <div className="grid gap-6 md:grid-cols-3">
         <StatCard label="Saved CAARs" value={String(reports.length)} />
-        <StatCard label="Court Admissible" value={String(certifiedCount)} />
+        <StatCard label="Certified CAARs" value={String(certifiedCount)} />
         <StatCard
           label="Managers with CAARs"
           value={String(new Set(reports.map((report) => report.created_by).filter(Boolean)).size)}

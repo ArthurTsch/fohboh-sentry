@@ -19,7 +19,7 @@ export const viewMeta: Record<ViewId, { eyebrow: string; title: string; sub: str
   caars: {
     eyebrow: "Recovery",
     title: "CAARs",
-    sub: "Court-admissible reports and remediation candidates generated from sealed evidence packages.",
+    sub: "Certified Automated Audit & Recovery reports and remediation candidates generated from sealed evidence packages.",
   },
   billing: {
     eyebrow: "Account",

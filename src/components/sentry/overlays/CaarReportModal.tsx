@@ -98,7 +98,7 @@ export function CaarReportModal({
       ? "This CAAR summary row exists, but its linked persisted certification-run traceability is incomplete or missing. Treat this report as broken lineage until the certification run, rule citations, and evidence trace are restored."
       : null;
   const claimReady =
-    Boolean(traceability?.courtAdmissible ?? record.status === "Court Admissible") &&
+    Boolean(traceability?.courtAdmissible ?? record.status === "Certified") &&
     hasPersistedTraceability &&
     unsupportedFieldAudit.length === 0;
   const remediationDone = claimReady;
@@ -113,7 +113,7 @@ export function CaarReportModal({
               ? `Trust Score remains below release because these MQ6 dimensions are still under the final gate: ${lowDimensions
                   .map((dimension) => `${dimension.name} (${dimension.score})`)
                   .join(", ")}.`
-              : "All displayed fields are backed, but the persisted certification run is still not marked court-admissible.",
+              : "All displayed fields are backed, but the persisted certification run has not passed the certified release gate.",
             ruleCitations.length > 0
               ? `The remaining blocker comes from stored rule-engine findings. Review ${ruleCitations.length} persisted rule citation${ruleCitations.length === 1 ? "" : "s"} below and resolve the failing control path.`
               : "The run does not expose enough persisted rule-citation detail yet to explain the final release block precisely.",
@@ -201,7 +201,7 @@ export function CaarReportModal({
               <CoverMeta label="Rule Set Version" value={ruleSetVersion ?? "Not persisted"} />
               <CoverMeta
                 label="Certification Class"
-                value={claimReady ? "Court Admissible" : reviewEvidence.length > 0 ? "Needs Review" : "Needs Remediation"}
+                value={claimReady ? "Certified" : reviewEvidence.length > 0 ? "Needs Review" : "Needs Remediation"}
               />
             </div>
           </div>
@@ -250,7 +250,7 @@ export function CaarReportModal({
                   label="Final Release Score"
                   tone={finalReleaseScore ?? 0}
                   value={finalReleaseScore ?? 0}
-                  description="Court-admissible release score. Weekly preliminary keeps this blocked until the monthly final cadence completes."
+                  description="Certified release score. Weekly preliminary keeps this blocked until the monthly final cadence completes."
                 />
               </div>
             ) : null}
@@ -404,8 +404,8 @@ export function CaarReportModal({
               <>
                 Composite trust score for this report is <strong>{record.trustScore}/100</strong>.{" "}
                 {claimReady
-                  ? "The certification state is court-admissible because the persisted engine output and required evidence package are both present."
-                  : "A high trust score alone is not enough. Unsupported fields, missing uploads, or review-state evidence still block a defensible certification."}
+                  ? "The CAAR is Certified because the persisted engine output and required evidence package are both present."
+                  : "A high trust score alone is not enough. Unsupported fields, missing uploads, or review-state evidence still block certified release."}
               </>
             )}
           </div>
@@ -413,7 +413,7 @@ export function CaarReportModal({
 
         <ReportCard
           eyebrow="Evidence & Provenance"
-          title={claimReady ? "Evidence posture is fully defensible" : "Why this is not fully defensible yet"}
+          title={claimReady ? "Evidence package is complete" : "Why certification is not complete yet"}
           sub={
             claimReady
               ? "All required source evidence, sealed governance, and rule outputs are persisted and traceable."

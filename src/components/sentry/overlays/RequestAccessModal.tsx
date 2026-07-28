@@ -308,7 +308,7 @@ function StepModules({
               Merchant Fee Recovery + Delivery Fee Recovery
             </div>
             <div className="mt-3 text-sm text-[var(--muted)]">
-              All 198 deterministic rules - Full CAAR evidence package - Court-admissible output
+              All 198 deterministic rules - Full CAAR evidence package - Certified Automated Audit & Recovery output
             </div>
           </div>
           <div className="pr-9 text-right">

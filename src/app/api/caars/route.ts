@@ -808,7 +808,7 @@ export async function GET(request: Request) {
           narrative: report.narrative,
           period: report.period,
           restaurantId: report.restaurant_id,
-          status: report.status as CaarRecord["status"],
+          status: persistedCaar?.court_admissible ? "Certified" : "Needs Remediation",
           traceability: {
             certCompletedAt: certRun?.completed_at?.toISOString() ?? null,
             certRunId: certRun?.id ?? null,

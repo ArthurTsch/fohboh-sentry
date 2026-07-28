@@ -157,7 +157,7 @@ export const caarRecords: CaarRecord[] = [
     period: "May 2026",
     trustScore: 91,
     amount: "$42,180",
-    status: "Court Admissible",
+    status: "Certified",
     exhibits: 9,
     narrative:
       "All required source systems were hash-verified and reconciled. The certified variance is appropriate for external vendor submission.",
@@ -186,7 +186,7 @@ export const caarRecords: CaarRecord[] = [
     status: "Needs Remediation",
     exhibits: 7,
     narrative:
-      "The portal identified recoverable variance, but court-admissible status is blocked by incomplete bank-level reconciliation.",
+      "The portal identified recoverable variance, but certified release is blocked by incomplete bank-level reconciliation.",
     findings: [
       "M02 evidence package is missing one bank statement needed for D3 validation.",
       "Certified fee variance remains visible, but final ExportPack generation is blocked.",
@@ -209,7 +209,7 @@ export const caarRecords: CaarRecord[] = [
     period: "May 2026",
     trustScore: 89,
     amount: "$31,220",
-    status: "Court Admissible",
+    status: "Certified",
     exhibits: 9,
     narrative:
       "Evidence chain, contract config, and rule lineage are complete. The report is suitable for legal review and vendor escalation.",
@@ -344,7 +344,7 @@ export const guidePhases: GuidePhase[] = [
       {
         id: "2.2",
         title: "Upload POS and bank source files",
-        text: "These are required for the three-way reconciliation gate that supports court-admissible output.",
+        text: "These are required for the three-way reconciliation gate that supports certified output.",
         where: "Upload Data -> M01",
       },
     ],
@@ -396,11 +396,11 @@ export const faqItems: FaqItem[] = [
     topic: "CAAR",
     question: "What is a CAAR?",
     answer:
-      "A Certified Amount-At-Risk Report (CAAR) is the output document produced after Sentry runs a certification. It identifies fee overcharges, documents the exact rules that were violated, and is formatted for court admissibility. Each CAAR is sealed with a SHA-256 hash so you can verify the downloaded file has not been altered.",
+      "A Certified Automated Audit & Recovery report (CAAR) is the output produced after Sentry completes certification. It documents reconciliation findings, the exact rules evaluated, and the certified recovery amount. Each CAAR is sealed with a SHA-256 hash so the downloaded file can be checked for alteration.",
   },
   {
     topic: "CAAR",
-    question: 'What does "court-admissible" mean in practice?',
+    question: 'What does "Certified Automated Audit & Recovery" mean?',
     answer:
       "It means the CAAR is formatted and evidence-chained to meet the evidentiary standards for use in arbitration, dispute resolution, or civil litigation. The SHA-256 seal hash creates an unbroken chain of custody from the original data to the final document - a requirement for legal standing.",
   },

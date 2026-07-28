@@ -66,8 +66,8 @@ export function CertificationRunModal({
               {ready
                 ? "CAAR release threshold met. Claim-pack generation is available."
                 : cadence === "weekly_preliminary"
-                  ? "Preliminary certification completed. Monthly Final is still required for court-admissible release."
-                  : "Evidence or reconciliation gates still block court-admissible release."}
+                  ? "Preliminary certification completed. Monthly Final is still required for certified release."
+                  : "Evidence or reconciliation gates still block certified release."}
             </div>
           </div>
           <div className="flex gap-2">

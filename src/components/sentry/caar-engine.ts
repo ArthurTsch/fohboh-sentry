@@ -305,7 +305,7 @@ export function buildCertificationResult({
     locationName: location.name,
     narrative: buildNarrative(location.name, activeModules, cadence, trustScore, ready),
     period: resolvedPeriod,
-    status: ready ? "Court Admissible" : "Needs Remediation",
+    status: ready ? "Certified" : "Needs Remediation",
     traceability: {
       certCompletedAt: null,
       certRunId: null,
@@ -431,7 +431,7 @@ function buildOverallCanonicalRuleCitations({
   citations.push(
     buildOverallCitation("R142", {
       detail: ready
-        ? "Certification record is eligible for final lock and court-admissible release."
+        ? "Certification record is eligible for final lock and certified release."
         : "Certification record remains mutable only through superseding remediation because release gates are unresolved.",
       ready,
     }),
@@ -1061,10 +1061,10 @@ function buildNarrative(
     .join("; ");
 
   if (ready) {
-    return `${locationName} completed the certification pipeline successfully. ${moduleSummary}. The evidence package is sufficient for court-admissible release at Trust Score ${trustScore}.`;
+    return `${locationName} completed the certification pipeline successfully. ${moduleSummary}. The evidence package is sufficient for certified release at Trust Score ${trustScore}.`;
   }
   if (cadence === "weekly_preliminary") {
-    return `${locationName} completed a weekly preliminary certification. ${moduleSummary}. Bank-reconciliation proof is deferred until the monthly final cadence, so this output remains operational and non-court-admissible by design.`;
+    return `${locationName} completed a weekly preliminary certification. ${moduleSummary}. Bank-reconciliation proof is deferred until the monthly final cadence, so this output remains preliminary by design.`;
   }
   return `${locationName} completed deterministic certification analysis but remains below the final release threshold. ${moduleSummary}. Remediation is still required before external delivery.`;
 }
@@ -1140,7 +1140,7 @@ function buildCertificationSteps(
       detail: ready
         ? "Release threshold met and CAAR was generated."
         : cadence === "weekly_preliminary"
-          ? "Preliminary run completed. Monthly Final is still required for court-admissible release."
+          ? "Preliminary run completed. Monthly Final is still required for certified release."
           : "Run completed, but release remains blocked until missing controls are resolved.",
       done: ready,
       label: "Certify & Lock",

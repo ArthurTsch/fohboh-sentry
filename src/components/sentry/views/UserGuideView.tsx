@@ -68,7 +68,7 @@ const guidePhases: GuidePhase[] = [
       {
         id: "2.3",
         text:
-          "Upload your executed merchant services agreement as a PDF. This is the source document for the contracted rates in Contract Config. The PDF is SHA-256 hashed on upload - the hash becomes your court-admissible chain-of-custody anchor.",
+          "Upload your executed merchant services agreement as a PDF. This is the source document for the contracted rates in Contract Config. The PDF is SHA-256 hashed on upload, creating the integrity anchor for the certified evidence chain.",
         title: "Upload Your Signed Merchant Agreement",
         where: "Where: Upload Data -> M01 -> Merchant Agreement PDF",
       },
@@ -184,7 +184,7 @@ const guidePhases: GuidePhase[] = [
   },
   {
     id: "6",
-    subtitle: "Court-admissible output - Trust Score >= 85 required · State S3 required",
+    subtitle: "Certified CAAR output - Trust Score >= 85 required · State S3 required",
     title: "CAAR & ExportPack",
     callout:
       "FohBoh certifies the evidence. Your legal team pursues recovery. A legal opinion engagement is required before any CAAR or ExportPack is formally submitted to a court, arbitrator, or opposing party.",
@@ -192,7 +192,7 @@ const guidePhases: GuidePhase[] = [
       {
         id: "6.1",
         text:
-          "Navigate to the CAARs view. Locate the entry with Court Admissible: Yes and a Trust Score >= 85. Click View Report to open the full CAAR viewer - 7 sections including the narrative findings, Trust Score breakdown, evidence chain, and chain of custody.",
+          "Navigate to the CAARs view. Locate the Certified entry with a Trust Score >= 85. Click View Report to open the full CAAR viewer - 7 sections including findings, Trust Score breakdown, evidence trace, and processing history.",
         title: "Open Your CAAR",
         where: "Where: CAARs -> View Report",
       },

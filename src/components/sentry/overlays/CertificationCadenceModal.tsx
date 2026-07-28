@@ -143,7 +143,7 @@ export function CertificationCadenceModal({
               Monthly Final
             </div>
             <div className="mt-3 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
-              Court-admissible path
+              Certified CAAR path
             </div>
             <div className="mt-3 text-sm leading-7 text-[var(--muted)]">
               Requires the full evidence package, including the matching bank statement. This is the only cadence that can clear final CAAR release.

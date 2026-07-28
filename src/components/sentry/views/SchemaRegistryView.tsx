@@ -254,7 +254,7 @@ function SchemaWorkspaceCard({
                 },
                 {
                   label: "Why It Matters",
-                  text: "Certification is not legally defensible if the contract layer is incomplete or sourced from the wrong document.",
+                  text: "Certification cannot be released if the contract layer is incomplete or sourced from the wrong document.",
                 },
               ]}
               footerLabel="Evidence Source"

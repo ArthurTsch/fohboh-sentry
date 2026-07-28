@@ -489,7 +489,7 @@ const systemHealthRules: RuleGroup[] = [
 
 const releaseRules = [
   "Certification can run weekly preliminary or monthly final.",
-  "Only monthly final can become fully release-ready and court-admissible.",
+  "Only monthly final can pass the complete Certified CAAR release gate.",
   "Per-module readiness currently requires score >= 85 plus strong completeness, authenticity, reconciliation, and rule-integrity conditions.",
   "Overall CAAR readiness requires every active requested module to be ready, overall trust score >= 85, and healthy system-health state.",
   "If both modules are enabled, they can still be run separately. The app should only evaluate the requested enabled modules for that certification cycle.",
