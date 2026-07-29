@@ -2777,6 +2777,17 @@ function buildOperationalFindings(
   if (!context.contract || contractFieldCount(context.contract) < 3) {
     findings.push("Contract config is incomplete for deterministic evaluation.");
   }
+  if (
+    context.moduleId === "M01" &&
+    context.statement?.uploaded &&
+    context.contract &&
+    isCostPlusPricing(context.contract) &&
+    numberValue(context.statement.metrics?.interchangeFeeAmount) <= 0
+  ) {
+    findings.push(
+      "Interchange amount is missing for a cost-plus contract - M01 fee variance was not evaluated. Provide interchange data (statement summary or cost-breakdown export) to certify fees.",
+    );
+  }
   if (dimensions["Cross-System Reconciliation"] < 85) {
     findings.push("Cross-system reconciliation remains below the final release gate.");
   }
@@ -3345,14 +3356,22 @@ function moduleRequiresBank(context: RuleContext) {
   return context.moduleId !== "M03";
 }
 
+function isCostPlusPricing(contract: Record<string, string>) {
+  const pricingModel = String(contract.pricing_model ?? contract.contract_type ?? "").toLowerCase();
+  return pricingModel.includes("interchange") || pricingModel.includes("cost");
+}
+
 function computeExpectedM01Fees(metrics: Metrics, contract: Record<string, string>) {
   const basisAmount = numberValue(metrics.basisAmount);
   const markupBps = numberValue(contract.markup_bps);
   const txnFee = numberValue(contract.txn_fee);
   const monthlyFee = numberValue(contract.monthly_fee);
   const transactionCount = Math.max(0, roundInteger(numberValue(metrics.transactionCount)));
+  const interchangePassthrough = isCostPlusPricing(contract)
+    ? Math.max(0, numberValue(metrics.interchangeFeeAmount))
+    : 0;
   return roundCurrency(
-    basisAmount * (markupBps / 10000) + (transactionCount * txnFee) + monthlyFee,
+    interchangePassthrough + basisAmount * (markupBps / 10000) + (transactionCount * txnFee) + monthlyFee,
   );
 }
 
@@ -3364,6 +3383,9 @@ function buildM01FeeGapSample(metrics: Metrics, contract: Record<string, string>
   const transactionCount = Math.max(0, roundInteger(numberValue(metrics.transactionCount)));
   const markupComponent = roundCurrency(basisAmount * (markupBps / 10000));
   const txnComponent = roundCurrency(transactionCount * txnFee);
+  const interchangeComponent = isCostPlusPricing(contract)
+    ? roundCurrency(Math.max(0, numberValue(metrics.interchangeFeeAmount)))
+    : 0;
 
   return {
     actual_fee_amount: actualFees,
@@ -3372,6 +3394,7 @@ function buildM01FeeGapSample(metrics: Metrics, contract: Record<string, string>
     contracted_monthly_fee: monthlyFee,
     contracted_per_txn_fee: txnFee,
     expected_fee_amount: expectedTotal,
+    expected_interchange_passthrough: interchangeComponent,
     expected_markup_component: markupComponent,
     expected_monthly_component: monthlyFee,
     expected_txn_component: txnComponent,
@@ -3407,6 +3430,13 @@ function computeCardBrandFee(amount: number, ratePct: number, fixedCents: number
 
 function computeM01Recovery(metrics?: Metrics, contract?: Record<string, string> | null) {
   if (!metrics || !contract) return 0;
+  if (isCostPlusPricing(contract) && numberValue(metrics.interchangeFeeAmount) <= 0) {
+    // A cost-plus contract cannot be evaluated without the interchange pass-through:
+    // the markup-only formula would attribute the entire pass-through to the
+    // processor as an overcharge. Report a data gap (buildOperationalFindings)
+    // instead of a recovery.
+    return 0;
+  }
   return Math.max(0, roundCurrency(numberValue(metrics.feeAmount) - computeExpectedM01Fees(metrics, contract)));
 }
 

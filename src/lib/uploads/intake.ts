@@ -273,12 +273,13 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "pos_net_sales",
       "payments",
     );
+    // "interchange_fee" must NOT appear here as well: it feeds interchangeFeeAmount
+    // below, and mapping it into feeAmount too would double-count the pass-through.
     metrics.feeAmount += read(
       "fee_amount",
       "processing_fees",
       "fee",
       "disc_amount",
-      "interchange_fee",
       "commission_charged",
       "dd_commission_amount",
       "grubhub_commission",

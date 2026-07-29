@@ -4,6 +4,7 @@ type PdfMetricExtraction = {
     depositAmount?: number;
     depositReferenceRows?: PdfReferenceRow[];
     feeAmount?: number;
+    interchangeFeeAmount?: number;
     orderCount?: number;
     payoutAmount?: number;
     transactionCount?: number;
@@ -340,12 +341,29 @@ function extractProcessorStatementMetrics(text: string): PdfMetricExtraction {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const totalBlock = findProcessorTotalBlock(lines);
   const basisAmount = totalBlock?.basisAmount ?? 0;
-  const payoutAmount = totalBlock?.payoutAmount ?? basisAmount;
   const transactionCount = totalBlock?.transactionCount ?? 0;
+
+  // Prefer the statement's label-anchored Summary block over positional parsing of a
+  // "Total" row: the positional path cannot tell fee columns from refund columns
+  // (on a Toast statement it reads Refunds as the fee), and the Summary block also
+  // carries the interchange pass-through that cost-plus evaluation needs.
+  const interchangeFeeAmount = findSummaryAmount(text, "Interchange Fees");
+  const processorMarkupFees =
+    findSummaryAmount(text, "Toast Processing Fees") || findSummaryAmount(text, "Processing Fees");
+  const labeledFeeAmount =
+    interchangeFeeAmount > 0 && processorMarkupFees > 0
+      ? roundCurrency(interchangeFeeAmount + processorMarkupFees)
+      : 0;
   const feeAmount =
-    totalBlock?.feeAmount ??
-    (findAmountNearSequence(lines, ["Card Processing", "Fees"]) ||
-      findAmountNearLabel(lines, /^fees$/i));
+    labeledFeeAmount > 0
+      ? labeledFeeAmount
+      : totalBlock?.feeAmount ??
+        (findAmountNearSequence(lines, ["Card Processing", "Fees"]) ||
+          findAmountNearLabel(lines, /^fees$/i));
+
+  // Net deposits settle through the batch table, not the card-type fee table.
+  const batchNetPayout = findBatchTotalNet(lines);
+  const payoutAmount = batchNetPayout > 0 ? batchNetPayout : (totalBlock?.payoutAmount ?? basisAmount);
 
   if (basisAmount <= 0) {
     return {
@@ -359,11 +377,31 @@ function extractProcessorStatementMetrics(text: string): PdfMetricExtraction {
     metrics: {
       basisAmount,
       feeAmount: feeAmount > 0 ? feeAmount : undefined,
+      interchangeFeeAmount: interchangeFeeAmount > 0 ? interchangeFeeAmount : undefined,
       payoutAmount,
       transactionCount: transactionCount > 0 ? transactionCount : undefined,
     },
     warnings: feeAmount > 0 ? [] : ["Processor fee total was not detected automatically from this PDF."],
   };
+}
+
+function findSummaryAmount(text: string, label: string) {
+  const match = text.match(new RegExp(`^${label}\\s+-?\\$?([\\d,]+\\.\\d{2})`, "im"));
+  return match ? Math.abs(parseCurrency(match[1])) : 0;
+}
+
+function findBatchTotalNet(lines: string[]) {
+  let inBatchSection = false;
+  for (const line of lines) {
+    if (/credit card batches/i.test(line)) {
+      inBatchSection = true;
+      continue;
+    }
+    if (!inBatchSection || !/^total\b/i.test(line)) continue;
+    const values = extractCurrencyValuesFromLine(line);
+    if (values.length >= 2) return values[values.length - 1];
+  }
+  return 0;
 }
 
 function findProcessorTotalBlock(lines: string[]) {
