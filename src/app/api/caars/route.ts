@@ -627,7 +627,17 @@ export async function GET(request: Request) {
       },
     });
 
-    const caarIds = reports.map((report) => report.caar_id);
+    // Legacy databases may contain duplicate summary rows even though the current
+    // Prisma model declares caar_id unique. Keep the newest row selected above.
+    const seenCaarIds = new Set<string>();
+    const canonicalReports = reports.filter((report) => {
+      if (seenCaarIds.has(report.caar_id)) {
+        return false;
+      }
+      seenCaarIds.add(report.caar_id);
+      return true;
+    });
+    const caarIds = canonicalReports.map((report) => report.caar_id);
     const persistedCaars = caarIds.length
       ? await prisma.caars_v2.findMany({
           where: {
@@ -649,7 +659,7 @@ export async function GET(request: Request) {
     const persistedCaarById = new Map(persistedCaars.map((row) => [row.caar_external_id, row]));
     const certRunIds = persistedCaars.map((row) => row.cert_run_id);
     const governedLocationIds = [...new Set(persistedCaars.map((row) => row.location_id))];
-    const uploadRestaurantIds = [...new Set(reports.map((row) => row.restaurant_id).filter((value): value is number => typeof value === "number"))];
+    const uploadRestaurantIds = [...new Set(canonicalReports.map((row) => row.restaurant_id).filter((value): value is number => typeof value === "number"))];
 
     const [certRuns, ruleCitations, uploads, sealedSchemas, sealedContracts] = await Promise.all([
       certRunIds.length
@@ -762,8 +772,8 @@ export async function GET(request: Request) {
       ruleCitationsByRun.set(citation.cert_run_id, current);
     }
 
-    const lineageBackedReports = reports.filter((report) => persistedCaarById.has(report.caar_id));
-    const orphanCount = reports.length - lineageBackedReports.length;
+    const lineageBackedReports = canonicalReports.filter((report) => persistedCaarById.has(report.caar_id));
+    const orphanCount = canonicalReports.length - lineageBackedReports.length;
     if (orphanCount > 0) {
       console.warn(`Filtered ${orphanCount} orphan CAAR report row(s) without persisted lineage.`);
     }

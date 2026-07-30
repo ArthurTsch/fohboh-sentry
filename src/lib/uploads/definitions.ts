@@ -10,7 +10,7 @@ export const VENDOR_TEMPLATE_HEADERS: Record<string, string[]> = {
   chase:
     "transaction_date,transaction_id,card_type,transaction_amount,disc_rate,disc_amount,interchange_fee,service_fee,authorization_number,mid".split(","),
   ubereats:
-    "date,order_id,item_subtotal,commission_charged,commission_rate_applied,platform_gross_sales,order_status,delivery_fee,tip,tax,settlement_date,menu_item_count,channel,notes".split(","),
+    "Store Name,Shop ID,Store ID,Order Count,Count of Misc payment,Sales (excl. tax),Tax on Sales,Sales (incl. tax),Order Error Adjustments,Tax on Order Error Adjustments,Order Error Adjustments (incl. tax),Price adjustments (excl. tax),Tax on Price Adjustments,Price Adjustments (incl. tax),Offers on items (incl. tax),Tax On Offers on items,Delivery Offer Redemptions (incl. tax),Tax On Delivery Offer Redemptions,Offer Redemption Fee,Marketing Adjustment,Bag Fee,Marketplace Fee,Tax on Marketplace Fee,Delivery Network Fee,Tax on Delivery Network Fee,Order Processing Fee,Total Sales after Adjustments (incl tax),Capital payments,Container Deposit Fee,Other payments,Marketplace Facilitator Tax Adjustment,Marketplace Facilitator Tax,Backup Withholding Tax,Total payout,Payout Date,Payout reference ID".split(","),
   doordash:
     "order_date,store_id,order_id,order_subtotal,dd_commission_rate,dd_commission_amount,dd_marketing_fee,error_charge,consumer_fee,payout_amount,order_status".split(","),
   grubhub:
@@ -50,19 +50,105 @@ const GENERIC_CSV_HEADERS: Record<string, string[]> = {
   "m02-pos": ["channel", "pos_net_sales", "commission_variance"],
 };
 
+const TOAST_SALES_BY_CHANNEL_HEADERS =
+  "ORDER_SOURCE_NAME,BUSINESS_DAY,CHECK_COUNT,CHECK_NET_AMOUNT,DEFERRED_ITEM_DISCOUNT_AMOUNT,DEFERRED_ITEM_GROSS_AMOUNT,DEFERRED_ITEM_NET_AMOUNT,DEFERRED_ITEM_QUANTITY,DEFERRED_ITEM_REFUND_AMOUNT,DEFERRED_ITEM_TAX_AMOUNT,DISCOUNT_AMOUNT,DISCOUNT_COUNT,GROSS_SALES,GUEST_COUNT,ITEM_GROSS_AMOUNT,ITEM_NET_AMOUNT,ITEM_QUANTITY,ITEM_REFUND_AMOUNT,ITEM_TAX_AMOUNT,ITEM_UPSOLD_AMOUNT,NET_SALES,ORDER_COUNT,ORDER_DURATION,ORDER_NET_AMOUNT,ORDERS_WITH_VOIDS_COUNT,REFUND_AMOUNT,SALES_AFTER_DISCOUNTS,SUB_ITEM_QUANTITY,SUB_ITEM_UPSOLD_AMOUNT,TAX_AMOUNT,TOTAL_QUANTITY_SOLD,TOTAL_UPSOLD_AMOUNT,VOID_AMOUNT,UPSELL_CONVERSION_RATE,VOIDED_ITEM_QUANTITY".split(
+    ",",
+  );
+
+const TOAST_PAYOUT_HEADERS =
+  "Settled date,Name,Location,Type,Sales period start,Sales period end,# Txns,Payments,Refunds,Fees,Withholdings,Chargebacks,External,Payout,External Ref. ID,Status".split(
+    ",",
+  );
+
+const DOORDASH_PAYOUT_SUMMARY_HEADERS =
+  "Business ID,Business name,Store ID,Store name,Merchant store ID,Payout date,Currency,Channel,Subtotal,Subtotal tax passed to merchant,Staff tip,Commission,Commission tax,Payment processing fee,Marketing fees | (including any applicable taxes),Customer discounts from marketing | (funded by you),Customer discounts from marketing | (funded by DoorDash),Customer discounts from marketing | (funded by a third-party),DoorDash marketing credit,Third-party contribution,Error charges,Adjustments,Net total,Subtotal for tax,Subtotal tax remitted by DoorDash to tax authorities,Tax remitted by DoorDash on fees DoorDash charges to merchant,Payout ID,Payout status".split(
+    ",",
+  );
+
+const VENDOR_ARTIFACT_HEADERS: Record<string, Record<string, string[]>> = {
+  doordash: {
+    "m02-settlement": DOORDASH_PAYOUT_SUMMARY_HEADERS,
+  },
+  ubereats: {
+    "m02-settlement": VENDOR_TEMPLATE_HEADERS.ubereats,
+  },
+  toast: {
+    "m01-pos": TOAST_PAYOUT_HEADERS,
+    "m02-pos": TOAST_SALES_BY_CHANNEL_HEADERS,
+  },
+};
+
+export type KnownSourceFormat = {
+  artifactKey: string;
+  headers: string[];
+  key: string;
+  name: string;
+  sourceSystemKey: string;
+};
+
+const KNOWN_SOURCE_FORMATS: KnownSourceFormat[] = [
+  {
+    artifactKey: "m02-settlement",
+    headers: DOORDASH_PAYOUT_SUMMARY_HEADERS,
+    key: "doordash-payout-summary-v1",
+    name: "DoorDash Payout Summary",
+    sourceSystemKey: "doordash",
+  },
+  {
+    artifactKey: "m01-pos",
+    headers: TOAST_PAYOUT_HEADERS,
+    key: "toast-payouts-v1",
+    name: "Toast Payouts",
+    sourceSystemKey: "toast",
+  },
+  {
+    artifactKey: "m02-settlement",
+    headers: VENDOR_TEMPLATE_HEADERS.ubereats,
+    key: "ubereats-payout-settlement-v1",
+    name: "Uber Eats Payout Settlement",
+    sourceSystemKey: "ubereats",
+  },
+  {
+    artifactKey: "m02-pos",
+    headers: TOAST_SALES_BY_CHANNEL_HEADERS,
+    key: "toast-sales-by-channel-v1",
+    name: "Toast Sales by Channel",
+    sourceSystemKey: "toast",
+  },
+];
+
 export function getTemplateHeaders(vendorKey: string) {
   return VENDOR_TEMPLATE_HEADERS[vendorKey] ?? [];
 }
 
 export function getExpectedHeaders(artifactKey: string, vendorKey?: string | null) {
   if (vendorKey) {
-    const vendorHeaders = getTemplateHeaders(vendorKey);
+    const vendorHeaders = VENDOR_ARTIFACT_HEADERS[vendorKey]?.[artifactKey] ?? [];
     if (vendorHeaders.length > 0) {
       return vendorHeaders;
     }
   }
 
   return GENERIC_CSV_HEADERS[artifactKey] ?? [];
+}
+
+export function detectKnownSourceFormat(artifactKey: string, headers: string[]) {
+  const normalizedHeaders = new Set(headers.map(normalizeHeader));
+  const candidates = KNOWN_SOURCE_FORMATS.filter((format) => format.artifactKey === artifactKey);
+
+  return (
+    candidates
+      .map((format) => {
+        const required = format.headers.map(normalizeHeader);
+        const matched = required.filter((header) => normalizedHeaders.has(header)).length;
+        return {
+          format,
+          matchPct: required.length ? Math.round((matched / required.length) * 100) : 0,
+        };
+      })
+      .filter((candidate) => candidate.matchPct >= 80)
+      .sort((left, right) => right.matchPct - left.matchPct)[0] ?? null
+  );
 }
 
 export function getArtifactPurpose(artifactKey: string) {

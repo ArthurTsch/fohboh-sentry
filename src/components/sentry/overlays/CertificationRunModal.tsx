@@ -71,15 +71,13 @@ export function CertificationRunModal({
             </div>
           </div>
           <div className="flex gap-2">
-            {ready ? (
-              <button
-                type="button"
-                onClick={openCaar}
-                className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
-              >
-                Open CAAR
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={openCaar}
+              className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+            >
+              Open CAAR
+            </button>
             <button
               type="button"
               onClick={onClose}

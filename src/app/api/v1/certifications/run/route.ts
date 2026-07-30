@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireManagerSession } from "@/lib/auth/session";
-import { logServerError } from "@/lib/ops/audit";
+import { logServerError, logServerEvent } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
 import { checkRateLimit } from "@/lib/ops/rate-limit";
 import { executePersistedCertification } from "@/lib/certification/service";
@@ -53,6 +53,7 @@ export async function POST(request: Request) {
       cadence?: "monthly_final" | "weekly_preliminary" | null;
       locationId?: string | null;
       modules?: Array<"M01" | "M02" | "M03"> | null;
+      vendorKey?: string | null;
     };
     const locationId = body.locationId?.trim() ?? "";
     const cadence =
@@ -68,7 +69,43 @@ export async function POST(request: Request) {
         ]
       : undefined;
     if (!locationId) {
+      logServerEvent("certification_request_rejected", {
+        code: "LOCATION_REQUIRED",
+        modules: modules ?? null,
+        requestId: requestContext.requestId,
+        vendorKey: body.vendorKey ?? null,
+      });
       return withRequestHeaders(NextResponse.json({ error: "locationId is required." }, { status: 400 }), requestContext);
+    }
+    if (!modules || modules.length !== 1) {
+      logServerEvent("certification_request_rejected", {
+        code: "MODULE_SCOPE_INVALID",
+        locationId,
+        modules: modules ?? null,
+        requestId: requestContext.requestId,
+        vendorKey: body.vendorKey ?? null,
+      });
+      return withRequestHeaders(
+        NextResponse.json(
+          { error: "Select exactly one certification module. M01 and M02 must produce separate CAARs." },
+          { status: 400 },
+        ),
+        requestContext,
+      );
+    }
+    const vendorKey = body.vendorKey?.trim().toLowerCase() || undefined;
+    if (modules[0] === "M02" && !vendorKey) {
+      logServerEvent("certification_request_rejected", {
+        code: "M02_VENDOR_REQUIRED",
+        locationId,
+        modules,
+        requestId: requestContext.requestId,
+        vendorKey: null,
+      });
+      return withRequestHeaders(
+        NextResponse.json({ error: "Select the delivery platform to certify." }, { status: 400 }),
+        requestContext,
+      );
     }
 
     const result = await executePersistedCertification({
@@ -76,6 +113,7 @@ export async function POST(request: Request) {
       locationId,
       modules,
       session,
+      vendorKey,
     });
 
     return withRequestHeaders(NextResponse.json({

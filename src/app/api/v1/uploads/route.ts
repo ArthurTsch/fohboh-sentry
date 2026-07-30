@@ -26,28 +26,6 @@ type ScopedRestaurant = {
   unit_id: string | null;
 };
 
-function extractGovernedPosHeaders(value: unknown) {
-  if (!value || typeof value !== "object") return [];
-  const posSchema = (value as { posSchema?: unknown }).posSchema;
-  if (!posSchema || typeof posSchema !== "object") return [];
-  const headerBindings = (posSchema as { headerBindings?: unknown }).headerBindings;
-  if (Array.isArray(headerBindings)) {
-    const boundHeaders = headerBindings
-      .map((entry) => {
-        if (!entry || typeof entry !== "object") return "";
-        const sourceHeader = (entry as { sourceHeader?: unknown }).sourceHeader;
-        return typeof sourceHeader === "string" ? sourceHeader.trim() : "";
-      })
-      .filter(Boolean);
-    if (boundHeaders.length > 0) {
-      return boundHeaders;
-    }
-  }
-  const validatedHeaders = (posSchema as { validatedHeaders?: unknown }).validatedHeaders;
-  if (!Array.isArray(validatedHeaders)) return [];
-  return validatedHeaders.map((entry) => String(entry).trim()).filter(Boolean);
-}
-
 function getAuthErrorResponse(error: unknown) {
   if (!(error instanceof Error)) return null;
   if (error.message === "Unauthorized") {
@@ -185,6 +163,8 @@ function buildUploadResponse({
   return {
     artifactKey,
     accountId,
+    detectedFormatKey: validation.detectedFormatKey,
+    detectedFormatName: validation.detectedFormatName,
     expectedColumns: validation.expectedColumns,
     fields: validation.fields,
     fileName: validation.fileName,
@@ -199,6 +179,7 @@ function buildUploadResponse({
     rows: validation.rows,
     schema: validation.schema,
     sizeBytes: validation.sizeBytes,
+    sourceSystemKey: validation.sourceSystemKey,
     status: validation.schema && validation.fields ? "ready" : "review",
     unmatchedHeaders: validation.unmatchedHeaders,
     updatedAt: validation.updatedAt,
@@ -380,45 +361,10 @@ export async function POST(request: Request) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    let expectedHeadersOverride: string[] | undefined;
-
-    if ((artifactKey === "m01-pos" || artifactKey === "m02-pos") && vendorName) {
-      const locationRecord = await prisma.locations_v2.findFirst({
-        where: {
-          deleted_at: null,
-          external_id: locationId,
-        },
-        orderBy: [{ id: "desc" }],
-        select: {
-          id: true,
-        },
-      });
-
-      if (locationRecord) {
-        const latestSchema = await prisma.schema_registry_v2.findFirst({
-          where: {
-            location_id: locationRecord.id,
-            module: moduleId,
-            vendor: vendorName,
-          },
-          orderBy: [{ version: "desc" }, { id: "desc" }],
-          select: {
-            fields: true,
-          },
-        });
-
-        const governedHeaders = extractGovernedPosHeaders(latestSchema?.fields);
-        if (governedHeaders.length > 0) {
-          expectedHeadersOverride = governedHeaders;
-        }
-      }
-    }
-
     const validation = await validateUploadArtifact({
       artifactKey,
       buffer,
       contentType: file.type,
-      expectedHeadersOverride,
       fileName: file.name,
       vendorKey,
       vendorName,

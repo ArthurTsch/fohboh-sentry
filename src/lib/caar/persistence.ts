@@ -13,6 +13,7 @@ type RunRecord = {
   assessment: ModuleAssessment;
   id: number;
   module: "M01" | "M02" | "M03";
+  vendor?: string;
   schemaRegistryIds: number[];
   uploadIds: number[];
   varianceCents: bigint;
@@ -695,6 +696,7 @@ export async function persistGeneratedCaar(
       },
       location_id: locationId,
       module: primaryRun.module,
+      vendor: primaryRun.vendor ?? null,
       period: record.period,
       superseded_by: null,
     },
@@ -766,6 +768,7 @@ export async function persistGeneratedCaar(
           finding_class: findingClass,
           location_id: locationId,
           module: primaryRun.module,
+          vendor: primaryRun.vendor ?? null,
           pdf_s3_key: pdfObjectKey,
           period: record.period,
           prev_sha256: existing.sha256,
@@ -791,9 +794,10 @@ export async function persistGeneratedCaar(
           finding_class: findingClass,
           location_id: locationId,
           module: primaryRun.module,
+          vendor: primaryRun.vendor ?? null,
           pdf_s3_key: pdfObjectKey,
           period: record.period,
-          prev_sha256: null,
+          prev_sha256: previousActive?.sha256 ?? null,
           recoverable_variance_cents: BigInt(Math.round(certification.amountValue * 100)),
           sha256: canonicalSha,
           sealed_at: sealedAt,

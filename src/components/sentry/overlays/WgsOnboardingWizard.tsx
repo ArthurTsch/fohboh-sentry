@@ -72,10 +72,18 @@ export function WgsOnboardingWizard({
     { completed: 0, total: 0 },
   );
   const checklistCount = visibleChecklistStats.completed;
-  const progressPercent =
-    visibleChecklistStats.total > 0
-      ? Math.round((visibleChecklistStats.completed / visibleChecklistStats.total) * 100)
+  const currentStepItems = currentStep?.items ?? [];
+  const currentStepChecks = currentStep
+    ? progress.checks[currentStep.id] ?? buildEmptyChecks(currentStep)
+    : [];
+  const currentStepFraction =
+    currentStepItems.length > 0
+      ? currentStepChecks.slice(0, currentStepItems.length).filter(Boolean).length /
+        currentStepItems.length
       : 0;
+  const progressPercent = progress.completed
+    ? 100
+    : Math.round(((safeStepIndex + currentStepFraction) / Math.max(totalSteps, 1)) * 100);
 
   function patchProgress(patch: Partial<WgsOnboardingProgress>) {
     onChange({ ...progress, ...patch });

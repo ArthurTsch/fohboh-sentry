@@ -469,6 +469,16 @@ export function UploadCenterView({
                 : "Upload native CSV statements exactly as downloaded - no reformatting, no Excel re-save"}
             </div>
           </div>
+          {activeLocationId ? (
+            <button
+              type="button"
+              onClick={() => onOpenLocationDashboard(activeLocationId)}
+              className="inline-flex items-center gap-2 rounded-xl border border-[var(--border)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--text)] transition hover:border-[var(--text)]"
+            >
+              <span aria-hidden="true">&larr;</span>
+              Return to Location Dashboard
+            </button>
+          ) : null}
         </div>
         {activeArtifactHint && activeLocationName ? (
           <div className="mt-4 rounded-2xl border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)] px-4 py-3">
@@ -1443,6 +1453,7 @@ function RecentUploadBanner({ receipt }: { receipt: UploadReceipt }) {
           <div className="mt-1 text-sm text-[var(--muted)]">
             {receipt.locationName} | {receipt.moduleId}
             {receipt.vendorName ? ` | ${receipt.vendorName}` : ""}
+            {receipt.detectedFormatName ? ` | Detected: ${receipt.detectedFormatName}` : ""}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

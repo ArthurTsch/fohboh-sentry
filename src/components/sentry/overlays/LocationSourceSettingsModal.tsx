@@ -20,7 +20,7 @@ export function LocationSourceSettingsModal({
   initialConfig: LocationSourceConfig;
   locationName: string;
   onClose: () => void;
-  onSave: (next: DraftState) => void;
+  onSave: (next: DraftState) => void | Promise<void>;
 }) {
   const [draft, setDraft] = useState<DraftState>({
     m01Enabled: initialConfig.m01Enabled,
@@ -28,11 +28,14 @@ export function LocationSourceSettingsModal({
     m02Enabled: initialConfig.m02Enabled,
     m02Vendors: initialConfig.m02Vendors.map((vendor) => vendor.key),
   });
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const m01Catalog = useMemo(() => getVendorCatalog("M01"), []);
   const m02Catalog = useMemo(() => getVendorCatalog("M02"), []);
 
   function toggleVendor(moduleId: "M01" | "M02", vendorKey: string) {
+    setError(null);
     setDraft((current) => {
       const stateKey = moduleId === "M01" ? "m01Vendors" : "m02Vendors";
       const currentValues = current[stateKey];
@@ -44,6 +47,30 @@ export function LocationSourceSettingsModal({
           : [...currentValues, vendorKey],
       };
     });
+  }
+
+  async function save() {
+    if (draft.m01Enabled && draft.m01Vendors.length === 0) {
+      setError("Select an M01 processor before saving.");
+      return;
+    }
+    if (draft.m02Enabled && draft.m02Vendors.length === 0) {
+      setError("Select at least one M02 delivery platform before saving.");
+      return;
+    }
+    if (!draft.m01Enabled && !draft.m02Enabled) {
+      setError("At least one certification module must remain enabled.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(draft);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Source settings could not be saved.");
+      setSaving(false);
+    }
   }
 
   return (
@@ -150,6 +177,12 @@ export function LocationSourceSettingsModal({
           </section>
         </div>
 
+        {error ? (
+          <div className="mx-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        ) : null}
+
         <div className="flex items-center justify-between gap-4 border-t border-[var(--border)] px-6 py-5">
           <div className="text-sm text-[var(--muted)]">
             Only selected providers will appear in Upload Data and related source workflows.
@@ -158,16 +191,18 @@ export function LocationSourceSettingsModal({
             <button
               type="button"
               onClick={onClose}
+              disabled={saving}
               className="rounded-xl border border-[var(--border)] px-4 py-2.5 text-sm font-medium text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
             >
               Cancel
             </button>
             <button
               type="button"
-              onClick={() => onSave(draft)}
-              className="rounded-xl bg-[var(--text)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+              onClick={() => void save()}
+              disabled={saving}
+              className="rounded-xl bg-[var(--text)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:cursor-wait disabled:opacity-60"
             >
-              Save Source Settings
+              {saving ? "Saving..." : "Save Source Settings"}
             </button>
           </div>
         </div>

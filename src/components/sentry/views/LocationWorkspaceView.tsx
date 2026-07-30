@@ -10,6 +10,7 @@ import type {
 import { LocationSourceSettingsModal } from "../overlays/LocationSourceSettingsModal";
 import { HelpTip, SectionCard } from "../ui/primitives";
 import { formatCurrency } from "../utils";
+import { resolveVendorKey } from "../vendor-catalog";
 
 type LocationWorkspaceTab = "dashboard" | "caars" | "vault";
 
@@ -43,7 +44,7 @@ export function LocationWorkspaceView({
     m01Vendors: string[];
     m02Enabled: boolean;
     m02Vendors: string[];
-  }) => void;
+  }) => void | Promise<void>;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   role: Role;
   workspaces: SchemaWorkspace[];
@@ -52,13 +53,48 @@ export function LocationWorkspaceView({
   const [tab, setTab] = useState<LocationWorkspaceTab>("dashboard");
   const [showManageSources, setShowManageSources] = useState(false);
   const canManageSources = role === "Admin" || role === "SuperAdmin" || role === "WGS Manager";
-  const locationCaars = useMemo(
-    () => caars.filter((record) => record.locationId === location.id),
-    [caars, location.id],
-  );
+  const locationCaars = useMemo(() => {
+    const seenCaarIds = new Set<string>();
+    return caars.filter((record) => {
+      if (record.locationId !== location.id || seenCaarIds.has(record.id)) {
+        return false;
+      }
+      seenCaarIds.add(record.id);
+      return true;
+    });
+  }, [caars, location.id]);
   const locationWorkspaces = useMemo(
     () => workspaces.filter((workspace) => workspace.locationId === location.id),
     [location.id, workspaces],
+  );
+  const configuredWorkspaceTargets = useMemo(
+    () => [
+      ...(locationSourceConfig?.m01Enabled
+        ? locationSourceConfig.m01Vendors.map((vendor) => ({
+            module: "M01" as const,
+            vendor,
+          }))
+        : []),
+      ...(locationSourceConfig?.m02Enabled
+        ? locationSourceConfig.m02Vendors.map((vendor) => ({
+            module: "M02" as const,
+            vendor,
+          }))
+        : []),
+    ],
+    [locationSourceConfig],
+  );
+  const missingWorkspaceTargets = useMemo(
+    () =>
+      configuredWorkspaceTargets.filter(
+        (target) =>
+          !locationWorkspaces.some(
+            (workspace) =>
+              workspace.module === target.module &&
+              resolveVendorKey(target.module, workspace.vendor) === target.vendor.key,
+          ),
+      ),
+    [configuredWorkspaceTargets, locationWorkspaces],
   );
   const defaultVendorByModule = useMemo(
     () => ({
@@ -91,6 +127,15 @@ export function LocationWorkspaceView({
 
     if (firstDraftWorkspace) {
       onEditWorkspace(firstDraftWorkspace);
+      return;
+    }
+
+    if (missingWorkspaceTargets[0]) {
+      onInitializeWorkspace(
+        location.id,
+        missingWorkspaceTargets[0].module,
+        missingWorkspaceTargets[0].vendor.name,
+      );
       return;
     }
 
@@ -376,7 +421,7 @@ export function LocationWorkspaceView({
             <div className="space-y-3">
               {locationCaars.map((record) => (
                 <button
-                  key={record.id}
+                  key={`${record.locationId}:${record.id}`}
                   type="button"
                   onClick={() => onOpenCaar(record)}
                   className="grid w-full gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--text)] md:grid-cols-[1.4fr_0.8fr_0.8fr_0.7fr]"
@@ -422,7 +467,7 @@ export function LocationWorkspaceView({
               </div>
             </div>
           </div>
-          {locationWorkspaces.length === 0 ? (
+          {locationWorkspaces.length === 0 && missingWorkspaceTargets.length === 0 ? (
             <div className="space-y-4">
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm text-[var(--muted)]">
                 No vault workspace exists for this location yet. Initialize the module workspace you want to govern.
@@ -488,6 +533,42 @@ export function LocationWorkspaceView({
                   </div>
                 </div>
               ))}
+              {missingWorkspaceTargets.map((target) => (
+                <div
+                  key={`${location.id}:missing:${target.module}:${target.vendor.key}`}
+                  className="rounded-2xl border border-dashed border-[rgba(214,48,49,0.35)] bg-[rgba(214,48,49,0.035)] p-5"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div>
+                      <div className="font-semibold text-[var(--text)]">
+                        {target.module} &bull; {target.vendor.name}
+                      </div>
+                      <div className="mt-1 text-sm text-[var(--accent)]">
+                        Active source, but its vault workspace has not been initialized.
+                      </div>
+                      <div className="mt-3 max-w-2xl text-sm leading-7 text-[var(--muted)]">
+                        Initialize and seal this vendor-specific workspace before uploading evidence
+                        or running a {target.module} certification for {target.vendor.name}.
+                      </div>
+                    </div>
+                    {canManageSources ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onInitializeWorkspace(location.id, target.module, target.vendor.name)
+                        }
+                        className="rounded-lg bg-[var(--text)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+                      >
+                        Initialize {target.vendor.name} Vault
+                      </button>
+                    ) : (
+                      <div className="rounded-lg border border-[var(--border)] bg-white px-4 py-2.5 text-sm text-[var(--muted)]">
+                        Contact a WGS Manager or SuperAdmin to initialize this vault.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </SectionCard>
@@ -498,8 +579,8 @@ export function LocationWorkspaceView({
           initialConfig={locationSourceConfig}
           locationName={location.name}
           onClose={() => setShowManageSources(false)}
-          onSave={(next) => {
-            onManageSources(next);
+          onSave={async (next) => {
+            await onManageSources(next);
             setShowManageSources(false);
           }}
         />

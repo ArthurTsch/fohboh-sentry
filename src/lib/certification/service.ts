@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { Prisma } from "@/app/generated/prisma/client";
 import {
   buildCertificationResult,
@@ -630,11 +630,13 @@ export async function executePersistedCertification({
   locationId,
   modules,
   session,
+  vendorKey,
 }: {
   cadence?: "monthly_final" | "weekly_preliminary";
   locationId: string;
   modules?: Array<"M01" | "M02" | "M03">;
   session: SessionState;
+  vendorKey?: string;
 }): Promise<CertificationExecutionResult> {
   if (typeof session.managerId !== "number") {
     throw new Error("This account is missing a database-backed manager identity.");
@@ -767,8 +769,33 @@ export async function executePersistedCertification({
   if (requestedModules.length === 0) {
     throw new Error("None of the requested modules are enabled for this location.");
   }
+  if (requestedModules.length !== 1) {
+    throw new Error("Select exactly one certification module. M01 and M02 must produce separate CAARs.");
+  }
+  const certificationVendor =
+    requestedModules[0] === "M02" ? vendorKey?.trim().toLowerCase() : undefined;
+  if (requestedModules[0] === "M02" && !certificationVendor) {
+    throw new Error("Select the delivery platform to certify.");
+  }
+  const vendorMatches = (value: string | null) =>
+    !certificationVendor ||
+    (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "") ===
+      certificationVendor.replace(/[^a-z0-9]/g, "");
+  const scopedUploadRows = uploadRows.filter(
+    (row) => row.module !== "M02" || vendorMatches(row.vendor),
+  );
+  const scopedSchemaRows = schemaRows.filter(
+    (row) => row.module !== "M02" || vendorMatches(row.vendor),
+  );
+  const scopedContractRows = contractRows.filter(
+    (row) => row.module !== "M02" || vendorMatches(row.vendor),
+  );
 
-  ensureGovernedModules({ activeModules: requestedModules, contractRows, schemaRows });
+  ensureGovernedModules({
+    activeModules: requestedModules,
+    contractRows: scopedContractRows,
+    schemaRows: scopedSchemaRows,
+  });
 
   const artifactIntakeState: Record<string, IntakeState> = {};
   for (const upload of uploadRows) {
@@ -837,10 +864,16 @@ export async function executePersistedCertification({
   }
 
   const { evaluationDate, inputHash, period, periodToken } = buildDeterministicRunContext({
-    contractRows,
-    schemaRows,
-    uploadRows,
+    contractRows: scopedContractRows,
+    schemaRows: scopedSchemaRows,
+    uploadRows: scopedUploadRows,
   });
+  const vendorToken = certificationVendor
+    ? `-${certificationVendor.replace(/[^0-9a-z]/gi, "").toUpperCase()}`
+    : "";
+  const caarExternalId =
+    `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${requestedModules[0]}${vendorToken}-` +
+    randomBytes(4).toString("hex").toUpperCase();
   const historicalSnapshots = buildHistoricalSnapshots(historicalRunsRaw, historicalCitations);
   const executionStartedAt = Date.now();
 
@@ -866,9 +899,10 @@ export async function executePersistedCertification({
           : "Onboarding",
     } satisfies LocationRecord,
     period: cadence === "weekly_preliminary" ? `${period} (Weekly Preliminary)` : period,
-    recordId: `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${inputHash.slice(0, 8).toUpperCase()}`,
+    recordId: caarExternalId,
     runAt: evaluationDate,
     scopeModules: requestedModules,
+    scopeVendorKey: certificationVendor,
     uploadModules: resolveUploadModulesForAccount(restaurant.accountId, requestedModules),
   });
   const executionDurationMs = Date.now() - executionStartedAt;
@@ -922,9 +956,10 @@ export async function executePersistedCertification({
           : "Onboarding",
     } satisfies LocationRecord,
     period: cadence === "weekly_preliminary" ? `${period} (Weekly Preliminary)` : period,
-    recordId: `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${inputHash.slice(0, 8).toUpperCase()}`,
+    recordId: caarExternalId,
     runAt: evaluationDate,
     scopeModules: requestedModules,
+    scopeVendorKey: certificationVendor,
     systemHealthFlags: impactingFlags,
     uploadModules: resolveUploadModulesForAccount(restaurant.accountId, requestedModules),
   });
@@ -1016,18 +1051,19 @@ export async function executePersistedCertification({
       assessment: (typeof certification.assessments)[number];
       id: number;
       module: "M01" | "M02" | "M03";
+      vendor?: string;
       schemaRegistryIds: number[];
       uploadIds: number[];
       varianceCents: bigint;
     }> = [];
 
     for (const assessment of certification.assessments) {
-      const contract = contractRows
+      const contract = scopedContractRows
         .find((row) => row.module === assessment.moduleId);
-      const moduleSchemaIds = schemaRows
+      const moduleSchemaIds = scopedSchemaRows
         .filter((row) => row.module === assessment.moduleId)
         .map((row) => row.id);
-      const moduleUploadIds = uploadRows
+      const moduleUploadIds = scopedUploadRows
         .filter((row) => row.module === assessment.moduleId)
         .map((row) => row.id);
 
@@ -1047,6 +1083,7 @@ export async function executePersistedCertification({
                 : assessment.findings.join(" "),
           location_id: locationV2.id,
           module: assessment.moduleId,
+          vendor: certificationVendor,
           period,
           rule_set_version: certification.ruleSetVersion,
           schema_registry_ids: toJsonValue(moduleSchemaIds),
@@ -1073,6 +1110,7 @@ export async function executePersistedCertification({
         assessment,
         id: run.id,
         module: assessment.moduleId,
+        vendor: certificationVendor,
         schemaRegistryIds: moduleSchemaIds,
         uploadIds: moduleUploadIds,
         varianceCents,

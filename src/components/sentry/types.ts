@@ -224,6 +224,8 @@ export type UploadArtifact = {
 export type IntakeStepKey = "uploaded" | "hash" | "schema" | "fields";
 
 export type IntakeState = {
+  detectedFormatKey?: string;
+  detectedFormatName?: string;
   uploadId?: number;
   uploaded: boolean;
   hash: boolean;
@@ -235,6 +237,7 @@ export type IntakeState = {
   vendorKey?: string;
   vendorName?: string;
   sizeBytes?: number;
+  sourceSystemKey?: string;
   matchPct?: number;
   matchedColumns?: number;
   expectedColumns?: number;
@@ -281,6 +284,8 @@ export type IntakeState = {
 
 export type UploadReceipt = {
   artifactKey?: string;
+  detectedFormatKey?: string;
+  detectedFormatName?: string;
   expectedColumns?: number;
   fileName: string;
   hashValue?: string;
@@ -294,6 +299,7 @@ export type UploadReceipt = {
   parseWarnings?: string[];
   rows?: number;
   sizeBytes: number;
+  sourceSystemKey?: string;
   status: "ready" | "review";
   unmatchedHeaders?: string[];
   updatedAt?: string;

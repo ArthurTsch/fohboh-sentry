@@ -221,6 +221,7 @@ model cert_runs_v2 {
   id                  Int       @id @default(autoincrement())
   location_id         Int
   module              String    @db.VarChar(10)
+  vendor              String?   @db.VarChar(100)
   period              String    @db.VarChar(50)
   contract_config_id  Int
   schema_registry_ids Json
@@ -236,6 +237,7 @@ model cert_runs_v2 {
   error_message       String?
 
   @@index([location_id, module, period], map: "idx_cert_runs_v2_location_module_period")
+  @@index([location_id, module, vendor, period], map: "idx_cert_runs_v2_location_module_vendor_period")
   @@index([status], map: "idx_cert_runs_v2_status")
   @@map("cert_runs_v2")
 }
@@ -246,6 +248,7 @@ model caars_v2 {
   cert_run_id                Int       @unique
   location_id                Int
   module                     String    @db.VarChar(10)
+  vendor                     String?   @db.VarChar(100)
   period                     String    @db.VarChar(50)
   status                     String    @db.VarChar(50)
   court_admissible           Boolean   @default(false)
@@ -262,6 +265,7 @@ model caars_v2 {
   superseded_reason          String?
 
   @@index([location_id, sealed_at], map: "idx_caars_v2_location_sealed_at")
+  @@index([location_id, module, vendor, sealed_at], map: "idx_caars_v2_location_module_vendor_sealed")
   @@index([status], map: "idx_caars_v2_status")
   @@index([caar_external_id], map: "idx_caars_v2_external_id")
   @@map("caars_v2")

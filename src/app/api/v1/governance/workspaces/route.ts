@@ -30,7 +30,7 @@ type GovernanceStateRow = {
 };
 
 type GovernanceSealBlockerPayload = {
-  action: "upload_agreement" | "upload_source";
+  action: "upload_agreement";
   artifactKey: string;
   ctaLabel: string;
   error: string;
@@ -127,16 +127,8 @@ function isSealedStatus(value: string | null | undefined) {
   return value === "sealed" || value === "seal";
 }
 
-function getSourceArtifactKey(module: "M01" | "M02") {
-  return module === "M01" ? "m01-processor" : "m02-settlement";
-}
-
 function getAgreementArtifactKey(module: "M01" | "M02") {
   return module === "M01" ? "m01-agreement" : "m02-agreement";
-}
-
-function getSourceArtifactLabel(module: "M01" | "M02") {
-  return module === "M01" ? "processor source file" : "settlement source file";
 }
 
 function getAgreementArtifactLabel(module: "M01" | "M02") {
@@ -562,33 +554,39 @@ export async function POST(request: Request) {
         name: restaurant.name,
       });
 
-      const [latestSchema, latestContract, latestSourceUpload, latestAgreementUpload, stateRow] = await Promise.all([
-        (() => {
-          const uploadVendorCandidates = buildUploadVendorCandidates(
-            normalizedWorkspace.module,
-            normalizedWorkspace.vendor,
-          );
+      // Version allocation must be serialized for this workspace. Without this lock,
+      // concurrent save/seal requests can both select the same latest version.
+      const workspaceLockKey = [
+        "governance-workspace",
+        location.id,
+        normalizedWorkspace.module,
+        normalizeVendorKey(normalizedWorkspace.vendor),
+      ].join(":");
+      await tx.$queryRaw<Array<{ locked: number }>>`
+        SELECT 1::integer AS "locked"
+        FROM pg_advisory_xact_lock(hashtext(${workspaceLockKey}))
+      `;
 
-          return tx.schema_registry_v2.findFirst({
-            where: {
-              location_id: location.id,
-              module: normalizedWorkspace.module,
-              vendor: normalizedWorkspace.vendor,
-            },
-            orderBy: [{ version: "desc" }, { id: "desc" }],
-            select: {
-              fields: true,
-              id: true,
-              location_id: true,
-              module: true,
-              sealed_at: true,
-              sha256: true,
-              status: true,
-              vendor: true,
-              version: true,
-            },
-          });
-        })(),
+      const [latestSchema, latestContract, latestAgreementUpload, stateRow] = await Promise.all([
+        tx.schema_registry_v2.findFirst({
+          where: {
+            location_id: location.id,
+            module: normalizedWorkspace.module,
+            vendor: normalizedWorkspace.vendor,
+          },
+          orderBy: [{ version: "desc" }, { id: "desc" }],
+          select: {
+            fields: true,
+            id: true,
+            location_id: true,
+            module: true,
+            sealed_at: true,
+            sha256: true,
+            status: true,
+            vendor: true,
+            version: true,
+          },
+        }),
         tx.contract_configs_v2.findFirst({
           where: {
             location_id: location.id,
@@ -606,22 +604,6 @@ export async function POST(request: Request) {
             terms: true,
             vendor: true,
             version: true,
-          },
-        }),
-        tx.uploads_v2.findFirst({
-          where: {
-            artifact_key: getSourceArtifactKey(normalizedWorkspace.module),
-            location_id: restaurant.id,
-            module: normalizedWorkspace.module,
-            superseded_by: null,
-            vendor: {
-              in: buildUploadVendorCandidates(normalizedWorkspace.module, normalizedWorkspace.vendor),
-            },
-          },
-          orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
-          select: {
-            id: true,
-            validation_summary: true,
           },
         }),
         tx.uploads_v2.findFirst({
@@ -726,23 +708,11 @@ export async function POST(request: Request) {
       const contractHash = computeWorkspaceHash(contractPayload);
       const sampleHeaders = normalizedWorkspace.fields.map((field) => field.source).filter(Boolean);
 
-      if (action === "seal" && !latestSourceUpload) {
-        throw new GovernanceSealBlockedError({
-          action: "upload_source",
-          artifactKey: getSourceArtifactKey(normalizedWorkspace.module),
-          ctaLabel: "Open Upload Data",
-          error: `Cannot seal ${normalizedWorkspace.module} ${normalizedWorkspace.vendor} workspace yet. Upload the governed ${getSourceArtifactLabel(normalizedWorkspace.module)} first.`,
-          locationId: restaurant.locationId,
-          locationName: restaurant.name,
-          moduleId: normalizedWorkspace.module,
-          vendor: normalizedWorkspace.vendor,
-        });
-      }
       if (action === "seal" && !latestAgreementUpload) {
         throw new GovernanceSealBlockedError({
           action: "upload_agreement",
           artifactKey: getAgreementArtifactKey(normalizedWorkspace.module),
-          ctaLabel: "Open Upload Data",
+          ctaLabel: "Open Vault Record",
           error: `Cannot seal ${normalizedWorkspace.module} ${normalizedWorkspace.vendor} workspace yet. Upload the ${getAgreementArtifactLabel(normalizedWorkspace.module)} PDF first.`,
           locationId: restaurant.locationId,
           locationName: restaurant.name,
@@ -764,7 +734,7 @@ export async function POST(request: Request) {
                 sealed_at: null,
                 sealed_by: managerId,
                 sha256: schemaHash,
-                source_upload_id: latestSourceUpload?.id ?? null,
+                source_upload_id: null,
                 status: persistedStatus,
               },
               select: {
@@ -789,7 +759,7 @@ export async function POST(request: Request) {
                 sealed_at: action === "seal" ? now : null,
                 sealed_by: managerId,
                 sha256: schemaHash,
-                source_upload_id: action === "seal" ? latestSourceUpload?.id ?? null : latestSourceUpload?.id ?? null,
+                source_upload_id: null,
                 status: persistedStatus,
                 vendor: normalizedWorkspace.vendor,
                 version: nextSchemaVersion,

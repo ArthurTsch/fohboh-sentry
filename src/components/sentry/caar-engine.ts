@@ -213,6 +213,7 @@ export function buildCertificationResult({
   recordId,
   runAt,
   scopeModules,
+  scopeVendorKey,
   systemHealthFlags = [],
   uploadModules,
 }: {
@@ -225,6 +226,7 @@ export function buildCertificationResult({
   recordId?: string;
   runAt?: Date;
   scopeModules?: Array<"M01" | "M02" | "M03">;
+  scopeVendorKey?: string;
   systemHealthFlags?: Array<"R186" | "R188" | "R191" | "R192">;
   uploadModules: UploadModule[];
 }): CertificationResult {
@@ -240,6 +242,7 @@ export function buildCertificationResult({
         evaluationDate,
         locationId: location.id,
         moduleId,
+        scopeVendorKey,
         systemHealthFlags,
         uploadModules,
       }),
@@ -935,6 +938,7 @@ function assessModule({
   evaluationDate,
   locationId,
   moduleId,
+  scopeVendorKey,
   systemHealthFlags,
   uploadModules,
 }: {
@@ -945,6 +949,7 @@ function assessModule({
   evaluationDate: Date;
   locationId: string;
   moduleId: "M01" | "M02" | "M03";
+  scopeVendorKey?: string;
   systemHealthFlags: Array<"R186" | "R188" | "R191" | "R192">;
   uploadModules: UploadModule[];
 }): ModuleAssessment | null {
@@ -960,6 +965,7 @@ function assessModule({
       locationId,
       moduleId,
       artifact.key,
+      moduleId === "M02" ? scopeVendorKey : undefined,
     );
     const contractValues = resolveContractValues(
       artifactContractState,
@@ -967,6 +973,7 @@ function assessModule({
       locationId,
       moduleId,
       artifact.key,
+      moduleId === "M02" ? scopeVendorKey : undefined,
     );
     const manualReady =
       Boolean(contractValues) &&
@@ -1021,10 +1028,16 @@ function resolveArtifactIntake(
   locationId: string,
   moduleId: "M01" | "M02" | "M03",
   artifactKey: string,
+  vendorKey?: string,
 ) {
   const prefix = `${accountId}:${locationId}:${moduleId}:${artifactKey}:`;
   const matches = Object.entries(state)
-    .filter(([key, value]) => key.startsWith(prefix) && value.uploaded)
+    .filter(
+      ([key, value]) =>
+        key.startsWith(prefix) &&
+        value.uploaded &&
+        (!vendorKey || key === `${prefix}${vendorKey}`),
+    )
     .map(([, value]) => value)
     .sort((left, right) => {
       const leftReady = Number(left.hash && left.schema && left.fields);
@@ -1040,9 +1053,12 @@ function resolveContractValues(
   locationId: string,
   moduleId: "M01" | "M02" | "M03",
   artifactKey: string,
+  vendorKey?: string,
 ) {
   const prefix = `${accountId}:${locationId}:${moduleId}:${artifactKey}:`;
-  const key = Object.keys(state).find((candidate) => candidate.startsWith(prefix));
+  const key = vendorKey
+    ? Object.keys(state).find((candidate) => candidate === `${prefix}${vendorKey}`)
+    : Object.keys(state).find((candidate) => candidate.startsWith(prefix));
   return key ? state[key] : null;
 }
 

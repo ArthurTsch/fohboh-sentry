@@ -75,8 +75,6 @@ export function SchemaEditorModal({
     error: null,
   });
   const canSeal = role === "WGS Manager" || role === "SuperAdmin";
-  const canEditGovernanceHeaders =
-    role === "Admin" || role === "SuperAdmin" || role === "WGS Manager";
   const canUploadGovernedDocuments =
     role === "Admin" || role === "SuperAdmin" || role === "WGS Manager";
 
@@ -105,8 +103,6 @@ export function SchemaEditorModal({
     [comparisonCandidateHeaders, comparisonFieldDefinitions, posSchema.headerBindings],
   );
   const extractedSampleReady = posSchema.extractedHeaders.length > 0;
-  const headerAttentionNeeded =
-    !posSchemaValidated || missingFields.length > 0 || reviewFields.length > 0;
   const sourceLabel =
     draft.module === "M01" ? `${draft.vendor} processor source file` : `${draft.vendor} settlement source file`;
   const agreementLabel =
@@ -220,7 +216,6 @@ export function SchemaEditorModal({
               { id: "mappings" as const, label: "Column Mappings" },
               { id: "contract" as const, label: "Contract Config" },
               { id: "missing" as const, label: "Missing Fields" },
-              { id: "posschema" as const, label: "Comparison Source Schema" },
               { id: "upload" as const, label: "Upload Statement" },
               { id: "vault" as const, label: "Vault Record" },
             ].map((item) => (
@@ -772,88 +767,38 @@ export function SchemaEditorModal({
                   mapping and contract state into an immutable versioned record used by certification and CAAR
                   generation.
                 </div>
-                <div
-                  className={`rounded-3xl border p-5 ${
-                    headerAttentionNeeded
-                      ? "border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)]"
-                      : "border-[var(--border)] bg-[var(--surface)]"
-                  }`}
-                >
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
                       <div className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.03em] text-[var(--text)]">
-                        Governed Header Control
+                        Application-managed source formats
                       </div>
                       <div className="mt-2 text-sm leading-6 text-[var(--muted)]">
-                        {headerAttentionNeeded
-                          ? "A comparison-source review is recommended before sealing. Open the Comparison Source Schema tab to update the governed header bindings when vendor columns no longer match."
-                          : "The governed comparison-source header bindings are already validated for this workspace."}
+                        Source-file formats are maintained centrally by FohBoh. Upload Data automatically recognizes
+                        the native Toast POS and Uber Eats settlement exports and applies their versioned field mappings.
+                        No location-level header configuration is required.
                       </div>
                     </div>
-                    <Badge tone={headerAttentionNeeded ? "warning" : "success"}>
-                      {headerAttentionNeeded ? "Review recommended" : "Headers validated"}
-                    </Badge>
-                  </div>
-                  <div className="mt-4 flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setTab("posschema")}
-                      disabled={!canEditGovernanceHeaders}
-                      className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#D8D9E0] disabled:text-[#7C8092]"
-                    >
-                      Change Governed Mapping
-                    </button>
-                    {!canEditGovernanceHeaders ? (
-                      <div className="text-sm leading-6 text-[var(--muted)]">
-                        Contact an Admin, SuperAdmin, or WGS Manager to update and reseal governed headers.
-                      </div>
-                    ) : (
-                      <div className="text-sm leading-6 text-[var(--muted)]">
-                        Updating bindings here changes the governed comparison-source schema used by Upload Data validation after the workspace is resealed.
-                      </div>
-                    )}
+                    <Badge tone="success">Managed format profile</Badge>
                   </div>
                 </div>
                 <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
                       <div className="font-[family-name:var(--font-display)] text-lg font-bold tracking-[-0.03em] text-[var(--text)]">
-                        Governed Source Documents
+                        Signed Agreement Evidence
                       </div>
                       <div className="mt-2 text-sm leading-6 text-[var(--muted)]">
-                        Upload the governed source documents here before sealing. This keeps the seal workflow self-contained
-                        and avoids routing you to Upload Data before the vault is ready.
+                        Upload the signed agreement that establishes the approved pricing terms. Recurring processor
+                        statements, POS exports, DSP settlements, and bank statements belong in Upload Data and are not
+                        duplicated in the vault.
                       </div>
                     </div>
-                    <Badge
-                      tone={
-                        governedSourceIntake?.uploaded && governedAgreementIntake?.uploaded
-                          ? "success"
-                          : governedSourceIntake?.uploaded || governedAgreementIntake?.uploaded
-                            ? "warning"
-                            : "danger"
-                      }
-                    >
-                      {governedSourceIntake?.uploaded && governedAgreementIntake?.uploaded
-                        ? "Seal evidence ready"
-                        : "Uploads required"}
+                    <Badge tone={governedAgreementIntake?.uploaded ? "success" : "danger"}>
+                      {governedAgreementIntake?.uploaded ? "Agreement ready" : "Agreement required"}
                     </Badge>
                   </div>
-                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                    <GovernedUploadCard
-                      actionLabel={draft.module === "M01" ? "Upload Source CSV/PDF" : "Upload Settlement CSV"}
-                      artifactLabel={sourceLabel}
-                      busy={governedUploadState.artifactKind === "source"}
-                      canUpload={canUploadGovernedDocuments && Boolean(onUploadGovernedArtifact)}
-                      helperText={
-                        draft.module === "M01"
-                          ? "Upload the exact processor export used to govern this M01 workspace. CSV is preferred; original processor PDF is accepted when supported."
-                          : "Upload the exact DSP settlement CSV used to govern this M02 workspace."
-                      }
-                      intake={governedSourceIntake ?? undefined}
-                      lockedText="Contact an Admin, SuperAdmin, or WGS Manager to attach the governed source file for seal."
-                      onUpload={() => sourceFileInputRef.current?.click()}
-                    />
+                  <div className="mt-4">
                     <GovernedUploadCard
                       actionLabel="Upload Agreement PDF"
                       artifactLabel={agreementLabel}
@@ -901,10 +846,6 @@ export function SchemaEditorModal({
                 <div>Verified fields: {verifiedFields.length}</div>
                 <div>Review items: {reviewFields.length}</div>
                 <div>Missing fields: {missingFields.length}</div>
-                <div className={posSchemaValidated ? "font-medium text-[var(--success)]" : undefined}>
-                  Comparison schema:{" "}
-                  {posSchemaValidated ? `${posSchema.validatedHeaders.length} validated headers` : "Not validated yet"}
-                </div>
                 <div>Upload gate: {uploadReady ? "Release Ready" : "Blocked / Review"}</div>
               </div>
             </div>
@@ -913,12 +854,9 @@ export function SchemaEditorModal({
               <div className="font-medium">Verification flow</div>
               <div className="mt-3 space-y-2 text-sm text-[var(--muted)]">
                 <div>1. Confirm native headers against canonical fields.</div>
-                <div className={posSchemaValidated ? "font-medium text-[var(--success)]" : undefined}>
-                  2. Validate the governed comparison-source header bindings.
-                </div>
-                <div>3. Verify contract terms against the signed agreement.</div>
-                <div>4. Resolve all amber or missing controls.</div>
-                <div>5. Seal only when the workspace reflects evidentiary truth.</div>
+                <div>2. Verify contract terms against the signed agreement.</div>
+                <div>3. Resolve all amber or missing controls.</div>
+                <div>4. Seal only when the workspace reflects evidentiary truth.</div>
               </div>
             </div>
           </aside>

@@ -26,6 +26,7 @@ import { useSentryPersistence } from "./hooks/useSentryPersistence";
 import { AddLocationModal } from "./overlays/AddLocationModal";
 import { ArtifactWorkflowModal } from "./overlays/ArtifactWorkflowModal";
 import { CertificationCadenceModal } from "./overlays/CertificationCadenceModal";
+import { CertificationProgressModal } from "./overlays/CertificationProgressModal";
 import { CertificationRunModal } from "./overlays/CertificationRunModal";
 import { CaarReportModal } from "./overlays/CaarReportModal";
 import { RequestAccessModal } from "./overlays/RequestAccessModal";
@@ -77,6 +78,7 @@ type ActiveArtifactState = {
 
 type ActiveCertificationState = {
   cadence: "monthly_final" | "weekly_preliminary";
+  caarId: string;
   locationId: string;
   locationName: string;
   ready: boolean;
@@ -84,17 +86,25 @@ type ActiveCertificationState = {
   trustScore: number;
 };
 
+type CertificationProgressState = {
+  cadence: "monthly_final" | "weekly_preliminary";
+  locationName: string;
+  moduleId: "M01" | "M02";
+};
+
 type PendingCertificationRequest = {
   locationId: string;
   locationName: string;
   locations?: { id: string; name: string }[];
   selectedModules: Array<"M01" | "M02">;
+  selectedVendorKey?: string;
   selectableModules: Array<{
     blockers: string[];
     enabled: boolean;
     moduleId: "M01" | "M02";
     ready: boolean;
   }>;
+  selectableVendors: Array<{ key: string; name: string }>;
 };
 
 type CertificationBlockerState = {
@@ -114,7 +124,7 @@ type CertificationBlockerState = {
 };
 
 type GovernanceWorkspaceConflictPayload = {
-  action?: "upload_agreement" | "upload_source";
+  action?: "upload_agreement";
   artifactKey?: string;
   ctaLabel?: string;
   error?: string;
@@ -167,6 +177,8 @@ type DatabaseCaarRecord = CaarRecord & {
 type PersistedUploadRecord = {
   artifactKey: string;
   accountId?: string | null;
+  detectedFormatKey?: string;
+  detectedFormatName?: string;
   expectedColumns?: number;
   fields: boolean;
   fileName: string;
@@ -183,6 +195,7 @@ type PersistedUploadRecord = {
   rows?: number;
   schema: boolean;
   sizeBytes: number;
+  sourceSystemKey?: string;
   status: "ready" | "review";
   unmatchedHeaders?: string[];
   updatedAt?: string;
@@ -270,6 +283,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   const [artifactIntakeState, setArtifactIntakeState] = useState<Record<string, IntakeState>>({});
   const [artifactContractState, setArtifactContractState] = useState<Record<string, Record<string, string>>>({});
   const [activeCertification, setActiveCertification] = useState<ActiveCertificationState | null>(null);
+  const [certificationProgress, setCertificationProgress] = useState<CertificationProgressState | null>(null);
   const [pendingCertificationRequest, setPendingCertificationRequest] = useState<PendingCertificationRequest | null>(null);
   const [certificationBlocker, setCertificationBlocker] = useState<CertificationBlockerState | null>(null);
   const [activeUploadLocation, setActiveUploadLocation] = useState<{
@@ -331,12 +345,13 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
           deriveLocationWorkflowState({
             artifactIntakeState,
             location,
+            onboardingProgress: wgsOnboardingState[location.id],
             schemaState,
             uploadState,
           }),
         ]),
       ) as Record<string, LocationWorkflowState>,
-    [artifactIntakeState, runtimeLocationState, schemaState, uploadState],
+    [artifactIntakeState, runtimeLocationState, schemaState, uploadState, wgsOnboardingState],
   );
 
   const persistenceHydrated = useSentryPersistence(
@@ -560,6 +575,8 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     setArtifactIntakeState((state) => ({
       ...state,
       [locationScopedKey]: {
+        detectedFormatKey: upload.detectedFormatKey,
+        detectedFormatName: upload.detectedFormatName,
         uploadId: upload.id,
         uploaded: upload.uploaded,
         hash: Boolean(upload.hashValue),
@@ -571,6 +588,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         vendorKey: upload.vendorKey,
         vendorName: upload.vendorName,
         sizeBytes: upload.sizeBytes,
+        sourceSystemKey: upload.sourceSystemKey,
         matchPct: upload.matchPct,
         matchedColumns: upload.matchedColumns,
         expectedColumns: upload.expectedColumns,
@@ -612,6 +630,8 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     return {
       receipt: {
         artifactKey: upload.artifactKey,
+        detectedFormatKey: upload.detectedFormatKey,
+        detectedFormatName: upload.detectedFormatName,
         expectedColumns: upload.expectedColumns,
         fileName: upload.fileName,
         hashValue: upload.hashValue,
@@ -625,6 +645,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         parseWarnings: upload.parseWarnings,
         rows: upload.rows,
         sizeBytes: upload.sizeBytes,
+        sourceSystemKey: upload.sourceSystemKey,
         status: upload.status,
         unmatchedHeaders: upload.unmatchedHeaders,
         updatedAt: upload.updatedAt,
@@ -1498,9 +1519,9 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       onboardingChecklist?: Record<string, boolean[]>;
       onboardingProgress?: WgsOnboardingProgress;
     },
-  ) {
+  ): Promise<boolean> {
     if (locationStatePersistenceStatusRef.current === "missing-table") {
-      return;
+      return false;
     }
 
     try {
@@ -1537,15 +1558,17 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
             payload?.error ??
               "Location-state persistence is disabled until the database migration is applied.",
           );
-          return;
+          return false;
         }
         showToast(payload?.error ?? "Location state save failed.");
-        return;
+        return false;
       }
 
       locationStatePersistenceStatusRef.current = "available";
+      return true;
     } catch {
       showToast("Location state save failed.");
+      return false;
     }
   }
 
@@ -1686,19 +1709,15 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
           payload.moduleId &&
           payload.error
         ) {
-          const documentLabel =
-            payload.action === "upload_agreement"
-              ? payload.moduleId === "M01"
-                ? `signed ${payload.vendor ?? ""} merchant agreement PDF`.trim()
-                : `signed ${payload.vendor ?? ""} DSP agreement PDF`.trim()
-              : payload.moduleId === "M01"
-                ? `${payload.vendor ?? "selected"} processor statement source file`
-                : `${payload.vendor ?? "selected"} settlement source file`;
+           const documentLabel =
+             payload.moduleId === "M01"
+               ? `signed ${payload.vendor ?? ""} merchant agreement PDF`.trim()
+               : `signed ${payload.vendor ?? ""} DSP agreement PDF`.trim();
           const workflow = workflowByLocation[payload.locationId];
           setCertificationBlocker({
               blockers: [payload.error],
-              description:
-                "This workspace cannot be sealed yet. Open DIY Access, upload the missing governed document from the Comparison Source Schema or Contract Config workflow, then return here and click Seal Contract Config again.",
+               description:
+                 "This workspace cannot be sealed yet. Upload the signed agreement in the Vault Record, then click Seal Contract Config again.",
             eyebrow: "Workspace Sealing Blocked",
             locationId: payload.locationId,
             locationName: payload.locationName,
@@ -2079,15 +2098,24 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     }
   }
 
-  function handleManageUploadSources(next: {
+  async function handleManageUploadSources(locationId: string, next: {
     m01Enabled: boolean;
     m01Vendors: string[];
     m02Enabled: boolean;
     m02Vendors: string[];
   }) {
-    const targetLocation = getUploadTargetLocation();
+    const targetLocation = runtimeLocationState.find((location) => location.id === locationId);
     if (!targetLocation) {
-      return;
+      throw new Error("The selected location is no longer available.");
+    }
+    if (next.m01Enabled && next.m01Vendors.length === 0) {
+      throw new Error("Select an M01 processor before saving.");
+    }
+    if (next.m02Enabled && next.m02Vendors.length === 0) {
+      throw new Error("Select at least one M02 delivery platform before saving.");
+    }
+    if (!next.m01Enabled && !next.m02Enabled) {
+      throw new Error("At least one certification module must remain enabled.");
     }
 
     const currentProgress = wgsOnboardingState[targetLocation.id] ?? createWgsOnboardingProgress();
@@ -2135,16 +2163,20 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       ],
     };
 
+    const saved = await persistLocationState(updatedLocation, {
+      onboardingChecklist: onboardingState,
+      onboardingProgress: nextProgress,
+    });
+    if (!saved) {
+      throw new Error("Source settings could not be saved.");
+    }
+
     setWgsOnboardingState((current) => ({
       ...current,
       [targetLocation.id]: nextProgress,
     }));
     updateRuntimeLocation(targetLocation.id, () => updatedLocation);
-    void persistLocationState(updatedLocation, {
-      onboardingChecklist: onboardingState,
-      onboardingProgress: nextProgress,
-    });
-    void syncAssignedRestaurants();
+    await syncAssignedRestaurants();
     showToast("Active source settings updated.");
   }
 
@@ -2351,11 +2383,12 @@ function handleCompleteOnboarding(locationId: string) {
     }));
     const defaultSelectedModules = selectableModules
       .filter((item) => item.enabled && item.ready)
-      .map((item) => item.moduleId);
+      .map((item) => item.moduleId)
+      .slice(0, 1);
 
-    if (workflow && !workflow.readyForCertification) {
+    if (defaultSelectedModules.length === 0) {
       setCertificationBlocker({
-        blockers: workflow.blockers,
+        blockers: workflow?.blockers ?? ["No module is ready for certification."],
         locationId,
         locationName: location.name,
         primaryAction: workflow.primaryAction,
@@ -2369,6 +2402,11 @@ function handleCompleteOnboarding(locationId: string) {
       locationName: location.name,
       selectedModules: defaultSelectedModules,
       selectableModules,
+      selectableVendors: getLocationSourceConfig(locationId)?.m02Vendors ?? [],
+      selectedVendorKey:
+        defaultSelectedModules[0] === "M02"
+          ? getLocationSourceConfig(locationId)?.m02Vendors[0]?.key
+          : undefined,
     });
   }
 
@@ -2377,46 +2415,71 @@ function handleCompleteOnboarding(locationId: string) {
     if (!request) return;
     const location = runtimeLocationState.find((item) => item.id === request.locationId);
     if (!location) return;
-    if (request.selectedModules.length === 0) {
-      showToast("Select at least one ready module before running certification.");
+    if (request.selectedModules.length !== 1) {
+      showToast("Select exactly one ready module. M01 and M02 produce separate CAARs.");
       return;
     }
+    const moduleId = request.selectedModules[0];
+    const selectedVendorKey =
+      moduleId === "M02"
+        ? request.selectedVendorKey ?? request.selectableVendors[0]?.key
+        : undefined;
+    if (moduleId === "M02" && !selectedVendorKey) {
+      setCertificationBlocker({
+        blockers: [
+          "No delivery platform is selected for this M02 certification. Open the location dashboard and configure a delivery source before running certification.",
+        ],
+        locationId: request.locationId,
+        locationName: location.name,
+        primaryAction: "uploads",
+        primaryLabel: "Open Upload Data",
+        requirements: [],
+      });
+      return;
+    }
+    setCertificationProgress({
+      cadence,
+      locationName: location.name,
+      moduleId,
+    });
     setPendingCertificationRequest(null);
 
-    const response = await fetch("/api/v1/certifications/run", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
+    try {
+      const response = await fetch("/api/v1/certifications/run", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
           cadence,
           locationId: request.locationId,
           modules: request.selectedModules,
-      }),
-    });
+          vendorKey: selectedVendorKey,
+        }),
+      });
 
-    const payload = (await response.json().catch(() => null)) as
-      | ({ error?: string } & PersistedCertificationResponse)
-      | null;
+      const payload = (await response.json().catch(() => null)) as
+        | ({ error?: string } & PersistedCertificationResponse)
+        | null;
 
-    if (!response.ok || !payload?.certification || !payload.location) {
-      const workflow = workflowByLocation[request.locationId];
-      if (response.status === 409) {
-        setCertificationBlocker({
-          blockers: parseCertificationBlockers(payload?.error, workflow),
-          locationId: request.locationId,
-          locationName: location.name,
-          primaryAction: workflow?.primaryAction ?? "uploads",
-          primaryLabel: workflow?.primaryLabel ?? "Open Upload Data",
-          requirements: workflow?.requirements ?? [],
-        });
+      if (!response.ok || !payload?.certification || !payload.location) {
+        const workflow = workflowByLocation[request.locationId];
+        if (response.status === 400 || response.status === 409) {
+          setCertificationBlocker({
+            blockers: parseCertificationBlockers(payload?.error, workflow),
+            locationId: request.locationId,
+            locationName: location.name,
+            primaryAction: workflow?.primaryAction ?? "uploads",
+            primaryLabel: workflow?.primaryLabel ?? "Open Upload Data",
+            requirements: workflow?.requirements ?? [],
+          });
+          return;
+        }
+        showToast(payload?.error ?? "Unable to run certification right now.");
         return;
       }
-      showToast(payload?.error ?? "Unable to run certification right now.");
-      return;
-    }
 
-    const { certification } = payload;
+      const { certification } = payload;
 
       updateRuntimeLocation(request.locationId, (item) => ({
         ...item,
@@ -2444,6 +2507,7 @@ function handleCompleteOnboarding(locationId: string) {
       ]);
       setActiveCertification({
         cadence: certification.cadence ?? cadence,
+        caarId: certification.record.id,
         locationId: request.locationId,
         locationName: location.name,
         ready: certification.ready,
@@ -2456,7 +2520,12 @@ function handleCompleteOnboarding(locationId: string) {
           ? `${certification.record.id} preliminary certification saved.`
           : `${certification.record.id} certified and saved.`,
       );
+    } catch {
+      showToast("The certification request could not be completed. Check your connection and try again.");
+    } finally {
+      setCertificationProgress(null);
     }
+  }
 
   if (!effectiveSession) {
     return (
@@ -2554,8 +2623,14 @@ function handleCompleteOnboarding(locationId: string) {
             locations: selectableLocations,
             selectedModules: selectableModules
               .filter((item) => item.enabled && item.ready)
-              .map((item) => item.moduleId),
+              .map((item) => item.moduleId)
+              .slice(0, 1),
             selectableModules,
+            selectableVendors: getLocationSourceConfig(primaryLocation.id)?.m02Vendors ?? [],
+            selectedVendorKey:
+              selectableModules.find((item) => item.enabled && item.ready)?.moduleId === "M02"
+                ? getLocationSourceConfig(primaryLocation.id)?.m02Vendors[0]?.key
+                : undefined,
           });
         }}
         onSignOut={handleSignOut}
@@ -2766,7 +2841,9 @@ function handleCompleteOnboarding(locationId: string) {
           locations={pendingCertificationRequest.locations}
           locationName={pendingCertificationRequest.locationName}
           selectedModules={pendingCertificationRequest.selectedModules}
+          selectedVendorKey={pendingCertificationRequest.selectedVendorKey}
           selectableModules={pendingCertificationRequest.selectableModules}
+          selectableVendors={pendingCertificationRequest.selectableVendors}
           onChangeLocation={(locationId) => {
             const nextLocation =
               pendingCertificationRequest.locations?.find((location) => location.id === locationId) ?? null;
@@ -2788,8 +2865,14 @@ function handleCompleteOnboarding(locationId: string) {
                     locationName: nextLocation.name,
                     selectedModules: nextSelectableModules
                       .filter((item) => item.enabled && item.ready)
-                      .map((item) => item.moduleId),
+                      .map((item) => item.moduleId)
+                      .slice(0, 1),
                     selectableModules: nextSelectableModules,
+                    selectableVendors: getLocationSourceConfig(nextLocation.id)?.m02Vendors ?? [],
+                    selectedVendorKey:
+                      nextSelectableModules.find((item) => item.enabled && item.ready)?.moduleId === "M02"
+                        ? getLocationSourceConfig(nextLocation.id)?.m02Vendors[0]?.key
+                        : undefined,
                   }
                 : current,
             );
@@ -2800,12 +2883,29 @@ function handleCompleteOnboarding(locationId: string) {
                 ? {
                     ...current,
                     selectedModules: modules,
+                    selectedVendorKey:
+                      modules[0] === "M02"
+                        ? current.selectedVendorKey ?? current.selectableVendors[0]?.key
+                        : undefined,
                   }
                 : current,
             )
           }
+          onChangeVendor={(vendorKey) =>
+            setPendingCertificationRequest((current) =>
+              current ? { ...current, selectedVendorKey: vendorKey } : current,
+            )
+          }
           onClose={() => setPendingCertificationRequest(null)}
           onSubmit={executeRunCertification}
+        />
+      ) : null}
+
+      {certificationProgress ? (
+        <CertificationProgressModal
+          cadence={certificationProgress.cadence}
+          locationName={certificationProgress.locationName}
+          moduleId={certificationProgress.moduleId}
         />
       ) : null}
 
@@ -2815,7 +2915,7 @@ function handleCompleteOnboarding(locationId: string) {
           locationName={activeCertification.locationName}
           onClose={() => setActiveCertification(null)}
           openCaar={() => {
-            const record = caarState.find((item) => item.locationId === activeCertification.locationId);
+            const record = caarState.find((item) => item.id === activeCertification.caarId);
             if (record) setSelectedCaar(record);
             setActiveCertification(null);
           }}
@@ -2882,7 +2982,17 @@ function mapAssignedRestaurantsToLocations(
         restaurant.store_id?.trim() ||
         `LOC-DB-${restaurant.id}`;
       const modules = parseStoredModules(restaurant.sentry_state?.modules_json);
-      const status = toLocationStatus(restaurant.sentry_state?.status);
+      const persistedStatus = toLocationStatus(restaurant.sentry_state?.status);
+      const status =
+        restaurant.sentry_state?.completed && persistedStatus === "Onboarding"
+          ? Math.round(
+              ((restaurant.sentry_state?.m01_score ?? 0) +
+                (restaurant.sentry_state?.m02_score ?? 0)) /
+                2,
+            ) >= 85
+            ? "Certified"
+            : "At Risk"
+          : persistedStatus;
 
       return {
         accountId: restaurant.sentry_state?.account_id || (
@@ -3075,11 +3185,13 @@ function extractNumericValue(value: string) {
 function deriveLocationWorkflowState({
   artifactIntakeState,
   location,
+  onboardingProgress,
   schemaState,
   uploadState,
 }: {
   artifactIntakeState: Record<string, IntakeState>;
   location: LocationRecord;
+  onboardingProgress?: WgsOnboardingProgress;
   schemaState: SchemaWorkspace[];
   uploadState: UploadModule[];
 }) {
@@ -3094,7 +3206,9 @@ function deriveLocationWorkflowState({
     M02: { blockers: [], enabled: activeModules.includes("M02"), ready: false, warnings: [] },
   };
 
-  if (location.status === "Onboarding") {
+  const onboardingComplete = onboardingProgress?.completed || location.status !== "Onboarding";
+
+  if (!onboardingComplete) {
     blockers.push("Complete onboarding and activation for this location before certification can run.");
     requirements.push({
       action: "onboarding",
@@ -3176,7 +3290,7 @@ function deriveLocationWorkflowState({
       moduleWarnings.push(`${moduleId} uploads are older than 31 days. Upload the current period evidence before rerun.`);
     }
 
-    const moduleReady = location.status !== "Onboarding" && moduleBlockers.length === 0;
+    const moduleReady = onboardingComplete && moduleBlockers.length === 0;
     moduleReadiness[moduleId] = {
       blockers: moduleBlockers,
       enabled: true,
@@ -3232,7 +3346,7 @@ function deriveLocationWorkflowState({
   }
 
   const readyForCertification = anyModuleReady;
-  const primaryAction = location.status === "Onboarding"
+  const primaryAction = !onboardingComplete
     ? "onboarding"
     : !anyModuleReady && schemaBlocked
       ? "diy"

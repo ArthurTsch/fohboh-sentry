@@ -185,6 +185,7 @@ function SchemaWorkspaceCard({
             </div>
           </div>
 
+          {false && workspace.posSchema && (
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <PanelTitle
               title="Comparison Source Schema"
@@ -206,13 +207,13 @@ function SchemaWorkspaceCard({
               footerLabel="Seal Status"
               footerValue={
                 workspace.posSchema?.validatedHeaders?.length
-                  ? `${workspace.posSchema.validatedHeaders.length} headers validated`
+                  ? `${workspace.posSchema!.validatedHeaders!.length} headers validated`
                   : "Comparison schema not validated yet"
               }
             />
             <div className="mt-4 space-y-2">
               {workspace.posSchema?.headerBindings?.length ? (
-                workspace.posSchema.headerBindings.map((binding) => (
+                workspace.posSchema!.headerBindings!.map((binding) => (
                   <div
                     key={`${workspace.accountId}:${workspace.locationId ?? "global"}:${workspace.module}:${workspace.vendor}:pos:${binding.appField}`}
                     className="grid gap-2 rounded-xl border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] px-4 py-3 text-sm md:grid-cols-[1fr_auto_1fr]"
@@ -223,7 +224,7 @@ function SchemaWorkspaceCard({
                   </div>
                 ))
               ) : workspace.posSchema?.validatedHeaders?.length ? (
-                workspace.posSchema.validatedHeaders.map((header) => (
+                workspace.posSchema!.validatedHeaders!.map((header) => (
                   <span
                     key={`${workspace.accountId}:${workspace.locationId ?? "global"}:${workspace.module}:${workspace.vendor}:pos:${header}`}
                     className="inline-flex rounded-full border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.08)] px-3 py-1 font-[family-name:var(--font-mono)] text-[11px] text-[var(--success)]"
@@ -238,6 +239,7 @@ function SchemaWorkspaceCard({
               )}
             </div>
           </div>
+          )}
 
           <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
             <PanelTitle

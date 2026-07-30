@@ -4,26 +4,34 @@ export function CertificationCadenceModal({
   locationName,
   onChangeLocation,
   onChangeModules,
+  onChangeVendor,
   onClose,
   onSubmit,
   selectedModules,
+  selectedVendorKey,
   selectableModules,
+  selectableVendors = [],
 }: {
   locationId: string;
   locations?: { id: string; name: string }[];
   locationName: string;
   onChangeLocation?: (locationId: string) => void;
   onChangeModules?: (modules: Array<"M01" | "M02">) => void;
+  onChangeVendor?: (vendorKey: string) => void;
   onClose: () => void;
   onSubmit: (cadence: "monthly_final" | "weekly_preliminary") => void | Promise<void>;
   selectedModules: Array<"M01" | "M02">;
+  selectedVendorKey?: string;
   selectableModules: Array<{
     blockers: string[];
     enabled: boolean;
     moduleId: "M01" | "M02";
     ready: boolean;
   }>;
+  selectableVendors?: Array<{ key: string; name: string }>;
 }) {
+  const requiresVendor = selectedModules[0] === "M02";
+  const canSubmit = selectedModules.length === 1 && (!requiresVendor || Boolean(selectedVendorKey));
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-2xl rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
@@ -38,6 +46,35 @@ export function CertificationCadenceModal({
             Choose the evidence path you want to certify before the engine runs.
           </div>
         </div>
+
+        {requiresVendor ? (
+          <div className="border-b border-[var(--border)] px-6 py-5">
+            <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+              Delivery platform
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              {selectableVendors.map((vendor) => (
+                <button
+                  key={vendor.key}
+                  type="button"
+                  onClick={() => onChangeVendor?.(vendor.key)}
+                  className={`rounded-2xl border px-4 py-3 text-left text-sm font-semibold ${
+                    selectedVendorKey === vendor.key
+                      ? "border-[var(--text)] bg-[var(--text)] text-white"
+                      : "border-[var(--border)] bg-white"
+                  }`}
+                >
+                  {vendor.name}
+                </button>
+              ))}
+            </div>
+            {selectableVendors.length === 0 ? (
+              <p className="mt-3 text-sm text-[var(--accent)]">
+                Configure at least one M02 delivery platform before running certification.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         {locations && locations.length > 1 ? (
           <div className="border-b border-[var(--border)] px-6 py-5">
@@ -73,10 +110,7 @@ export function CertificationCadenceModal({
                   type="button"
                   disabled={disabled}
                   onClick={() => {
-                    const next = selected
-                      ? selectedModules.filter((item) => item !== module.moduleId)
-                      : [...selectedModules, module.moduleId];
-                    onChangeModules?.(next);
+                    onChangeModules?.([module.moduleId]);
                   }}
                   className={`rounded-[20px] border p-4 text-left transition ${
                     disabled
@@ -113,12 +147,15 @@ export function CertificationCadenceModal({
               );
             })}
           </div>
+          <div className="mt-3 text-sm leading-6 text-[var(--muted)]">
+            Select one module. M01 and M02 are certified independently and produce separate CAARs.
+          </div>
         </div>
 
         <div className="grid gap-4 px-6 py-6 md:grid-cols-2">
           <button
             type="button"
-            disabled={selectedModules.length === 0}
+            disabled={!canSubmit}
             onClick={() => onSubmit("weekly_preliminary")}
             className="rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5 text-left transition hover:border-[var(--text)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -135,7 +172,7 @@ export function CertificationCadenceModal({
 
           <button
             type="button"
-            disabled={selectedModules.length === 0}
+            disabled={!canSubmit}
             onClick={() => onSubmit("monthly_final")}
             className="rounded-[24px] border border-[rgba(214,48,49,0.24)] bg-[rgba(214,48,49,0.04)] p-5 text-left transition hover:border-[var(--accent)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
           >

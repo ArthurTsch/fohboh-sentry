@@ -138,7 +138,7 @@ export function SentryViewRouter({
   onAddUser: () => void;
   onApprove: (approvalId: string) => void | Promise<void>;
   onCompleteUploadSet: (locationId: string, moduleId: "M01" | "M02") => void;
-  onManageUploadSources: (next: {
+  onManageUploadSources: (locationId: string, next: {
     m01Enabled: boolean;
     m01Vendors: string[];
     m02Enabled: boolean;
@@ -245,7 +245,7 @@ export function SentryViewRouter({
         locationSourceConfig={diyLocationSourceConfigs[activeLocation.id] ?? null}
         onEditWorkspace={onOpenSchemaEditor}
         onInitializeWorkspace={onInitializeWorkspace}
-        onManageSources={onManageUploadSources}
+        onManageSources={(next) => onManageUploadSources(activeLocation.id, next)}
         onOpenCaar={onOpenCaar}
         onOpenOnboarding={onOpenOnboarding}
         onOpenUploads={onOpenUploads}

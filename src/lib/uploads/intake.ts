@@ -1,5 +1,10 @@
 import { createHash } from "crypto";
-import { getExpectedHeaders, getExpectedKind, normalizeHeader } from "./definitions";
+import {
+  detectKnownSourceFormat,
+  getExpectedHeaders,
+  getExpectedKind,
+  normalizeHeader,
+} from "./definitions";
 import { extractPdfDocument, extractPdfMetrics } from "./pdf";
 
 type UploadMetrics = {
@@ -50,6 +55,8 @@ type UploadReferenceRow = {
 };
 
 export type PersistedUploadValidation = {
+  detectedFormatKey?: string;
+  detectedFormatName?: string;
   expectedColumns?: number;
   fields: boolean;
   fileName: string;
@@ -62,6 +69,7 @@ export type PersistedUploadValidation = {
   rows?: number;
   schema: boolean;
   sizeBytes: number;
+  sourceSystemKey?: string;
   unmatchedHeaders?: string[];
   updatedAt: string;
   uploaded: boolean;
@@ -123,17 +131,17 @@ export async function validateUploadArtifact({
   }
 
   const text = buffer.toString("utf8");
-  const csvLines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  const headers = (csvLines[0] ?? "")
-    .split(",")
+  const csvRows = parseCsv(text);
+  const headers = (csvRows[0] ?? [])
     .map((header) => normalizeHeader(header))
     .filter(Boolean);
-  const rows = Math.max(csvLines.length - 1, 0);
-  const dataRows = csvLines.slice(1).map((line) => line.split(",").map((cell) => cell.trim()));
+  const dataRows = csvRows.slice(1).filter((row) => row.some((cell) => cell.trim().length > 0));
+  const rows = dataRows.length;
+  const detectedFormat = detectKnownSourceFormat(artifactKey, headers);
   const expectedHeaders =
     expectedHeadersOverride && expectedHeadersOverride.length > 0
       ? expectedHeadersOverride
-      : getExpectedHeaders(artifactKey, vendorKey);
+      : detectedFormat?.format.headers ?? getExpectedHeaders(artifactKey, vendorKey);
   const normalizedExpectedHeaders = expectedHeaders.map(normalizeHeader);
   const matchedColumns = normalizedExpectedHeaders.filter((header) => headers.includes(header));
   const unmatchedHeaders = normalizedExpectedHeaders.filter((header) => !headers.includes(header));
@@ -153,16 +161,41 @@ export async function validateUploadArtifact({
     hashValue,
     matchedColumns: matchedColumns.length || undefined,
     matchPct,
-    metrics: extractUploadMetrics(artifactKey, headers, dataRows),
+    detectedFormatKey: detectedFormat?.format.key,
+    detectedFormatName: detectedFormat?.format.name,
+    metrics: extractUploadMetrics(
+      artifactKey,
+      headers,
+      selectMetricRows(artifactKey, vendorKey, headers, dataRows),
+    ),
     rows,
     schema,
     sizeBytes: buffer.byteLength,
+    sourceSystemKey: detectedFormat?.format.sourceSystemKey,
     unmatchedHeaders: unmatchedHeaders.length > 0 ? unmatchedHeaders : undefined,
     updatedAt,
     uploaded: true,
     vendorKey: vendorKey ?? undefined,
     vendorName: vendorName ?? undefined,
   };
+}
+
+function selectMetricRows(
+  artifactKey: string,
+  configuredVendorKey: string | null | undefined,
+  headers: string[],
+  rows: string[][],
+) {
+  if (artifactKey !== "m02-pos" || configuredVendorKey !== "ubereats") return rows;
+
+  const sourceIndex = headers.indexOf(normalizeHeader("ORDER_SOURCE_NAME"));
+  if (sourceIndex < 0) return rows;
+
+  // Toast groups third-party marketplace orders under Orders API. This binding is
+  // deterministic only while Uber Eats is the configured DSP for this upload slot.
+  return rows.filter(
+    (row) => String(row[sourceIndex] ?? "").trim().toLowerCase() === "orders api",
+  );
 }
 
 function resolvePdfFieldReadiness(
@@ -257,6 +290,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       const index = valueFor(...names);
       return index >= 0 ? parseNumber(row[index]) : 0;
     };
+    const readAbs = (...names: string[]) => Math.abs(read(...names));
 
     metrics.basisAmount += read(
       "trans_amount",
@@ -272,8 +306,10 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "pos_merchant_sales",
       "pos_net_sales",
       "payments",
+      "sales (excl. tax)",
+      "subtotal",
     );
-    metrics.feeAmount += read(
+    const standardFeeAmountRaw = read(
       "fee_amount",
       "processing_fees",
       "fee",
@@ -286,15 +322,30 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "transaction_fees",
       "commission_variance",
       "fees",
+      "commission",
     );
+    const standardFeeAmount =
+      artifactKey === "m02-settlement" ? Math.abs(standardFeeAmountRaw) : standardFeeAmountRaw;
+    const marketplaceFeeAmount = readAbs("marketplace fee");
+    metrics.feeAmount += marketplaceFeeAmount || standardFeeAmount;
     metrics.interchangeFeeAmount += read("interchange_fee", "interchange_amount");
-    metrics.serviceFeeAmount += read("service_fee", "processing_fees", "transaction_fees", "fees");
+    const serviceFeeAmount = read(
+      "service_fee",
+      "processing_fees",
+      "transaction_fees",
+      "payment_processing_fee",
+      "fees",
+    );
+    metrics.serviceFeeAmount +=
+      artifactKey === "m02-settlement" ? Math.abs(serviceFeeAmount) : serviceFeeAmount;
     metrics.otherFeeAmount += read("other_merchant_fees", "assessment", "withholdings", "external");
-    metrics.marketingFeeAmount += read("marketing_fee", "marketing_contribution");
+    metrics.marketingFeeAmount +=
+      readAbs("marketing adjustment", "offer redemption fee", "marketing fees") ||
+      read("marketing_fee", "marketing_contribution", "marketing_fees");
     metrics.taxRemittedAmount += read("tax_remitted", "tax");
     metrics.tipAmount += read("tip");
-    metrics.adjustmentAmount += read("adjustment_amount", "adjustment", "external");
-    metrics.errorChargeAmount += read("error_charge");
+    metrics.adjustmentAmount += read("adjustment_amount", "adjustment", "adjustments", "external");
+    metrics.errorChargeAmount += readAbs("error_charge", "error_charges");
     metrics.deliveryFeeAmount += read("delivery_fee", "consumer_fee");
     const payoutAmount = read(
       "payout_amount",
@@ -302,6 +353,8 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "platform_net_sales",
       "bank_deposit_amount",
       "payout",
+      "total payout",
+      "net total",
     );
     metrics.payoutAmount += payoutAmount;
     metrics.depositAmount += read(
@@ -311,23 +364,36 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "net_payout",
       "payout_amount",
       "payout",
+      "total payout",
+      "net total",
     );
 
-    const externalRefIdIndex = valueFor("external_ref_id", "external ref. id", "reference_id");
+    const externalRefIdIndex = valueFor(
+      "external_ref_id",
+      "external ref. id",
+      "reference_id",
+      "payout reference id",
+      "payout id",
+    );
     const typeIndex = valueFor("type");
-    const settledDateIndex = valueFor("settled_date", "settled date", "settlement_date");
+    const settledDateIndex = valueFor(
+      "settled_date",
+      "settled date",
+      "settlement_date",
+      "payout date",
+    );
     const externalRefId =
       externalRefIdIndex >= 0 ? normalizeReferenceId(String(row[externalRefIdIndex] ?? "")) : "";
     const rowType = typeIndex >= 0 ? String(row[typeIndex] ?? "").trim().toUpperCase() : "";
     const settledDate = settledDateIndex >= 0 ? String(row[settledDateIndex] ?? "").trim() : "";
 
-    if (artifactKey === "m01-pos" && externalRefId && payoutAmount > 0) {
+    if ((artifactKey === "m01-pos" || artifactKey === "m02-settlement") && externalRefId && payoutAmount > 0) {
       metrics.payoutReferenceRows.push({
         amount: roundTo2(payoutAmount),
         externalRefId,
         rowNumber: metrics.payoutReferenceRows.length + 1,
         settledDate,
-        type: rowType || "PAYOUT",
+        type: rowType || (artifactKey === "m02-settlement" ? "DSP_PAYOUT" : "PAYOUT"),
       });
     }
 
@@ -435,7 +501,8 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
 
   metrics.transactionCount =
     round(sumColumn(headers, rows, ["transaction_count", "#_txns", "# txns"])) || rows.length;
-  metrics.orderCount = round(sumColumn(headers, rows, ["order_count", "menu_item_count"])) || rows.length;
+  metrics.orderCount =
+    round(sumColumn(headers, rows, ["order_count", "menu_item_count", "order count"])) || rows.length;
 
   if (artifactKey.includes("bank")) {
     metrics.basisAmount = 0;
@@ -448,7 +515,80 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     metrics.depositAmount = 0;
   }
 
+  const monetaryMetricKeys: Array<keyof UploadMetrics> = [
+    "adjustmentAmount",
+    "basisAmount",
+    "deliveryFeeAmount",
+    "depositAmount",
+    "errorChargeAmount",
+    "feeAmount",
+    "interchangeFeeAmount",
+    "marketingFeeAmount",
+    "mcCreditAmount",
+    "mcCreditFeeAmount",
+    "mcDebitAmount",
+    "mcDebitFeeAmount",
+    "otherFeeAmount",
+    "payoutAmount",
+    "serviceFeeAmount",
+    "taxRemittedAmount",
+    "tipAmount",
+    "visaCreditAmount",
+    "visaCreditFeeAmount",
+    "visaDebitAmount",
+    "visaDebitFeeAmount",
+  ];
+  for (const key of monetaryMetricKeys) {
+    const value = metrics[key];
+    if (typeof value === "number") {
+      (metrics as Record<string, unknown>)[key] = roundTo2(value);
+    }
+  }
+
   return metrics;
+}
+
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    const next = text[index + 1];
+
+    if (character === '"') {
+      if (quoted && next === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+      continue;
+    }
+
+    if (character === "," && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+      continue;
+    }
+
+    if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && next === "\n") index += 1;
+      row.push(cell.trim());
+      if (row.some((value) => value.length > 0)) rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+
+    cell += character;
+  }
+
+  row.push(cell.trim());
+  if (row.some((value) => value.length > 0)) rows.push(row);
+  return rows;
 }
 
 function readDateValue(row: string[], index: number) {
