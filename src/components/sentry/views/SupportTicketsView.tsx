@@ -128,10 +128,14 @@ export function SupportTicketsView({
   }
 
   useEffect(() => {
+    // Loading remote state on mount is the intended synchronization boundary here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadTickets();
   }, []);
 
   useEffect(() => {
+    // Initialize the form when its externally supplied location options arrive.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setForm((current) =>
       current.locationId || locations.length === 0
         ? current
@@ -457,7 +461,7 @@ export function SupportTicketsView({
               Recent tickets
             </div>
             <div className="text-sm text-[var(--muted)]">
-              Your account's latest support requests and current handling status.
+              Your account&apos;s latest support requests and current handling status.
             </div>
             {loading ? (
               <div className="text-sm text-[var(--muted)]">Loading tickets...</div>

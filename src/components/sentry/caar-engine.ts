@@ -987,7 +987,7 @@ function assessModule({
       hash: Boolean(intake?.hash || manualReady),
       key: artifact.key,
       label: artifact.label,
-      metrics: intake?.metrics,
+      metrics: intake?.hash && intake.schema && intake.fields ? intake.metrics : undefined,
       schema: Boolean(intake?.schema || manualReady),
       type: artifact.type,
       updatedAt: intake?.updatedAt,
@@ -1411,14 +1411,14 @@ function buildLoopBResult({
 
   const findings: LoopBFinding[] = [];
 
-  for (const module of currentModules) {
-    const moduleHistory = relevantHistory.filter((entry) => entry.moduleId === module.moduleId);
+  for (const currentModule of currentModules) {
+    const moduleHistory = relevantHistory.filter((entry) => entry.moduleId === currentModule.moduleId);
     const windowSize = moduleHistory.length;
     if (windowSize === 0) {
       continue;
     }
 
-    const recoverySeries = [...moduleHistory.map((entry) => entry.recoveryValue), module.recoveryValue];
+    const recoverySeries = [...moduleHistory.map((entry) => entry.recoveryValue), currentModule.recoveryValue];
     if (
       recoverySeries.length >= 4 &&
       recoverySeries
@@ -1437,14 +1437,14 @@ function buildLoopBResult({
         detail:
           "Certified variance has increased monotonically across at least four consecutive periods and may indicate a stable recoverable pattern.",
         impactsCertification: confidenceScore >= 0.75,
-        moduleId: module.moduleId,
+        moduleId: currentModule.moduleId,
         patternCode: "VARIANCE_TREND_ASCENDING",
         ruleId: confidenceScore >= 0.85 && trustScore >= 85 ? "R163" : "R154",
       });
     }
 
     const previousRuleIds = moduleHistory.flatMap((entry) => entry.ruleIds);
-    const recurringRuleId = module.ruleCitations
+    const recurringRuleId = currentModule.ruleCitations
       .map((citation) => citation.ruleId)
       .find((ruleId) => previousRuleIds.filter((entry) => entry === ruleId).length >= 2);
     if (recurringRuleId) {
@@ -1461,7 +1461,7 @@ function buildLoopBResult({
         confidenceScore,
         detail: `Rule ${recurringRuleId} recurred across multiple periods for the same module, suggesting a vendor-systemic error signature.`,
         impactsCertification: confidenceScore >= 0.75,
-        moduleId: module.moduleId,
+        moduleId: currentModule.moduleId,
         patternCode: "VENDOR_SYSTEMIC_PATTERN",
         ruleId: confidenceScore >= 0.85 && trustScore >= 85 ? "R163" : "R157",
       });
@@ -1474,7 +1474,7 @@ function buildLoopBResult({
       moduleHistory.reduce((sum, entry) => sum + Math.pow(entry.recoveryValue - priorAverage, 2), 0) /
       Math.max(moduleHistory.length, 1);
     const baselineDeviation = Math.sqrt(Math.max(0, squaredDrift));
-    if (module.recoveryValue > priorAverage * 1.5 && moduleHistory.length >= 3) {
+    if (currentModule.recoveryValue > priorAverage * 1.5 && moduleHistory.length >= 3) {
       const confidenceScore = round(
         Math.min(1, 0.5 + moduleHistory.length / 10),
       );
@@ -1485,7 +1485,7 @@ function buildLoopBResult({
         detail:
           "Current-period recoverable variance materially exceeds the recent certified baseline and should trigger supplemental review of prior periods.",
         impactsCertification: true,
-        moduleId: module.moduleId,
+        moduleId: currentModule.moduleId,
         patternCode: "RE_CERTIFY_REQUIRED",
         ruleId: "R159",
       });
@@ -1494,10 +1494,10 @@ function buildLoopBResult({
     if (
       moduleHistory.length >= 4 &&
       baselineDeviation > 0 &&
-      Math.abs(module.recoveryValue - priorAverage) > baselineDeviation * 1.5
+      Math.abs(currentModule.recoveryValue - priorAverage) > baselineDeviation * 1.5
     ) {
       const confidenceScore = round(
-        Math.min(1, Math.abs(module.recoveryValue - priorAverage) / Math.max(baselineDeviation * 2, 1)),
+        Math.min(1, Math.abs(currentModule.recoveryValue - priorAverage) / Math.max(baselineDeviation * 2, 1)),
       );
       findings.push({
         affectedPeriods: moduleHistory.slice(-4).map((entry) => entry.period),
@@ -1506,15 +1506,15 @@ function buildLoopBResult({
         detail:
           "Current certified error behavior falls materially outside the recent merchant baseline and should be reviewed as a cluster-style outlier pattern.",
         impactsCertification: confidenceScore >= 0.75,
-        moduleId: module.moduleId,
+        moduleId: currentModule.moduleId,
         patternCode: "CLUSTER_OUTLIER",
         ruleId: "R156",
       });
     }
 
     if (
-      module.ruleCitations.length === 0 &&
-      module.recoveryValue > 0 &&
+      currentModule.ruleCitations.length === 0 &&
+      currentModule.recoveryValue > 0 &&
       moduleHistory.length >= 2
     ) {
       const confidenceScore = round(Math.min(1, 0.55 + moduleHistory.length / 10));
@@ -1525,7 +1525,7 @@ function buildLoopBResult({
         detail:
           "Historical recovery posture persists but the current certified package does not map it to a known active canonical finding, so it is recorded as an unclassified pattern for rule-registry review.",
         impactsCertification: confidenceScore >= 0.75,
-        moduleId: module.moduleId,
+        moduleId: currentModule.moduleId,
         patternCode: "UNCLASSIFIED_PATTERN",
         ruleId: "R158",
       });

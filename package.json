@@ -12,6 +12,7 @@
     "lint": "eslint",
     "set-manager-password": "tsx scripts/set-manager-password.ts",
     "verify:caar-scenarios": "tsx scripts/verify-caar-scenarios.ts",
+    "verify": "pnpm lint && pnpm verify:caar-scenarios && pnpm verify:uber-eats-intake && pnpm verify:recovery-packs && pnpm build",
     "verify:uber-eats-intake": "tsx scripts/verify-uber-eats-intake.ts",
     "verify:recovery-packs": "tsx scripts/verify-recovery-packs.ts"
   },

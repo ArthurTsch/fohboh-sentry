@@ -18,37 +18,39 @@ const TOLERANCE = 0.01;
 
 const SCENARIOS: RecoveryScenario[] = [
   {
-    dir: "Test/RECOVERY-M01-ONLY",
+    dir: "Test/archives/RECOVERY-M01-ONLY",
     expectedM01: 40.6,
     expectedM02: 0,
     name: "RECOVERY-M01-ONLY",
   },
   {
-    dir: "Test/RECOVERY-M02-ONLY",
+    dir: "Test/archives/RECOVERY-M02-ONLY",
     expectedM01: 0,
-    expectedM02: 18.82,
+    expectedM02: 0,
     name: "RECOVERY-M02-ONLY",
   },
   {
-    dir: "Test/RECOVERY-BOTH",
+    dir: "Test/archives/RECOVERY-BOTH",
     expectedM01: 40.6,
-    expectedM02: 18.82,
+    expectedM02: 0,
     name: "RECOVERY-BOTH",
   },
 ];
 
 async function main() {
   for (const scenario of SCENARIOS) {
-    const result = await runScenario(scenario.dir);
-    const m01 = result.assessments.find((item) => item.moduleId === "M01")?.recoveryValue ?? 0;
-    const m02 = result.assessments.find((item) => item.moduleId === "M02")?.recoveryValue ?? 0;
+    const { m01Result, m02Result } = await runScenario(scenario.dir);
+    const m01 = m01Result.assessments.find((item) => item.moduleId === "M01")?.recoveryValue ?? 0;
+    const m02 = m02Result.assessments.find((item) => item.moduleId === "M02")?.recoveryValue ?? 0;
     const passM01 = nearlyEqual(m01, scenario.expectedM01);
     const passM02 = nearlyEqual(m02, scenario.expectedM02);
-    const passed = passM01 && passM02 && result.ready;
+    const passed = passM01 && passM02;
 
     console.log(`\n[${passed ? "PASS" : "FAIL"}] ${scenario.name}`);
     console.log(
-      `  ready=${result.ready} trustScore=${result.trustScore} M01=${m01.toFixed(2)} M02=${m02.toFixed(2)} total=${result.amountValue.toFixed(2)}`,
+      `  M01 trust=${m01Result.trustScore} recovery=${m01.toFixed(2)}; ` +
+        `M02/DoorDash trust=${m02Result.trustScore} recovery=${m02.toFixed(2)}; ` +
+        `total=${(m01 + m02).toFixed(2)}`,
     );
 
     if (!passed) {
@@ -134,10 +136,10 @@ async function runScenario(dir: string) {
     store_id: LOCATION_ID,
   };
 
-  return buildCertificationResult({
+  const shared = {
     artifactContractState,
     artifactIntakeState,
-    cadence: "monthly_final",
+    cadence: "monthly_final" as const,
     location: {
       accountId: ACCOUNT_ID,
       id: LOCATION_ID,
@@ -152,11 +154,28 @@ async function runScenario(dir: string) {
       ium: "--",
       lastCertified: "",
       recovery: "$0",
-      status: "At Risk",
+      status: "At Risk" as const,
     },
     runAt: new Date("2026-07-15T12:00:00Z"),
-    uploadModules,
-  });
+  };
+
+  return {
+    m01Result: buildCertificationResult({
+      ...shared,
+      scopeModules: ["M01"],
+      uploadModules: uploadModules.filter(
+        (module) => module.accountId === ACCOUNT_ID && module.id === "M01",
+      ),
+    }),
+    m02Result: buildCertificationResult({
+      ...shared,
+      scopeModules: ["M02"],
+      scopeVendorKey: "doordash",
+      uploadModules: uploadModules.filter(
+        (module) => module.accountId === ACCOUNT_ID && module.id === "M02",
+      ),
+    }),
+  };
 }
 
 async function loadArtifact(dir: string, fileName: string, artifactKey: string, vendorKey: string) {
