@@ -8,6 +8,7 @@ import type {
   UploadModule,
 } from "../types";
 import { HelpTip } from "../ui/primitives";
+import { ActionNotice, WorkflowContextBar } from "../ui/workflow-ux";
 import { getScoreBar, getTrustTone } from "../utils";
 import { findCanonicalRule, findCanonicalRuleClause, getRuntimeRuleCrosswalk } from "@/lib/mge/canonical-registry";
 
@@ -145,9 +146,10 @@ export function CaarReportModal({
   const finalReleaseScore = weeklyPreliminary ? record.trustScore : null;
   const headlineScore = preliminaryTrustScore ?? record.trustScore;
   const headlineBadge = getScoreBandLabel(headlineScore);
+  const providerName = evidenceRows.find((row) => row.vendor)?.vendor ?? null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f7f7f9]">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f7f7f9]" role="dialog" aria-modal="true" aria-label={`CAAR ${record.id}`}>
       <div className="sticky top-0 z-20 flex items-center gap-4 border-b border-[var(--border)] bg-white px-6 py-4 shadow-[0_6px_20px_rgba(0,0,0,0.05)]">
         <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
           CAAR Viewer
@@ -182,6 +184,18 @@ export function CaarReportModal({
       </div>
 
       <div className="mx-auto max-w-7xl space-y-5 px-5 py-8 lg:px-8">
+        <WorkflowContextBar
+          locationId={record.locationId}
+          locationName={record.locationName}
+          moduleId={moduleId === "M01" || moduleId === "M02" ? moduleId : null}
+          providerName={providerName}
+          period={record.period}
+        />
+        <ActionNotice title={claimReady ? "CAAR is ready for release" : "CAAR requires remediation"} tone={claimReady ? "success" : "danger"}>
+          {claimReady
+            ? `${record.amount} is backed by persisted evidence and sealed governance. ${custodyRows.filter((row) => row.status === "Hashed").length}/${custodyRows.length} custody records expose a hash.`
+            : effectiveRemediationSteps[0] ?? "Review the evidence and rule findings below before release."}
+        </ActionNotice>
         <section className="grid gap-4 rounded-[28px] border border-[var(--border)] bg-white p-6 lg:grid-cols-[1.15fr_0.85fr]">
           <div>
             <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--accent)]">
@@ -263,6 +277,8 @@ export function CaarReportModal({
                 {evidenceRows.filter((row) => row.status === "provided").length} direct-upload artifacts supported
                 <br />
                 {fieldAudit.filter((row) => row.supported).length}/{fieldAudit.length || 1} displayed CAAR fields fully backed
+                <br />
+                Evidence coverage: {coverageComplete ? "complete" : "incomplete"} | Integrity: {integrityReady ? "verified" : "action required"}
               </div>
             </div>
           </div>

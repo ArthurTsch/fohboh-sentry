@@ -1,3 +1,5 @@
+import { ActionNotice, ReadinessChecklist, WorkflowContextBar } from "../ui/workflow-ux";
+
 export function CertificationCadenceModal({
   locationId,
   locations,
@@ -32,19 +34,71 @@ export function CertificationCadenceModal({
 }) {
   const requiresVendor = selectedModules[0] === "M02";
   const canSubmit = selectedModules.length === 1 && (!requiresVendor || Boolean(selectedVendorKey));
+  const selectedModule = selectableModules.find((module) => module.moduleId === selectedModules[0]);
+  const selectedVendor = selectableVendors.find((vendor) => vendor.key === selectedVendorKey);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-2xl rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="certification-preflight-title">
+      <div className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div className="border-b border-[var(--border)] px-6 py-5">
           <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
             Certification Cadence
           </div>
-          <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
+          <div id="certification-preflight-title" className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
             {locationName}
           </div>
           <div className="mt-1 text-sm text-[var(--muted)]">
             Choose the evidence path you want to certify before the engine runs.
           </div>
+        </div>
+
+        <div className="space-y-4 border-b border-[var(--border)] bg-[var(--surface)] px-6 py-5">
+          <WorkflowContextBar
+            locationId={locationId}
+            locationName={locationName}
+            moduleId={selectedModules[0] ?? null}
+            providerName={selectedVendor?.name}
+            period="Current evidence period"
+          />
+          <div>
+            <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+              Certification preflight
+            </div>
+            <div className="mt-3">
+              <ReadinessChecklist
+                items={[
+                  {
+                    detail: selectedModule?.enabled ? "The module is enabled for this location." : "Enable this module for the location.",
+                    label: "Module configuration",
+                    ready: Boolean(selectedModule?.enabled),
+                  },
+                  {
+                    detail: requiresVendor
+                      ? selectedVendor
+                        ? `${selectedVendor.name} will be certified independently.`
+                        : "Select the delivery platform for this run."
+                      : "M01 uses the configured processor scope.",
+                    label: "Provider scope",
+                    ready: !requiresVendor || Boolean(selectedVendor),
+                  },
+                  {
+                    detail: selectedModule?.ready
+                      ? "Evidence and governance prerequisites passed."
+                      : selectedModule?.blockers[0] ?? "Select one ready module.",
+                    label: "Evidence and governance",
+                    ready: Boolean(selectedModule?.ready),
+                  },
+                ]}
+              />
+            </div>
+          </div>
+          {!canSubmit ? (
+            <ActionNotice title="Certification is blocked">
+              {selectedModule?.blockers[0] ??
+                (requiresVendor && !selectedVendor
+                  ? "Select the delivery platform to continue."
+                  : "Select exactly one ready module to continue.")}
+            </ActionNotice>
+          ) : null}
         </div>
 
         {requiresVendor ? (

@@ -242,11 +242,12 @@ export function SentryShell({
             </div>
           ))}
 
-          <div className="mb-5">
-            <div className="px-3 pb-2 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">
-              Advanced
-            </div>
-            <div className="space-y-1">
+          {session.role === "WGS Manager" || session.role === "Admin" || session.role === "SuperAdmin" ? (
+            <div className="mb-5">
+              <div className="px-3 pb-2 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--muted)]">
+                Advanced
+              </div>
+              <div className="space-y-1">
               <div
                 className={`rounded-xl ${
                   activeView === "diy" ? "bg-[rgba(214,48,49,0.08)]" : "opacity-80 hover:bg-[var(--surface)]"
@@ -266,7 +267,7 @@ export function SentryShell({
                     <span className="min-w-0 flex-1">
                       <span className="block leading-5">DIY Access</span>
                       <span className="mt-1 inline-flex rounded-full bg-[rgba(214,48,49,0.08)] px-2 py-0.5 font-[family-name:var(--font-mono)] text-[9px] font-bold uppercase tracking-[0.12em] text-[var(--accent)]">
-                        WGS Only
+                        Governance
                       </span>
                     </span>
                   </button>
@@ -290,8 +291,9 @@ export function SentryShell({
                   onClick={() => onViewChange("wgs")}
                 />
               ) : null}
+              </div>
             </div>
-          </div>
+          ) : null}
         </nav>
 
         <div className="mt-auto border-t border-[var(--border)] p-4">

@@ -22,13 +22,13 @@ export function CertificationRunModal({
   trustScore: number;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="w-full max-w-2xl rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="certification-result-title">
+      <div className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div className="border-b border-[var(--border)] px-6 py-5">
           <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
             MGE Certification Engine
           </div>
-          <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
+          <div id="certification-result-title" className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
             {locationName}
           </div>
           <div className="mt-1 text-sm text-[var(--muted)]">

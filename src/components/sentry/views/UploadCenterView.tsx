@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
 import type { RefObject } from "react";
 import { Badge } from "../ui/primitives";
+import { ActionNotice, WorkflowContextBar } from "../ui/workflow-ux";
 import type {
   IntakeState,
   LocationSourceConfig,
@@ -31,6 +32,27 @@ type PdfViewerState = {
   title: string;
   uploadId: number;
 };
+
+function getActionableUploadError(error: unknown) {
+  const message = error instanceof Error ? error.message : "Upload failed.";
+  const normalized = message.toLowerCase();
+  if (normalized.includes("eai_again") || normalized.includes("connection") || normalized.includes("network") || normalized.includes("fetch")) {
+    return "Temporary connection problem. Your file was not rejected; check the connection and retry the upload.";
+  }
+  if (normalized.includes("too large") || normalized.includes("100 mb")) {
+    return "This file exceeds the 100 MB upload limit. Export a smaller statement period and try again.";
+  }
+  if (normalized.includes("pdf") && (normalized.includes("readable") || normalized.includes("text"))) {
+    return "This PDF does not contain readable text. Download the original machine-readable statement instead of a scan.";
+  }
+  if (normalized.includes("provider") || normalized.includes("vendor")) {
+    return `This document does not match the selected provider. ${message}`;
+  }
+  if (normalized.includes("schema") || normalized.includes("column") || normalized.includes("header")) {
+    return `The provider export format needs review. ${message}`;
+  }
+  return `${message} Retry with the original file downloaded from the provider portal.`;
+}
 
 const moduleMeta = {
   M01: {
@@ -433,15 +455,22 @@ export function UploadCenterView({
         ...current,
         [uploadKey]: {
           phase: "error",
-          message:
-            error instanceof Error ? error.message : "Upload failed. Try again with the raw file export.",
+          message: getActionableUploadError(error),
         },
       }));
     }
   }
 
   return (
-    <div className="rounded-[24px] border border-[var(--border)] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
+    <div className="space-y-4">
+      <WorkflowContextBar
+        locationId={activeLocationId}
+        locationName={activeLocationName ?? "No location selected"}
+        moduleId={activeModule}
+        providerName={activeVendorNameHint}
+        period="Current evidence period"
+      />
+      <div className="rounded-[24px] border border-[var(--border)] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
       <input
         ref={fileInputRef}
         type="file"
@@ -481,16 +510,13 @@ export function UploadCenterView({
           ) : null}
         </div>
         {activeArtifactHint && activeLocationName ? (
-          <div className="mt-4 rounded-2xl border border-[rgba(214,48,49,0.16)] bg-[rgba(214,48,49,0.06)] px-4 py-3">
-            <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
-              Required Next Upload
-            </div>
-            <div className="mt-2 text-sm text-[var(--text)]">
+          <div className="mt-4">
+            <ActionNotice title="Required next upload">
               Upload the highlighted governed document for <span className="font-semibold">{activeLocationName}</span>
               {activeModuleHint ? <> in <span className="font-semibold">{activeModuleHint}</span></> : null}
               {activeVendorNameHint ? <> with <span className="font-semibold">{activeVendorNameHint}</span></> : null}
               .
-            </div>
+            </ActionNotice>
           </div>
         ) : null}
       </div>
@@ -1354,6 +1380,8 @@ export function UploadCenterView({
         </div>
       </div>
 
+      </div>
+
       {pdfViewer ? (
         <div className="fixed inset-0 z-[220] flex items-center justify-center bg-[rgba(15,23,42,0.42)] px-4 py-6">
           <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(15,23,42,0.22)]">
@@ -1617,6 +1645,8 @@ function DocumentSection({
       </div>
       {uploadState?.message ? (
         <div
+          aria-live="polite"
+          role={uploadState.phase === "error" ? "alert" : "status"}
           className={`mt-3 rounded-lg px-3 py-2 text-[12px] ${
             uploadState.phase === "error"
               ? "bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"

@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { navigation, viewMeta } from "./config";
+import { getNavigationForRole, viewMeta } from "./config";
 import {
   emptyAddLocationDraft,
   faqItems,
@@ -2598,7 +2598,7 @@ function handleCompleteOnboarding(locationId: string) {
       <SentryShell
         activeView={activeView}
         meta={meta}
-        navGroups={navigation}
+        navGroups={getNavigationForRole(effectiveSession.role)}
         onExitSupportMode={() => setSupportMode({ active: false, accountId: null, accountName: null })}
         onRunPrimaryCertification={() => {
           const selectableLocations = visibleLocations.map((location) => ({

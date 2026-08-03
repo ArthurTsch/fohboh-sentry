@@ -114,6 +114,16 @@ export const navigation = [
   },
 ];
 
+export function getNavigationForRole(role: Role) {
+  const hiddenByRole: Partial<Record<Role, ViewId[]>> = {
+    Viewer: ["billing", "log", "permissions"],
+  };
+  const hidden = new Set(hiddenByRole[role] ?? []);
+  return navigation
+    .map((group) => ({ ...group, items: group.items.filter((item) => !hidden.has(item.id)) }))
+    .filter((group) => group.items.length > 0);
+}
+
 export const roleClass: Record<Role, string> = {
   Admin: "bg-[rgba(214,48,49,0.08)] text-[var(--accent)] border border-[rgba(214,48,49,0.2)]",
   SuperAdmin:

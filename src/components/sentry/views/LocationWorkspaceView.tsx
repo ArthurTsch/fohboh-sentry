@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type {
   CaarRecord,
+  IntakeState,
   LocationRecord,
   LocationSourceConfig,
   LocationWorkflowState,
@@ -9,12 +10,14 @@ import type {
 } from "../types";
 import { LocationSourceSettingsModal } from "../overlays/LocationSourceSettingsModal";
 import { HelpTip, SectionCard } from "../ui/primitives";
+import { ActionNotice, ReadinessChecklist, WorkflowContextBar, WorkflowProgress } from "../ui/workflow-ux";
 import { formatCurrency } from "../utils";
 import { resolveVendorKey } from "../vendor-catalog";
 
 type LocationWorkspaceTab = "dashboard" | "caars" | "vault";
 
 export function LocationWorkspaceView({
+  artifactIntakeState,
   caars,
   location,
   locationSourceConfig,
@@ -30,6 +33,7 @@ export function LocationWorkspaceView({
   workspaces,
   workflow,
 }: {
+  artifactIntakeState: Record<string, IntakeState>;
   caars: CaarRecord[];
   location: LocationRecord;
   locationSourceConfig: LocationSourceConfig | null;
@@ -121,6 +125,72 @@ export function LocationWorkspaceView({
           (workspace.status === "sealed" || workspace.vault.state === "sealed"),
       ),
   );
+  const sourceTargets = configuredWorkspaceTargets.map((target) => {
+    const workspace = locationWorkspaces.find(
+      (item) =>
+        item.module === target.module &&
+        resolveVendorKey(target.module, item.vendor) === target.vendor.key,
+    );
+    const evidencePrefix = `${location.accountId}:${location.id}:${target.module}:`;
+    const evidence = Object.entries(artifactIntakeState).filter(
+      ([key]) => key.startsWith(evidencePrefix) && key.endsWith(`:${target.vendor.key}`),
+    );
+    const requiredCount = 4;
+    const readyEvidence = evidence.filter(
+      ([, intake]) => intake.uploaded && intake.hash && intake.schema && intake.fields,
+    ).length;
+    const sealed = workspace?.status === "sealed" || workspace?.vault.state === "sealed";
+    const moduleState = workflow.moduleReadiness?.[target.module];
+    return {
+      blocker: moduleState?.blockers[0] ?? null,
+      moduleId: target.module,
+      provider: target.vendor,
+      ready: Boolean(moduleState?.ready && sealed && readyEvidence >= requiredCount),
+      readyEvidence,
+      requiredCount,
+      sealed,
+    };
+  });
+  const hasConfiguredSources = sourceTargets.length > 0;
+  const allGovernanceSealed = hasConfiguredSources && sourceTargets.every((target) => target.sealed);
+  const allEvidenceReady =
+    hasConfiguredSources && sourceTargets.every((target) => target.readyEvidence >= target.requiredCount);
+  const workflowStages = [
+    {
+      detail: hasConfiguredSources ? "Providers selected" : "Select providers",
+      label: "Configure",
+      status: hasConfiguredSources ? ("complete" as const) : ("blocked" as const),
+    },
+    {
+      detail: allGovernanceSealed ? "Vaults sealed" : "Seal provider vaults",
+      label: "Govern",
+      status: allGovernanceSealed ? ("complete" as const) : ("current" as const),
+    },
+    {
+      detail: allEvidenceReady ? "Evidence ready" : "Complete required evidence",
+      label: "Upload",
+      status: allEvidenceReady
+        ? ("complete" as const)
+        : allGovernanceSealed
+          ? ("current" as const)
+          : ("pending" as const),
+    },
+    {
+      detail: workflow.blockers[0] ?? "No blockers",
+      label: "Resolve",
+      status: workflow.blockers.length === 0 ? ("complete" as const) : ("blocked" as const),
+    },
+    {
+      detail: workflow.readyForCertification ? "Ready to run" : "Waiting on prerequisites",
+      label: "Certify",
+      status: workflow.readyForCertification ? ("current" as const) : ("pending" as const),
+    },
+    {
+      detail: locationCaars.length > 0 ? `${locationCaars.length} saved` : "No report yet",
+      label: "Review CAAR",
+      status: locationCaars.length > 0 ? ("complete" as const) : ("pending" as const),
+    },
+  ];
 
   function openSealVaultWorkflow() {
     setTab("vault");
@@ -150,6 +220,16 @@ export function LocationWorkspaceView({
 
   return (
     <div className="space-y-5">
+      <WorkflowContextBar
+        locationId={location.id}
+        locationName={location.name}
+        period={
+          location.lastCertified && location.lastCertified !== "Pending"
+            ? `Last run ${location.lastCertified}`
+            : "Current period"
+        }
+      />
+      <WorkflowProgress stages={workflowStages} />
       <SectionCard className="overflow-hidden p-0">
         <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.15fr_0.85fr]">
           <div>
@@ -255,6 +335,100 @@ export function LocationWorkspaceView({
 
       {tab === "dashboard" ? (
         <div className="space-y-5">
+          <SectionCard>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+                  Provider readiness
+                </div>
+                <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
+                  Each provider keeps its own evidence, governance, certification, and CAAR scope.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpenUploads(location.id)}
+                disabled={uploadLockedByVault}
+                className="rounded-xl bg-[var(--text)] px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Open evidence intake
+              </button>
+            </div>
+            {sourceTargets.length > 0 ? (
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                {sourceTargets.map((target) => (
+                  <div
+                    key={`${target.moduleId}:${target.provider.key}`}
+                    className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
+                          {target.moduleId}
+                        </div>
+                        <div className="mt-1 text-lg font-semibold text-[var(--text)]">
+                          {target.provider.name}
+                        </div>
+                      </div>
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${
+                          target.ready
+                            ? "bg-[rgba(0,200,83,0.1)] text-[var(--success)]"
+                            : "bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"
+                        }`}
+                      >
+                        {target.ready ? "Ready" : "Action required"}
+                      </span>
+                    </div>
+                    <div className="mt-4">
+                      <ReadinessChecklist
+                        items={[
+                          {
+                            detail: target.sealed
+                              ? "Contract and schema are sealed."
+                              : "Seal this provider's contract and schema.",
+                            label: "Governance vault",
+                            ready: target.sealed,
+                          },
+                          {
+                            detail: `${target.readyEvidence}/${target.requiredCount} artifacts passed intake.`,
+                            label: "Required evidence",
+                            ready: target.readyEvidence >= target.requiredCount,
+                          },
+                          {
+                            detail: target.ready
+                              ? "This provider can be selected for certification."
+                              : target.blocker ?? "Complete the remaining requirements.",
+                            label: "Certification preflight",
+                            ready: target.ready,
+                          },
+                        ]}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-5">
+                <ActionNotice
+                  title="No providers configured"
+                  action={
+                    canManageSources ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowManageSources(true)}
+                        className="rounded-xl bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white"
+                      >
+                        Configure providers
+                      </button>
+                    ) : null
+                  }
+                >
+                  Select the card processor and delivery platforms used by this location before uploading evidence.
+                </ActionNotice>
+              </div>
+            )}
+          </SectionCard>
           <div className="grid gap-4 lg:grid-cols-4">
             <MetricCard label="Recovery" value={formatRecoveryDisplay(location.recovery)} />
             <MetricCard label="IUM" value={location.ium} />

@@ -240,6 +240,7 @@ export function SentryViewRouter({
 
     return (
       <LocationWorkspaceView
+        artifactIntakeState={artifactIntakeState}
         caars={caars}
         location={activeLocation}
         locationSourceConfig={diyLocationSourceConfigs[activeLocation.id] ?? null}
