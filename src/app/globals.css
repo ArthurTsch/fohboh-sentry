@@ -52,3 +52,23 @@ summary::-webkit-details-marker {
     transform: translateY(0);
   }
 }
+
+@keyframes certificationProgressSweep {
+  from {
+    transform: translateX(-110%);
+  }
+
+  to {
+    transform: translateX(310%);
+  }
+}
+
+.certification-progress-indeterminate {
+  animation: certificationProgressSweep 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .certification-progress-indeterminate {
+    animation-duration: 3s;
+  }
+}

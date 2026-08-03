@@ -51,6 +51,7 @@ export async function POST(request: Request) {
 
     const body = (await request.json()) as {
       cadence?: "monthly_final" | "weekly_preliminary" | null;
+      certificationMonth?: string | null;
       locationId?: string | null;
       modules?: Array<"M01" | "M02" | "M03"> | null;
       vendorKey?: string | null;
@@ -58,6 +59,7 @@ export async function POST(request: Request) {
     const locationId = body.locationId?.trim() ?? "";
     const cadence =
       body.cadence === "weekly_preliminary" ? "weekly_preliminary" : "monthly_final";
+    const certificationMonth = body.certificationMonth?.trim() ?? "";
     const modules = Array.isArray(body.modules)
       ? [
           ...new Set(
@@ -76,6 +78,18 @@ export async function POST(request: Request) {
         vendorKey: body.vendorKey ?? null,
       });
       return withRequestHeaders(NextResponse.json({ error: "locationId is required." }, { status: 400 }), requestContext);
+    }
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(certificationMonth)) {
+      return withRequestHeaders(
+        NextResponse.json({ error: "certificationMonth is required in YYYY-MM format." }, { status: 400 }),
+        requestContext,
+      );
+    }
+    if (certificationMonth > new Date().toISOString().slice(0, 7)) {
+      return withRequestHeaders(
+        NextResponse.json({ error: "The certification month cannot be in the future." }, { status: 400 }),
+        requestContext,
+      );
     }
     if (!modules || modules.length !== 1) {
       logServerEvent("certification_request_rejected", {
@@ -110,6 +124,7 @@ export async function POST(request: Request) {
 
     const result = await executePersistedCertification({
       cadence,
+      certificationMonth,
       locationId,
       modules,
       session,

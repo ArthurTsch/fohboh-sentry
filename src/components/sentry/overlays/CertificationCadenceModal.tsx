@@ -1,4 +1,20 @@
+import { useState } from "react";
 import { ActionNotice, ReadinessChecklist, WorkflowContextBar } from "../ui/workflow-ux";
+
+function getDefaultCertificationMonth() {
+  const date = new Date();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() - 1);
+  return date.toISOString().slice(0, 7);
+}
+
+function formatCertificationMonth(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  if (!year || !month) return "Select a month";
+  return new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC", year: "numeric" }).format(
+    new Date(Date.UTC(year, month - 1, 1)),
+  );
+}
 
 export function CertificationCadenceModal({
   locationId,
@@ -21,7 +37,7 @@ export function CertificationCadenceModal({
   onChangeModules?: (modules: Array<"M01" | "M02">) => void;
   onChangeVendor?: (vendorKey: string) => void;
   onClose: () => void;
-  onSubmit: (cadence: "monthly_final" | "weekly_preliminary") => void | Promise<void>;
+  onSubmit: (cadence: "monthly_final" | "weekly_preliminary", certificationMonth: string) => void | Promise<void>;
   selectedModules: Array<"M01" | "M02">;
   selectedVendorKey?: string;
   selectableModules: Array<{
@@ -32,8 +48,10 @@ export function CertificationCadenceModal({
   }>;
   selectableVendors?: Array<{ key: string; name: string }>;
 }) {
+  const [certificationMonth, setCertificationMonth] = useState(getDefaultCertificationMonth);
   const requiresVendor = selectedModules[0] === "M02";
-  const canSubmit = selectedModules.length === 1 && (!requiresVendor || Boolean(selectedVendorKey));
+  const validMonth = /^\d{4}-(0[1-9]|1[0-2])$/.test(certificationMonth);
+  const canSubmit = validMonth && selectedModules.length === 1 && (!requiresVendor || Boolean(selectedVendorKey));
   const selectedModule = selectableModules.find((module) => module.moduleId === selectedModules[0]);
   const selectedVendor = selectableVendors.find((vendor) => vendor.key === selectedVendorKey);
   return (
@@ -57,7 +75,7 @@ export function CertificationCadenceModal({
             locationName={locationName}
             moduleId={selectedModules[0] ?? null}
             providerName={selectedVendor?.name}
-            period="Current evidence period"
+            period={formatCertificationMonth(certificationMonth)}
           />
           <div>
             <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
@@ -99,6 +117,24 @@ export function CertificationCadenceModal({
                   : "Select exactly one ready module to continue.")}
             </ActionNotice>
           ) : null}
+        </div>
+
+        <div className="border-b border-[var(--border)] px-6 py-5">
+          <label htmlFor="certification-month" className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+            Certification Month
+          </label>
+          <input
+            id="certification-month"
+            type="month"
+            required
+            value={certificationMonth}
+            max={new Date().toISOString().slice(0, 7)}
+            onChange={(event) => setCertificationMonth(event.target.value)}
+            className="mt-3 w-full rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold outline-none focus:border-[var(--text)]"
+          />
+          <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+            Choose the month represented by the evidence. The previous completed month is selected by default.
+          </p>
         </div>
 
         {requiresVendor ? (
@@ -210,7 +246,7 @@ export function CertificationCadenceModal({
           <button
             type="button"
             disabled={!canSubmit}
-            onClick={() => onSubmit("weekly_preliminary")}
+            onClick={() => onSubmit("weekly_preliminary", certificationMonth)}
             className="rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5 text-left transition hover:border-[var(--text)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
@@ -227,7 +263,7 @@ export function CertificationCadenceModal({
           <button
             type="button"
             disabled={!canSubmit}
-            onClick={() => onSubmit("monthly_final")}
+            onClick={() => onSubmit("monthly_final", certificationMonth)}
             className="rounded-[24px] border border-[rgba(214,48,49,0.24)] bg-[rgba(214,48,49,0.04)] p-5 text-left transition hover:border-[var(--accent)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">

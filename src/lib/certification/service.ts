@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "crypto";
+import { createHash } from "crypto";
 import { Prisma } from "@/app/generated/prisma/client";
 import {
   buildCertificationResult,
@@ -20,6 +20,8 @@ import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
 import type { SystemHealthFlag } from "@/lib/mge/engine";
 
 const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
+const CERTIFICATION_TRANSACTION_MAX_WAIT_MS = 10_000;
+const CERTIFICATION_TRANSACTION_TIMEOUT_MS = 30_000;
 const DIMENSION_WEIGHT_BPS: Record<string, number> = {
   Auditability: 1000,
   "Cross-System Reconciliation": 2500,
@@ -213,10 +215,12 @@ function isSealedStatus(value: string | null | undefined) {
 }
 
 function buildDeterministicRunContext({
+  certificationMonth,
   contractRows,
   schemaRows,
   uploadRows,
 }: {
+  certificationMonth: string;
   contractRows: Array<{ id: number; sealed_at: Date | null; sha256: string }>;
   schemaRows: Array<{ id: number; sealed_at: Date | null; sha256: string }>;
   uploadRows: Array<{ id: number; sha256: string; uploaded_at: Date | null }>;
@@ -228,14 +232,18 @@ function buildDeterministicRunContext({
   ].filter((value) => value > 0);
 
   const evaluationDate = new Date(Math.max(...timestamps, Date.now()));
+  const [periodYear, periodMonth] = certificationMonth.split("-").map(Number);
+  const periodDate = new Date(Date.UTC(periodYear, periodMonth - 1, 1));
   const period = new Intl.DateTimeFormat("en-US", {
     month: "long",
+    timeZone: "UTC",
     year: "numeric",
-  }).format(evaluationDate);
-  const periodToken = evaluationDate.toISOString().slice(0, 7).replace("-", "");
+  }).format(periodDate);
+  const periodToken = certificationMonth.replace("-", "");
   const inputHash = createHash("sha256")
     .update(
       JSON.stringify({
+        certificationMonth,
         contractRows: contractRows
           .map((row) => ({ id: row.id, sha256: row.sha256 }))
           .sort((left, right) => left.id - right.id),
@@ -627,17 +635,25 @@ async function getScopedRestaurant(
 
 export async function executePersistedCertification({
   cadence = "monthly_final",
+  certificationMonth,
   locationId,
   modules,
   session,
   vendorKey,
 }: {
   cadence?: "monthly_final" | "weekly_preliminary";
+  certificationMonth: string;
   locationId: string;
   modules?: Array<"M01" | "M02" | "M03">;
   session: SessionState;
   vendorKey?: string;
 }): Promise<CertificationExecutionResult> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(certificationMonth)) {
+    throw new Error("A valid certification month is required.");
+  }
+  if (certificationMonth > new Date().toISOString().slice(0, 7)) {
+    throw new Error("The certification month cannot be in the future.");
+  }
   if (typeof session.managerId !== "number") {
     throw new Error("This account is missing a database-backed manager identity.");
   }
@@ -864,6 +880,7 @@ export async function executePersistedCertification({
   }
 
   const { evaluationDate, inputHash, period, periodToken } = buildDeterministicRunContext({
+    certificationMonth,
     contractRows: scopedContractRows,
     schemaRows: scopedSchemaRows,
     uploadRows: scopedUploadRows,
@@ -871,9 +888,9 @@ export async function executePersistedCertification({
   const vendorToken = certificationVendor
     ? `-${certificationVendor.replace(/[^0-9a-z]/gi, "").toUpperCase()}`
     : "";
+  const cadenceToken = cadence === "weekly_preliminary" ? "-WEEKLY" : "";
   const caarExternalId =
-    `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${requestedModules[0]}${vendorToken}-` +
-    randomBytes(4).toString("hex").toUpperCase();
+    `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${requestedModules[0]}${vendorToken}${cadenceToken}`;
   const historicalSnapshots = buildHistoricalSnapshots(historicalRunsRaw, historicalCitations);
   const executionStartedAt = Date.now();
 
@@ -1225,6 +1242,9 @@ export async function executePersistedCertification({
       generatedCaarId: generatedCaar.id,
       runIds: nextRunIds,
     };
+  }, {
+    maxWait: CERTIFICATION_TRANSACTION_MAX_WAIT_MS,
+    timeout: CERTIFICATION_TRANSACTION_TIMEOUT_MS,
   });
 
   return {

@@ -38,6 +38,7 @@ export function ArtifactWorkflowModal({
   onFieldChange,
   onFileSelected,
   onProgressIntake,
+  uploadProgress,
   vendorName,
 }: {
   artifact: UploadArtifact;
@@ -46,8 +47,9 @@ export function ArtifactWorkflowModal({
   moduleId: "M01" | "M02";
   onClose: () => void;
   onFieldChange: (fieldId: string, value: string) => void;
-  onFileSelected: (file: File) => void;
+  onFileSelected: (file: File) => void | Promise<void>;
   onProgressIntake: () => void;
+  uploadProgress?: { fileName: string } | null;
   vendorName?: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -58,6 +60,7 @@ export function ArtifactWorkflowModal({
   const manualActionLabel = getManualActionLabel(artifact);
   const progressActionLabel = getProgressActionLabel(artifact);
   const manualSaveReady = requiredFieldIds.length > 0 && completedRequired === requiredFieldIds.length;
+  const isUploading = Boolean(uploadProgress);
   const ready = intake.uploaded && intake.hash && intake.schema && intake.fields;
   const workflowSteps = [
     {
@@ -98,13 +101,19 @@ export function ArtifactWorkflowModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="artifact-workflow-title"
+        aria-busy={isUploading}
+        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]"
+      >
         <div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-5">
           <div>
             <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
               {manualMode ? "Manual Intake Pipeline" : "Artifact Intake Pipeline"}
             </div>
-            <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
+            <div id="artifact-workflow-title" className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
               {artifact.label}
             </div>
             <div className="mt-1 text-sm text-[var(--muted)]">
@@ -114,11 +123,37 @@ export function ArtifactWorkflowModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+            disabled={isUploading}
+            className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             Close
           </button>
         </div>
+
+        {uploadProgress ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="border-b border-blue-200 bg-blue-50 px-6 py-4 text-blue-950"
+          >
+            <div className="flex items-start gap-3">
+              <span
+                aria-hidden="true"
+                className="mt-0.5 h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold">Uploading and processing document</div>
+                <div className="mt-1 truncate text-sm text-blue-800">{uploadProgress.fileName}</div>
+                <div className="mt-1 text-xs leading-5 text-blue-700">
+                  Securely storing the file, computing its integrity hash, and validating its schema. Keep this window open.
+                </div>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-blue-200">
+                  <div className="h-full w-2/3 animate-pulse rounded-full bg-blue-700" />
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="border-r border-[var(--border)] bg-[var(--surface)] p-6">
@@ -168,20 +203,22 @@ export function ArtifactWorkflowModal({
                   accept={artifact.type === "CSV" ? ".csv,text/csv" : ".pdf,application/pdf"}
                   onChange={(event) => {
                     const file = event.target.files?.[0];
-                    if (file) onFileSelected(file);
+                    if (file) void onFileSelected(file);
                   }}
                 />
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="mt-4 w-full rounded-lg bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+                  disabled={isUploading}
+                  className="mt-4 w-full rounded-lg bg-[var(--text)] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:cursor-wait disabled:opacity-60"
                 >
-                  Choose File
+                  {isUploading ? "Uploading…" : "Choose File"}
                 </button>
                 <button
                   type="button"
                   onClick={onProgressIntake}
-                  className="mt-3 w-full rounded-lg border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+                  disabled={isUploading}
+                  className="mt-3 w-full rounded-lg border border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] disabled:cursor-wait disabled:opacity-50"
                 >
                   {progressActionLabel}
                 </button>
@@ -243,15 +280,17 @@ export function ArtifactWorkflowModal({
               <button
                 type="button"
                 onClick={onProgressIntake}
-                className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)]"
+                disabled={isUploading}
+                className="rounded-lg bg-[var(--text)] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[var(--accent)] disabled:cursor-wait disabled:opacity-60"
               >
-                {progressActionLabel}
+                {isUploading ? "Processing…" : progressActionLabel}
               </button>
             ) : null}
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+              disabled={isUploading}
+              className="rounded-lg border border-[var(--border)] px-4 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Close
             </button>

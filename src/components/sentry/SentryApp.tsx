@@ -88,8 +88,10 @@ type ActiveCertificationState = {
 
 type CertificationProgressState = {
   cadence: "monthly_final" | "weekly_preliminary";
+  certificationMonth: string;
   locationName: string;
   moduleId: "M01" | "M02";
+  phase: "preparing" | "certifying" | "applying" | "refreshing";
 };
 
 type PendingCertificationRequest = {
@@ -280,6 +282,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   const [creatingWgsUser, setCreatingWgsUser] = useState(false);
   const [activeChecklist, setActiveChecklist] = useState<ActiveArtifactState | null>(null);
   const [activeArtifact, setActiveArtifact] = useState<ActiveArtifactState | null>(null);
+  const [artifactUploadProgress, setArtifactUploadProgress] = useState<{ fileName: string } | null>(null);
   const [artifactIntakeState, setArtifactIntakeState] = useState<Record<string, IntakeState>>({});
   const [artifactContractState, setArtifactContractState] = useState<Record<string, Record<string, string>>>({});
   const [activeCertification, setActiveCertification] = useState<ActiveCertificationState | null>(null);
@@ -1574,7 +1577,12 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
 
   async function handleArtifactFileSelected(file: File) {
     if (!activeArtifact) return;
-    await processArtifactFileUpload(activeArtifact, file);
+    setArtifactUploadProgress({ fileName: file.name });
+    try {
+      await processArtifactFileUpload(activeArtifact, file);
+    } finally {
+      setArtifactUploadProgress(null);
+    }
   }
 
   async function handleDirectArtifactUpload(
@@ -1615,7 +1623,12 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       vendorName: vendor?.name,
     };
     setActiveArtifact(target);
-    return processArtifactFileUpload(target, file, vendor);
+    setArtifactUploadProgress({ fileName: file.name });
+    try {
+      return await processArtifactFileUpload(target, file, vendor);
+    } finally {
+      setArtifactUploadProgress(null);
+    }
   }
 
   async function handleWorkspaceGovernedArtifactUpload(
@@ -2410,7 +2423,10 @@ function handleCompleteOnboarding(locationId: string) {
     });
   }
 
-  async function executeRunCertification(cadence: "monthly_final" | "weekly_preliminary") {
+  async function executeRunCertification(
+    cadence: "monthly_final" | "weekly_preliminary",
+    certificationMonth: string,
+  ) {
     const request = pendingCertificationRequest;
     if (!request) return;
     const location = runtimeLocationState.find((item) => item.id === request.locationId);
@@ -2439,12 +2455,16 @@ function handleCompleteOnboarding(locationId: string) {
     }
     setCertificationProgress({
       cadence,
+      certificationMonth,
       locationName: location.name,
       moduleId,
+      phase: "preparing",
     });
     setPendingCertificationRequest(null);
 
     try {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      setCertificationProgress((current) => current ? { ...current, phase: "certifying" } : current);
       const response = await fetch("/api/v1/certifications/run", {
         method: "POST",
         headers: {
@@ -2452,6 +2472,7 @@ function handleCompleteOnboarding(locationId: string) {
         },
         body: JSON.stringify({
           cadence,
+          certificationMonth,
           locationId: request.locationId,
           modules: request.selectedModules,
           vendorKey: selectedVendorKey,
@@ -2479,6 +2500,7 @@ function handleCompleteOnboarding(locationId: string) {
         return;
       }
 
+      setCertificationProgress((current) => current ? { ...current, phase: "applying" } : current);
       const { certification } = payload;
 
       updateRuntimeLocation(request.locationId, (item) => ({
@@ -2514,6 +2536,8 @@ function handleCompleteOnboarding(locationId: string) {
         steps: certification.steps,
         trustScore: certification.trustScore,
       });
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      setCertificationProgress((current) => current ? { ...current, phase: "refreshing" } : current);
       await Promise.all([syncAssignedRestaurants(), syncAssignedCaars(), syncAuditLogs()]);
       showToast(
         cadence === "weekly_preliminary"
@@ -2744,6 +2768,7 @@ function handleCompleteOnboarding(locationId: string) {
           onFieldChange={handleArtifactContractFieldChange}
           onFileSelected={handleArtifactFileSelected}
           onProgressIntake={handleProgressArtifactWorkflow}
+          uploadProgress={artifactUploadProgress}
           vendorName={activeArtifact.vendorName}
         />
       ) : null}
@@ -2904,8 +2929,10 @@ function handleCompleteOnboarding(locationId: string) {
       {certificationProgress ? (
         <CertificationProgressModal
           cadence={certificationProgress.cadence}
+          certificationMonth={certificationProgress.certificationMonth}
           locationName={certificationProgress.locationName}
           moduleId={certificationProgress.moduleId}
+          phase={certificationProgress.phase}
         />
       ) : null}
 
