@@ -48,3 +48,5 @@ next-env.d.ts
 /docs
 index.html
 public/sentry.html
+
+.vscode
