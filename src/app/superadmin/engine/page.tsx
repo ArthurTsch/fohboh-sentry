@@ -97,7 +97,7 @@ const architectureSteps = [
     step: "1",
     title: "Source Intake",
     text:
-      "The app receives raw evidence per location and per module. CSV uploads are hashed, parsed, schema-checked, and reduced into numeric metrics. PDF uploads are hashed, text-extracted when possible, and validated for workflow readiness.",
+      "The app receives raw evidence per location and governed provider scope. CSV uploads are hashed, parsed, schema-checked, and reduced into numeric metrics. PDF uploads use coordinate-aware, all-page text extraction. A bank statement is uploaded once per location and linked to each configured module/provider evidence set while remaining one stored object.",
   },
   {
     step: "2",
@@ -109,7 +109,7 @@ const architectureSteps = [
     step: "3",
     title: "Certification Gate",
     text:
-      "A certification run is blocked until the location is actually certifiable for the requested module set: onboarding complete, required uploads present, active schema sealed, active contract config sealed, and module scope resolved for the location.",
+      "A certification request selects an explicit certification month and exactly one module. M02 additionally selects one provider. The run is blocked until required uploads are present and the matching schema and contract workspace are sealed for that scope.",
   },
   {
     step: "4",
@@ -127,7 +127,7 @@ const architectureSteps = [
     step: "6",
     title: "CAAR & Persistence",
     text:
-      "The resulting CAAR includes trust score, recovery amount, findings, narrative, rule citations, cross-module and Loop B summaries, workflow state, and persistence into certification, CAAR, citation, audit, and system-health tables.",
+      "The resulting module/provider/month CAAR includes trust score, recovery amount, findings, narrative, rule citations, Loop B context, workflow state, reconciliation notes/warnings/exceptions, and persistence into certification, CAAR, citation, audit, artifact, and system-health tables.",
   },
 ];
 
@@ -158,7 +158,7 @@ const m01Artifacts = [
     format: "PDF",
     source: "Operating account bank statement",
     purpose:
-      "Monthly-final deposit reconciliation evidence tying processor payouts to the actual bank deposit trail.",
+      "Monthly-final deposit reconciliation evidence tying processor payouts to the actual bank deposit trail. The physical PDF is location-shared: one upload is parsed per configured provider and linked into each governed evidence set.",
   },
   {
     doc: "Proof Zone Sample",
@@ -196,7 +196,7 @@ const m02Artifacts = [
     format: "PDF",
     source: "Operating account bank statement",
     purpose:
-      "Monthly-final payout reconciliation evidence tying marketplace settlement payout to actual bank deposit behavior.",
+      "Monthly-final payout reconciliation evidence tying marketplace settlement payout to actual bank deposit behavior. It reuses the location-level shared bank PDF and provider-specific parsed metrics rather than requiring another upload.",
   },
 ];
 
@@ -232,23 +232,26 @@ const m03Artifacts = [
 ];
 
 const nonDocumentInputs = [
-  "Selected active modules per location: M01, M02, M03, or any valid combination. Certification now runs per selected module even when multiple modules are enabled.",
+  "Selected active modules per location. The production certification API accepts exactly one module per CAAR run even when multiple modules are enabled.",
   "Selected active source vendors per location: for example Heartland or Toast for M01, DoorDash or Uber Eats for M02, and the active royalty/franchise source for M03.",
   "Schema Registry mappings: exact native source columns bound to canonical engine fields.",
   "POS source schema governance: a representative POS CSV can be uploaded to extract headers, corrected manually, validated, and sealed as the recurring Upload Data expectation.",
   "Contract Config values: governed legal terms used by the deterministic engine across M01, M02, and M03.",
   "Location ownership, team access, and certification scope resolution.",
+  "Required certification month in YYYY-MM format. The UI defaults to the previous completed month, permits past/current months, and rejects future months.",
 ];
 
 const workflowCards = [
   {
     title: "Upload Data",
     items: [
-      "Evidence is location-specific and module-specific.",
+      "Evidence is location- and scope-specific, except the bank PDF, which is physically shared at location level and linked into module/provider scopes.",
       "Only the active source vendors for that location should appear.",
       "CSV readiness requires all four structural gates: upload, hash, schema, and fields.",
       "PDF readiness requires upload and hash, plus parser-derived usability where the workflow needs text-based validation.",
       "Saved uploads are persisted and replace the previous artifact for the same document slot when re-uploaded.",
+      "The bank statement is location-level. One physical PDF is stored, then separately parsed and linked for all configured module/provider evidence scopes.",
+      "PDF extraction reads all pages, reconstructs horizontal rows from coordinates, preserves explicit line endings, and excludes rotated scanner-control text from the reading layer.",
     ],
   },
   {
@@ -276,6 +279,16 @@ const workflowCards = [
       "A sealed workspace represents the active column mapping, governed contract values, and proof-cycle state for a given module and vendor at a given location.",
       "Certification uses the sealed state, not just whatever happens to be visible in the editor.",
       "If a workspace is not sealed, the location may upload files, but final certification remains blocked.",
+    ],
+  },
+  {
+    title: "Certification & CAAR",
+    items: [
+      "The preflight requires one module, one explicit month, and one M02 provider when applicable.",
+      "The progress UI exposes real client milestones and uses an indeterminate moving state while the atomic server certification transaction runs.",
+      "Monthly reruns for the same location/module/provider/cadence reuse a stable CAAR identity instead of creating accidental duplicates.",
+      "The CAAR separates blocking reconciliation exceptions from amber timing warnings and informational prior-period carryover notes.",
+      "Certification persistence uses a bounded 30-second transaction timeout because CAAR sealing includes database writes and artifact storage.",
     ],
   },
 ];
@@ -348,7 +361,7 @@ const trustGates = [
   {
     gate: "TG07",
     detail:
-      "Fee legitimacy and reconciliation gate. In multi-module runs it is weighted by reviewed fee volume across active modules.",
+      "Fee legitimacy and reconciliation gate. Production CAAR requests are single-module, so TG07 carries the selected module's governed reconciliation result directly. Reviewed-fee weighting remains available in the aggregate engine layer, not the current run endpoint.",
   },
   {
     gate: "TG08",
@@ -446,12 +459,12 @@ const advancedEngineBlocks = [
   },
   {
     title: "Cross-Module Rollup",
-    summary: "Location-wide aggregation across active modules.",
+    summary: "Aggregate analysis capability outside the single-module production run contract.",
     points: [
-      "Weights reviewed fee volume across active modules.",
+      "The engine can weight reviewed fee volume across active modules when it receives a composite module set.",
       "Tests module-weight imbalance and recovery-direction conflict.",
-      "Builds aggregate recovery and cross-module narrative used by the final CAAR.",
-      "Feeds workflow/manual-review decisions when modules disagree or are structurally imbalanced.",
+      "The current `/api/v1/certifications/run` contract enforces exactly one module, so each production CAAR remains independently scoped.",
+      "Cross-module summaries are analytical rollups and historical context; they do not merge M01 and M02 into one production CAAR.",
     ],
   },
   {
@@ -489,17 +502,20 @@ const systemHealthRules: RuleGroup[] = [
 
 const releaseRules = [
   "Certification can run weekly preliminary or monthly final.",
+  "Every request must include an explicit non-future certification month; the current date is never silently treated as the CAAR period.",
+  "Each production run certifies exactly one module. M02 certifies exactly one selected delivery provider.",
   "Only monthly final can pass the complete Certified CAAR release gate.",
   "Per-module readiness currently requires score >= 85 plus strong completeness, authenticity, reconciliation, and rule-integrity conditions.",
-  "Overall CAAR readiness requires every active requested module to be ready, overall trust score >= 85, and healthy system-health state.",
-  "If both modules are enabled, they can still be run separately. The app should only evaluate the requested enabled modules for that certification cycle.",
+  "CAAR readiness requires the selected module to be ready, overall trust score >= 85, TG11 PASS, and healthy system-health state.",
+  "If both M01 and M02 are enabled, they are run separately and produce independent CAARs.",
+  "Prior-period bank carryovers are informational notes; exact reference/amount matches with cross-month dates are timing warnings; missing references or amount mismatches remain blocking exceptions.",
 ];
 
 const persistenceRows = [
   {
     table: "uploads_v2",
     purpose:
-      "Stores persisted artifact uploads, vendor scope, validation summary, hash, extracted text state, and supersession chain.",
+      "Stores persisted artifact evidence links, vendor scope, validation summary, hash, extracted metrics, object key, and supersession chain. Shared bank evidence may have multiple provider links pointing to one stored PDF object.",
   },
   {
     table: "schema_registry_v2",
@@ -527,6 +543,11 @@ const persistenceRows = [
       "Stores fired deterministic rule citations with sample evidence and attributed variance.",
   },
   {
+    table: "caars_v2",
+    purpose:
+      "Stores the governed CAAR identity, selected module/provider/month scope, canonical payload and PDF object keys, seal hash, previous-hash chain, release state, and supersession metadata.",
+  },
+  {
     table: "caar_reports",
     purpose:
       "Stores the business-facing CAAR summary record used by the app and management views.",
@@ -534,7 +555,7 @@ const persistenceRows = [
   {
     table: "caar_artifacts_v2",
     purpose:
-      "Stores canonical CAAR payload blocks such as trust gates, workflow, system health, loop summaries, and recovery detail.",
+      "Stores the canonical JSON and rendered CAAR PDF artifact records, including object key, byte count, sequence, and SHA-256. The structured trust, workflow, health, and loop data lives inside the canonical payload.",
   },
   {
     table: "loop_b_findings_v2",
@@ -566,6 +587,18 @@ const codeMap = [
   {
     file: "src/lib/uploads/pdf.ts",
     detail: "PDF text extraction and document-level parser helpers used by upload persistence.",
+  },
+  {
+    file: "src/app/api/v1/uploads/route.ts",
+    detail: "Persisted upload API, shared bank evidence linking, safe replacement/removal, and scoped access enforcement.",
+  },
+  {
+    file: "src/app/api/v1/certifications/run/route.ts",
+    detail: "Production certification request contract: explicit month, exactly one module, and required M02 provider scope.",
+  },
+  {
+    file: "src/app/api/caars/route.ts",
+    detail: "CAAR list and traceability projection, including payout-to-bank exceptions, timing warnings, and prior-period notes.",
   },
   {
     file: "src/lib/mge/engine.ts",
@@ -722,8 +755,13 @@ export default async function SuperAdminEnginePage({
                 This page is the canonical SuperAdmin documentation for how the app currently works in production.
                 It documents module inputs, governance workspaces, contract sealing, deterministic certification,
                 Trust Gates, Loop B history logic, system-health rules, CAAR assembly, and database persistence.
-                The audited runtime registry now marks the canonical rule set `R001-R198` as fully implemented.
+                The audited canonical registry marks `R001-R198` as implemented. Runtime-family citation IDs are a
+                separate operational crosswalk and should not be mistaken for 198 distinct citation names firing on every run.
               </p>
+              <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-[rgba(0,163,68,0.22)] bg-[rgba(0,163,68,0.08)] px-3 py-1.5 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[#087A38]">
+                <span className="h-2 w-2 rounded-full bg-[var(--success)]" />
+                Runtime-aligned review · August 4, 2026
+              </div>
             </div>
 
             <div className="grid min-w-[300px] gap-3 sm:grid-cols-2">
@@ -735,7 +773,7 @@ export default async function SuperAdminEnginePage({
           </div>
         </section>
 
-        <section className="rounded-[32px] border border-[var(--border)] bg-white p-6 shadow-[0_20px_60px_rgba(0,0,0,0.05)]">
+        <section className="sticky top-4 z-20 rounded-[32px] border border-[var(--border)] bg-white/95 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.08)] backdrop-blur">
           <div className="flex flex-col gap-6 border-b border-[var(--border)] pb-6 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
@@ -876,7 +914,7 @@ function ModulesInputsSection() {
         <ModuleCard
           moduleId="M03"
           title="Royalty Recovery"
-          summary="Royalty and franchise-fee certification against the sealed royalty agreement and governed basis evidence."
+          summary="Royalty and franchise-fee engine support against sealed agreement and basis evidence. The audited runtime exists, but the current tenant certification UI exposes M01 and M02 selection only."
           artifacts={m03Artifacts}
         />
       </div>
@@ -1040,10 +1078,10 @@ function DeterministicEngineSection({
               label="Registry-only canonical gaps"
             />
           </div>
-          <div className="mt-4 rounded-2xl border border-[rgba(214,48,49,0.16)] bg-white p-4 text-sm leading-7 text-[var(--muted)]">
-            The production engine still does not execute all canonical `R001-R198` rules one-by-one. The audited
-            split is now shown directly here: rules with direct runtime branches, rules only covered through
-            grouped aliases, and rules that still exist only in the canonical registry.
+          <div className="mt-4 rounded-2xl border border-[rgba(0,163,68,0.2)] bg-[rgba(0,163,68,0.05)] p-4 text-sm leading-7 text-[var(--muted)]">
+            Canonical coverage and runtime citation naming are different views of the same engine. The audited registry
+            reports all 198 canonical controls implemented. The runtime crosswalk below groups those controls into the
+            citation families emitted by live executions; a smaller runtime-family count is not a canonical coverage gap.
           </div>
         </div>
 
@@ -1278,7 +1316,7 @@ function CodeMapSection() {
             </div>
             <div className="mt-3 space-y-2 text-sm leading-7 text-[var(--muted)]">
               <div>- Final Trust Score is derived from Trust Gates rather than a loose narrative score.</div>
-              <div>- TG07 is special because multi-module runs weight it by reviewed fee volume.</div>
+              <div>- TG07 carries the selected module result in the production single-module run path; aggregate engine callers may use reviewed-fee weighting.</div>
               <div>- TG11 is the composite release gate computed from the pre-TG11 weighted gate score.</div>
               <div>- System-health penalties are applied after gate scoring.</div>
             </div>
