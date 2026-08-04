@@ -71,6 +71,8 @@ export function CaarReportModal({
   const fieldAudit = traceability?.fieldAudit ?? [];
   const passedRuleCitations = traceability?.passedRuleCitations ?? [];
   const reconciliationExceptions = traceability?.reconciliationExceptions ?? [];
+  const reconciliationNotes = traceability?.reconciliationNotes ?? [];
+  const reconciliationWarnings = traceability?.reconciliationWarnings ?? [];
   const ruleCitations = traceability?.ruleCitations ?? [];
   const hasPersistedTraceability =
     Boolean(traceability?.certRunId) &&
@@ -467,6 +469,33 @@ export function CaarReportModal({
                   className="rounded-2xl border border-[rgba(214,48,49,0.18)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]"
                 >
                   {item}
+                </div>
+              ))}
+            </div>
+          </ReportCard>
+        ) : null}
+
+        {reconciliationWarnings.length > 0 || reconciliationNotes.length > 0 ? (
+          <ReportCard
+            eyebrow="Settlement Timing Context"
+            title="Cross-period bank activity"
+            sub="Timing differences remain visible in the CAAR without being treated as missing evidence or blocking reconciliation errors."
+          >
+            <div className="space-y-3">
+              {reconciliationWarnings.map((item, index) => (
+                <div
+                  key={`reconciliation-warning:${index}`}
+                  className="rounded-2xl border border-[rgba(255,152,0,0.28)] bg-[rgba(255,152,0,0.08)] p-4 text-sm leading-7 text-[#9A5A00]"
+                >
+                  <span className="font-semibold">Timing warning: </span>{item}
+                </div>
+              ))}
+              {reconciliationNotes.map((item, index) => (
+                <div
+                  key={`reconciliation-note:${index}`}
+                  className="rounded-2xl border border-[rgba(0,97,255,0.18)] bg-[rgba(0,97,255,0.05)] p-4 text-sm leading-7 text-[var(--info)]"
+                >
+                  <span className="font-semibold">Prior-period note: </span>{item}
                 </div>
               ))}
             </div>

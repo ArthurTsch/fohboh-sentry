@@ -1312,6 +1312,26 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     if (vendor?.name ?? target.vendorName) {
       formData.set("vendorName", vendor?.name ?? target.vendorName ?? "");
     }
+    if (target.artifact.key.includes("bank")) {
+      const sourceConfig = getLocationSourceConfig(target.locationId);
+      const sharedBankTargets = ([
+        ...(sourceConfig?.m01Enabled
+          ? sourceConfig.m01Vendors.map((configuredVendor) => ({ moduleId: "M01" as const, vendor: configuredVendor }))
+          : []),
+        ...(sourceConfig?.m02Enabled
+          ? sourceConfig.m02Vendors.map((configuredVendor) => ({ moduleId: "M02" as const, vendor: configuredVendor }))
+          : []),
+      ]).map(({ moduleId, vendor: configuredVendor }) => ({
+        artifactKey:
+          resolveModuleTemplate(uploadState, target.accountId, moduleId)?.artifacts.find((artifact) =>
+            artifact.key.startsWith(moduleId === "M01" ? "m01-bank" : "m02-bank"),
+          )?.key ?? (moduleId === "M01" ? "m01-bank" : "m02-bank"),
+        moduleId,
+        vendorKey: configuredVendor.key,
+        vendorName: configuredVendor.name,
+      }));
+      formData.set("sharedBankTargets", JSON.stringify(sharedBankTargets));
+    }
 
     const response = await fetch("/api/v1/uploads", {
       method: "POST",
@@ -1319,7 +1339,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     });
 
     const payload = (await response.json().catch(() => null)) as
-      | { error?: string; upload?: PersistedUploadRecord }
+      | { error?: string; upload?: PersistedUploadRecord; uploads?: PersistedUploadRecord[] }
       | null;
 
     if (!response.ok || !payload?.upload) {
@@ -1328,7 +1348,12 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       throw new Error(message);
     }
 
-    const { receipt } = applyPersistedUpload(payload.upload, target.accountId);
+    const persistedUploads = payload.uploads?.length ? payload.uploads : [payload.upload];
+    const appliedUploads = persistedUploads.map((upload) => applyPersistedUpload(upload, target.accountId));
+    const receipt =
+      appliedUploads.find(({ receipt: candidate }) =>
+        candidate.moduleId === target.moduleId && candidate.vendorKey === (vendor?.key ?? target.vendorKey),
+      )?.receipt ?? appliedUploads[0].receipt;
     const targetLocation = runtimeLocationState.find((item) => item.id === target.locationId);
     const currentProgress = wgsOnboardingState[target.locationId] ?? createWgsOnboardingProgress();
     const uploadRecord = buildOnboardingUploadRecord(
@@ -1354,7 +1379,11 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     }
     void syncAuditLogs();
     setUploadFeedback(receipt);
-    showToast(`${receipt.fileName} uploaded and stored.`);
+    showToast(
+      persistedUploads.length > 1
+        ? `${receipt.fileName} uploaded once and linked to ${persistedUploads.length} provider evidence sets.`
+        : `${receipt.fileName} uploaded and stored.`,
+    );
     return receipt;
   }
 
@@ -1387,7 +1416,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       }),
     });
 
-    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    const payload = (await response.json().catch(() => null)) as { error?: string; removedUploadIds?: number[] } | null;
     if (!response.ok) {
       showToast(payload?.error ?? "Unable to remove the saved upload.");
       return;
@@ -1395,7 +1424,12 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
 
     setArtifactIntakeState((current) => {
       const next = { ...current };
-      delete next[intakeKey];
+      const removedUploadIds = new Set(payload?.removedUploadIds ?? [intake.uploadId!]);
+      for (const [key, value] of Object.entries(next)) {
+        if (removedUploadIds.has(value.uploadId ?? -1)) {
+          delete next[key];
+        }
+      }
       return next;
     });
 

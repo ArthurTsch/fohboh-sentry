@@ -17,6 +17,7 @@ type PdfReferenceRow = {
   externalRefId: string;
   lineText?: string;
   postedDate?: string;
+  settledDate?: string;
 };
 
 type ExtractedPdfDocument = {
@@ -31,7 +32,22 @@ type PdfParseResult = {
 
 type PdfParseOptions = {
   max?: number;
+  pagerender?: (pageData: PdfPageData) => Promise<string>;
   version?: string;
+};
+
+type PdfPageData = {
+  getTextContent: (options?: { disableCombineTextItems?: boolean; normalizeWhitespace?: boolean }) => Promise<{
+    items: PdfTextItem[];
+  }>;
+};
+
+type PdfTextItem = {
+  hasEOL?: boolean;
+  height?: number;
+  str?: string;
+  transform?: number[];
+  width?: number;
 };
 
 type PdfParseFunction = (buffer: Buffer, options?: PdfParseOptions) => Promise<PdfParseResult>;
@@ -54,6 +70,7 @@ async function loadPdfParse(): Promise<PdfParseFunction> {
 export async function extractPdfDocument(buffer: Buffer): Promise<ExtractedPdfDocument> {
   const parsePdf = await loadPdfParse();
   const candidates: PdfParseOptions[] = [
+    { max: 0, pagerender: renderPageWithLayout },
     { max: 0 },
     { max: 0, version: "v1.10.100" },
     { max: 0, version: "v1.10.88" },
@@ -68,11 +85,11 @@ export async function extractPdfDocument(buffer: Buffer): Promise<ExtractedPdfDo
     try {
       const parsed = await parsePdf(buffer, options);
       const normalized = normalizeExtractedPdfText(parsed.text || "");
-      if (normalized.length > bestText.length) {
+      if (getVisibleCharacterCount(normalized) > getVisibleCharacterCount(bestText)) {
         bestText = normalized;
         bestPageCount = parsed.numpages || bestPageCount || 1;
       }
-      if (normalized.length > 0) {
+      if (options.pagerender && normalized.length > 0) {
         break;
       }
     } catch {
@@ -94,6 +111,99 @@ export async function extractPdfDocument(buffer: Buffer): Promise<ExtractedPdfDo
   };
 }
 
+async function renderPageWithLayout(pageData: PdfPageData) {
+  const textContent = await pageData.getTextContent({
+    disableCombineTextItems: false,
+    normalizeWhitespace: false,
+  });
+  const positionedItems = textContent.items
+    .filter((item) => {
+      const transform = item.transform ?? [];
+      const horizontalScale = Math.abs(transform[0] ?? 0);
+      const verticalSkew = Math.abs(transform[1] ?? 0);
+      const horizontalSkew = Math.abs(transform[2] ?? 0);
+      const verticalScale = Math.abs(transform[3] ?? 0);
+      const rotatedVertically = verticalSkew > horizontalScale && horizontalSkew > verticalScale;
+      return !rotatedVertically;
+    })
+    .flatMap((item) => {
+      const height = Math.abs(item.height ?? item.transform?.[3] ?? 10);
+      const fragments = String(item.str ?? "").replace(/\r/g, "").split("\n");
+      return fragments.map((fragment, index) => ({
+        forceBreakAfter: index < fragments.length - 1 || Boolean(item.hasEOL),
+        height,
+        str: fragment.replace(/[ \t]+/g, " ").trim(),
+        width: fragments.length === 1 ? Math.abs(item.width ?? 0) : 0,
+        x: item.transform?.[4] ?? 0,
+        y: (item.transform?.[5] ?? 0) - index * height * 1.2,
+      }));
+    })
+    .filter((item) => item.str.length > 0)
+    .sort((left, right) => right.y - left.y || left.x - right.x);
+
+  const lines: typeof positionedItems[] = [];
+  for (const item of positionedItems) {
+    const currentLine = lines.at(-1);
+    const baseline = currentLine?.reduce((sum, entry) => sum + entry.y, 0) ?? 0;
+    const averageBaseline = currentLine?.length ? baseline / currentLine.length : item.y;
+    // Some bank PDFs report a text-item height several times larger than the
+    // visible glyphs. Keep baseline tolerance tight so adjacent transaction
+    // rows are not merged into one long date/description/amount line.
+    const tolerance = Math.max(0.6, Math.min(1.5, item.height * 0.12));
+    if (!currentLine || Math.abs(averageBaseline - item.y) > tolerance) {
+      lines.push([item]);
+    } else {
+      currentLine.push(item);
+    }
+  }
+
+  return lines
+    .flatMap((line) => splitAtExplicitLineBreaks(line.sort((left, right) => left.x - right.x)))
+    .map((line) => formatPositionedLine(line))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function splitAtExplicitLineBreaks<T extends { forceBreakAfter: boolean }>(line: T[]) {
+  const segments: T[][] = [];
+  let segment: T[] = [];
+  for (const item of line) {
+    segment.push(item);
+    if (item.forceBreakAfter) {
+      segments.push(segment);
+      segment = [];
+    }
+  }
+  if (segment.length > 0) segments.push(segment);
+  return segments;
+}
+
+function formatPositionedLine(
+  line: Array<{ height: number; str: string; width: number; x: number; y: number }>,
+) {
+  let output = "";
+  let previousEnd = line[0]?.x ?? 0;
+  let averageCharacterWidth = 5;
+
+  for (const item of line) {
+    const measuredCharacterWidth = item.width > 0 ? item.width / Math.max(1, item.str.length) : item.height * 0.5;
+    averageCharacterWidth = Math.max(2.5, Math.min(12, measuredCharacterWidth || averageCharacterWidth));
+    const gap = item.x - previousEnd;
+    if (output && gap > averageCharacterWidth * 0.35) {
+      const spaces = Math.max(1, Math.min(24, Math.round(gap / averageCharacterWidth)));
+      output += " ".repeat(spaces);
+    }
+    output += item.str;
+    previousEnd = Math.max(previousEnd, item.x + (item.width || item.str.length * averageCharacterWidth));
+  }
+
+  return output.trimEnd();
+}
+
+function getVisibleCharacterCount(value: string) {
+  return value.replace(/\s/g, "").length;
+}
+
 export async function extractPdfText(buffer: Buffer) {
   const document = await extractPdfDocument(buffer);
   return document.text;
@@ -102,6 +212,7 @@ export async function extractPdfText(buffer: Buffer) {
 export function extractPdfMetrics(
   artifactKey: string,
   text: string,
+  vendorKey?: string | null,
 ): PdfMetricExtraction {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -113,7 +224,7 @@ export function extractPdfMetrics(
   }
 
   if (artifactKey.includes("bank")) {
-    return extractBankMetrics(artifactKey, trimmed);
+    return extractBankMetrics(artifactKey, trimmed, vendorKey);
   }
 
   if (artifactKey.includes("processor")) {
@@ -177,13 +288,17 @@ function estimatePdfPageCountFromBuffer(buffer: Buffer) {
   return matches?.length || 1;
 }
 
-function extractBankMetrics(artifactKey: string, text: string): PdfMetricExtraction {
+function extractBankMetrics(artifactKey: string, text: string, vendorKey?: string | null): PdfMetricExtraction {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const toastDepositRefs = artifactKey === "m01-bank" ? extractToastBankDepositRows(lines) : [];
-  const depositMatches =
-    toastDepositRefs.length > 0 ? toastDepositRefs.map((row) => row.amount) : extractLegacyBankDepositMatches(artifactKey, lines);
+  const normalizedVendor = vendorKey?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+  const toastDepositRefs = artifactKey.startsWith("m01-bank") && (!normalizedVendor || normalizedVendor === "toast")
+    ? extractToastBankDepositRows(lines)
+    : [];
+  const depositMatches = toastDepositRefs.length > 0
+    ? toastDepositRefs.map((row) => row.amount)
+    : extractLegacyBankDepositMatches(artifactKey, lines, vendorKey);
 
-  const fallbackSummary = extractSummaryFallback(artifactKey, text);
+  const fallbackSummary = extractSummaryFallback(artifactKey, text, vendorKey);
   const depositAmount = roundCurrency(sum(depositMatches)) || fallbackSummary;
 
   if (depositAmount <= 0) {
@@ -205,11 +320,21 @@ function extractBankMetrics(artifactKey: string, text: string): PdfMetricExtract
   };
 }
 
-function extractLegacyBankDepositMatches(artifactKey: string, lines: string[]) {
-  const descriptors =
-    artifactKey === "m01-bank"
-      ? [/toast/i, /processor/i]
-      : [/uber/i, /eats/i, /doordash/i, /grubhub/i, /slice/i, /dsp/i];
+function extractLegacyBankDepositMatches(artifactKey: string, lines: string[], vendorKey?: string | null) {
+  const normalizedVendor = vendorKey?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+  const descriptors = artifactKey.startsWith("m01-bank")
+    ? normalizedVendor === "toast"
+      ? [/toast/i]
+      : normalizedVendor === "heartland"
+        ? [/heartland/i]
+        : [/toast/i, /heartland/i, /processor/i]
+    : normalizedVendor === "ubereats"
+      ? [/uber/i, /eats/i]
+      : normalizedVendor === "doordash"
+        ? [/doordash/i, /door dash/i]
+        : normalizedVendor === "grubhub"
+          ? [/grubhub/i]
+          : [/uber/i, /eats/i, /doordash/i, /door dash/i, /grubhub/i, /slice/i, /dsp/i];
   const depositMatches: number[] = [];
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -257,10 +382,26 @@ function extractToastBankDepositRows(lines: string[]): PdfReferenceRow[] {
       externalRefId: normalizeReferenceId(externalRefId),
       lineText: line,
       postedDate: extractPostedDate(line) ?? extractPostedDate(lines[index - 1] ?? ""),
+      settledDate: extractToastSettlementDate(
+        line,
+        extractPostedDate(line) ?? extractPostedDate(lines[index - 1] ?? ""),
+      ),
     });
   }
 
   return rows;
+}
+
+function extractToastSettlementDate(line: string, postedDate?: string) {
+  const match = line.match(/\bDEP\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\b/i);
+  const postedMatch = postedDate?.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match || !postedMatch) return undefined;
+  const monthNames = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const month = monthNames.indexOf(match[1].toLowerCase()) + 1;
+  const postedMonth = Number(postedMatch[1]);
+  let year = Number(postedMatch[3]);
+  if (month - postedMonth > 6) year -= 1;
+  return `${year}-${String(month).padStart(2, "0")}-${String(Number(match[2])).padStart(2, "0")}`;
 }
 
 function extractToastDepositReferenceId(line: string) {
@@ -290,18 +431,20 @@ function collectNearbyCurrencyCandidates(lines: string[], index: number) {
   return [...candidates];
 }
 
-function extractSummaryFallback(artifactKey: string, text: string) {
+function extractSummaryFallback(artifactKey: string, text: string, vendorKey?: string | null) {
+  const normalizedVendor = vendorKey?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
   const summaryPatterns =
-    artifactKey === "m01-bank"
+    artifactKey.startsWith("m01-bank")
       ? [
-          /toast(?: card processing)?[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i,
-          /processor[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i,
+          ...(normalizedVendor !== "heartland" ? [/toast(?: card processing)?[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i] : []),
+          ...(normalizedVendor !== "toast" ? [/heartland[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i] : []),
+          ...(!normalizedVendor ? [/processor[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i] : []),
         ]
       : [
-          /uber[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i,
-          /doordash[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i,
-          /grubhub[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i,
-          /slice[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i,
+          ...(!normalizedVendor || normalizedVendor === "ubereats" ? [/uber[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i] : []),
+          ...(!normalizedVendor || normalizedVendor === "doordash" ? [/doordash[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i] : []),
+          ...(!normalizedVendor || normalizedVendor === "grubhub" ? [/grubhub[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i] : []),
+          ...(!normalizedVendor || normalizedVendor === "slice" ? [/slice[\s\S]{0,80}?\$([0-9,]+\.\d{2})/i] : []),
         ];
 
   return roundCurrency(

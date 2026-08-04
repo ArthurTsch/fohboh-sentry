@@ -51,6 +51,7 @@ type UploadReferenceRow = {
   externalRefId: string;
   rowNumber?: number;
   settledDate?: string;
+  postedDate?: string;
   type?: string;
 };
 
@@ -108,7 +109,7 @@ export async function validateUploadArtifact({
     const extractedPdf = validPdf ? await extractPdfDocument(buffer) : null;
     const pageCount = extractedPdf?.pageCount ?? estimatePdfPageCount(buffer);
     const pdfText = extractedPdf?.text ?? "";
-    const pdfExtraction = validPdf ? extractPdfMetrics(artifactKey, pdfText) : { warnings: [] };
+    const pdfExtraction = validPdf ? extractPdfMetrics(artifactKey, pdfText, vendorKey) : { warnings: [] };
     const metrics = pdfExtraction.metrics;
     const fields = validPdf && resolvePdfFieldReadiness(artifactKey, metrics);
     const parseWarnings = pdfExtraction.warnings.length > 0 ? pdfExtraction.warnings : undefined;

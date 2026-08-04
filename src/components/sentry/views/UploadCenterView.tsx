@@ -627,7 +627,8 @@ export function UploadCenterView({
           <div className="mt-2 text-sm leading-7 text-[var(--muted)]">
             Reopening Upload Data shows the current saved evidence set for{" "}
             <span className="font-semibold text-[var(--text)]">{activeLocationName ?? "this location"}</span>.
-            Uploading again replaces the current file for that document slot. Removing clears only that saved artifact.
+            Uploading again replaces the current file for that document slot. The bank statement is location-level:
+            upload it once from any bank slot and Sentry links it to every configured module and provider automatically.
           </div>
         </div>
         <div className="rounded-xl border border-[rgba(214,48,49,0.18)] bg-[#2B1403] px-4 py-4 text-[#F3AE62]">
@@ -991,7 +992,7 @@ export function UploadCenterView({
                           : undefined
                       }
                       onOpenSchema={onOpenSchema}
-                      emptyTitle="Drop bank statement PDF or browse"
+                      emptyTitle="Upload shared bank statement once"
                       emptySub="PDF only | matching period"
                     />
                   </div>
@@ -1226,7 +1227,7 @@ export function UploadCenterView({
                           : undefined
                       }
                       title="4 | Bank Statement"
-                      subtitle="Matching-period bank statement for processor deposit reconciliation"
+                      subtitle="Shared location statement · automatically linked across modules and providers"
                       primaryLabel="Upload PDF"
                       onPrimary={() => {
                         if (!bankArtifactKey) return;
@@ -1266,7 +1267,7 @@ export function UploadCenterView({
                               void handleViewExtractedText({
                                 artifactKey: bankArtifactKey,
                                 fileName: bankIntake.fileName ?? "",
-                                subtitle: "Matching-period bank statement for processor deposit reconciliation",
+                                subtitle: "Shared location statement used across configured evidence sets",
                                 title: "4 | Bank Statement",
                                 uploadId: bankIntake.uploadId!,
                               })
@@ -1278,7 +1279,7 @@ export function UploadCenterView({
                           : undefined
                       }
                       onOpenSchema={onOpenSchema}
-                      emptyTitle="Drop bank statement PDF or browse"
+                      emptyTitle="Upload shared bank statement once"
                       emptySub="PDF only | matching period"
                     />
                   </div>
@@ -1430,9 +1431,13 @@ export function UploadCenterView({
                   Loading persisted extracted text for this PDF...
                 </div>
               ) : pdfViewer.text.trim() ? (
-                <pre className="whitespace-pre-wrap break-words rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-5 font-[family-name:var(--font-mono)] text-[12px] leading-6 text-[var(--text)]">
-                  {pdfViewer.text}
-                </pre>
+                <div className="min-w-max rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-5 font-[family-name:var(--font-mono)] text-[12px] leading-6 text-[var(--text)]">
+                  {pdfViewer.text.split(/\r?\n/).map((line, index) => (
+                    <div key={`${index}:${line.slice(0, 24)}`} className="min-h-6 whitespace-pre">
+                      {line || " "}
+                    </div>
+                  ))}
+                </div>
               ) : (
                 <div className="rounded-2xl border border-[rgba(255,152,0,0.3)] bg-[rgba(255,152,0,0.08)] px-5 py-5 text-sm leading-7 text-[var(--text)]">
                   No machine-readable text was extracted from this saved PDF. This usually means the document is scan-only or image-only rather than text-based.

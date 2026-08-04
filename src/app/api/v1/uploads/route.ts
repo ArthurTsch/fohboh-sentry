@@ -15,6 +15,7 @@ import {
 import { persistUploadBlob } from "@/lib/uploads/storage";
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+const DATABASE_READ_RETRY_DELAY_MS = 200;
 
 type ScopedRestaurant = {
   account_id: string | null;
@@ -46,6 +47,34 @@ function isMissingUploadSchema(error: unknown) {
   );
 }
 
+function isRetryableDatabaseConnectivityError(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : "";
+  return ["P1001", "P1002", "P1017"].includes(code) ||
+    /EAI_AGAIN|ENOTFOUND|ECONNRESET|connection pool|server has closed the connection/i.test(error.message);
+}
+
+async function retryDatabaseRead<T>(operation: () => Promise<T>) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isRetryableDatabaseConnectivityError(error)) throw error;
+    await new Promise<void>((resolve) => setTimeout(resolve, DATABASE_READ_RETRY_DELAY_MS));
+    return operation();
+  }
+}
+
+function getDatabaseUnavailableResponse() {
+  const response = NextResponse.json(
+    { error: "The database connection is temporarily unavailable. Nothing was changed; retry in a moment." },
+    { status: 503 },
+  );
+  response.headers.set("retry-after", "2");
+  return response;
+}
+
 function getMissingUploadSchemaMessage() {
   return "The production upload storage tables are not fully migrated yet. Apply the latest Prisma migrations before using persisted uploads on Vercel.";
 }
@@ -56,7 +85,7 @@ function toJsonValue(value: unknown) {
 
 async function getScopedRestaurants(session: SessionState) {
   const scopedWhere = await getScopedRestaurantWhere(session);
-  const restaurants = await prisma.restaurants.findMany({
+  const restaurants = await retryDatabaseRead(() => prisma.restaurants.findMany({
     where: {
       active: true,
       ...scopedWhere,
@@ -69,13 +98,13 @@ async function getScopedRestaurants(session: SessionState) {
       store_id: true,
       unit_id: true,
     },
-  });
+  }));
 
   let stateRows: Array<{ account_id: string | null; location_id: string; restaurant_id: number }> = [];
 
   try {
     if (restaurants.length > 0) {
-      stateRows = await prisma.restaurant_sentry_state.findMany({
+      stateRows = await retryDatabaseRead(() => prisma.restaurant_sentry_state.findMany({
         where: {
           restaurant_id: {
             in: restaurants.map((restaurant) => restaurant.id),
@@ -86,7 +115,7 @@ async function getScopedRestaurants(session: SessionState) {
           location_id: true,
           restaurant_id: true,
         },
-      });
+      }));
     }
   } catch (error) {
     if (
@@ -360,15 +389,51 @@ export async function POST(request: Request) {
       ), requestContext);
     }
 
+    const primaryTarget = { artifactKey, moduleId, vendorKey, vendorName };
+    let uploadTargets = [primaryTarget];
+    if (artifactKey.includes("bank")) {
+      try {
+        const requestedTargets = JSON.parse(String(formData.get("sharedBankTargets") ?? "[]")) as Array<{
+          artifactKey?: unknown;
+          moduleId?: unknown;
+          vendorKey?: unknown;
+          vendorName?: unknown;
+        }>;
+        const validTargets = requestedTargets
+          .filter((target) =>
+            (target.moduleId === "M01" || target.moduleId === "M02") &&
+            typeof target.artifactKey === "string" &&
+            target.artifactKey.startsWith(target.moduleId === "M01" ? "m01-bank" : "m02-bank"),
+          )
+          .map((target) => ({
+            artifactKey: String(target.artifactKey),
+            moduleId: target.moduleId as "M01" | "M02",
+            vendorKey: typeof target.vendorKey === "string" ? target.vendorKey.trim() || null : null,
+            vendorName: typeof target.vendorName === "string" ? target.vendorName.trim() || null : null,
+          }));
+        uploadTargets = [...new Map(
+          [primaryTarget, ...validTargets].map((target) => [
+            `${target.moduleId}:${target.artifactKey}:${target.vendorKey ?? "global"}`,
+            target,
+          ]),
+        ).values()];
+      } catch {
+        uploadTargets = [primaryTarget];
+      }
+    }
+
     const buffer = Buffer.from(await file.arrayBuffer());
-    const validation = await validateUploadArtifact({
-      artifactKey,
-      buffer,
-      contentType: file.type,
-      fileName: file.name,
-      vendorKey,
-      vendorName,
-    });
+    const validatedTargets = await Promise.all(uploadTargets.map(async (target) => ({
+      ...target,
+      validation: await validateUploadArtifact({
+        artifactKey: target.artifactKey,
+        buffer,
+        contentType: file.type,
+        fileName: file.name,
+        vendorKey: target.vendorKey,
+        vendorName: target.vendorName,
+      }),
+    })));
     const timestamp = Date.now();
     const objectKey = [
       String(restaurant.id),
@@ -383,80 +448,85 @@ export async function POST(request: Request) {
     });
 
     const created = await prisma.$transaction(async (tx) => {
-      const existing = await tx.uploads_v2.findFirst({
-        where: {
-          artifact_key: artifactKey,
-          location_id: restaurant.id,
-          module: moduleId,
-          superseded_by: null,
-          vendor: vendorKey,
-        },
-        orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
-        select: { id: true },
-      });
-
-      const upload = await tx.uploads_v2.create({
-        data: {
-          artifact_key: artifactKey,
-          byte_count: BigInt(buffer.byteLength),
-          file_name: file.name,
-          file_purpose: getArtifactPurpose(artifactKey),
-          location_id: restaurant.id,
-          module: moduleId,
-          page_count: validation.pageCount ?? null,
-          row_count: validation.rows ?? null,
-          s3_key: objectKey,
-          sha256: validation.hashValue,
-          uploaded_by: uploaderId,
-          validation_summary: toJsonValue(validation),
-          vendor: vendorKey,
-        },
-        select: {
-          id: true,
-        },
-      });
-
-      if (existing) {
-        await tx.uploads_v2.update({
-          where: { id: existing.id },
-          data: { superseded_by: upload.id },
+      const uploads: Array<{ id: number }> = [];
+      for (const target of validatedTargets) {
+        const existing = await tx.uploads_v2.findFirst({
+          where: {
+            artifact_key: target.artifactKey,
+            location_id: restaurant.id,
+            module: target.moduleId,
+            superseded_by: null,
+            vendor: target.vendorKey,
+          },
+          orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
+          select: { id: true },
         });
+        const upload = await tx.uploads_v2.create({
+          data: {
+            artifact_key: target.artifactKey,
+            byte_count: BigInt(buffer.byteLength),
+            file_name: file.name,
+            file_purpose: getArtifactPurpose(target.artifactKey),
+            location_id: restaurant.id,
+            module: target.moduleId,
+            page_count: target.validation.pageCount ?? null,
+            row_count: target.validation.rows ?? null,
+            s3_key: objectKey,
+            sha256: target.validation.hashValue,
+            uploaded_by: uploaderId,
+            validation_summary: toJsonValue(target.validation),
+            vendor: target.vendorKey,
+          },
+          select: { id: true },
+        });
+        uploads.push(upload);
+        if (existing) {
+          await tx.uploads_v2.update({
+            where: { id: existing.id },
+            data: { superseded_by: upload.id },
+          });
+        }
       }
 
-      await writeAuditLog(
-        {
-          action: "upload_received",
-          actorUserId: uploaderId,
-          entityId: String(upload.id),
-          entityType: "uploads_v2",
-          ipAddress: requestContext.ipAddress,
-          locationId: restaurant.id,
-          metadata: {
-            artifactKey,
-            fileName: file.name,
-            moduleId,
-            requestId: requestContext.requestId,
-            vendorKey,
-          },
-          summary: `Uploaded ${file.name} for ${restaurant.name} (${moduleId}/${artifactKey}).`,
-          userAgent: requestContext.userAgent,
+      await writeAuditLog({
+        action: "upload_received",
+        actorUserId: uploaderId,
+        entityId: uploads.map((upload) => upload.id).join(","),
+        entityType: "uploads_v2",
+        ipAddress: requestContext.ipAddress,
+        locationId: restaurant.id,
+        metadata: {
+          artifactKey,
+          evidenceLinks: validatedTargets.length,
+          fileName: file.name,
+          moduleId,
+          requestId: requestContext.requestId,
+          vendorKey,
         },
-        tx,
-      );
+        summary: validatedTargets.length > 1
+          ? `Uploaded ${file.name} once and linked it to ${validatedTargets.length} bank evidence sets for ${restaurant.name}.`
+          : `Uploaded ${file.name} for ${restaurant.name} (${moduleId}/${artifactKey}).`,
+        userAgent: requestContext.userAgent,
+      }, tx);
 
-      return upload;
+      return uploads;
+    }, {
+      maxWait: 10_000,
+      timeout: 30_000,
     });
 
+    const uploadResponses = validatedTargets.map((target, index) => buildUploadResponse({
+      artifactKey: target.artifactKey,
+      id: created[index].id,
+      accountId: restaurant.account_id,
+      locationId: restaurant.location_id,
+      locationName: restaurant.name,
+      moduleId: target.moduleId,
+      validation: target.validation,
+    }));
     return withRequestHeaders(NextResponse.json({
-      upload: buildUploadResponse({
-        artifactKey,
-        id: created.id,
-        accountId: restaurant.account_id,
-        locationId: restaurant.location_id,
-        locationName: restaurant.name,
-        moduleId,
-        validation,
-      }),
+      upload: uploadResponses[0],
+      uploads: uploadResponses,
     }), requestContext);
   } catch (error) {
     const authResponse = getAuthErrorResponse(error);
@@ -515,6 +585,7 @@ export async function DELETE(request: Request) {
           id: true,
           location_id: true,
           module: true,
+          s3_key: true,
           vendor: true,
         },
       });
@@ -534,11 +605,24 @@ export async function DELETE(request: Request) {
         );
       }
 
+      const linkedUploads = upload.artifact_key.includes("bank")
+        ? await prisma.uploads_v2.findMany({
+            where: {
+              location_id: upload.location_id,
+              s3_key: upload.s3_key,
+              superseded_by: null,
+            },
+            select: { id: true },
+          })
+        : [{ id: upload.id }];
+
       await prisma.$transaction(async (tx) => {
-        await tx.uploads_v2.update({
-          where: { id: upload.id },
-          data: { superseded_by: upload.id },
-        });
+        for (const linkedUpload of linkedUploads) {
+          await tx.uploads_v2.update({
+            where: { id: linkedUpload.id },
+            data: { superseded_by: linkedUpload.id },
+          });
+        }
 
         await writeAuditLog(
           {
@@ -561,7 +645,11 @@ export async function DELETE(request: Request) {
         );
       });
 
-      return withRequestHeaders(NextResponse.json({ ok: true, removedUploadId: upload.id }), requestContext);
+      return withRequestHeaders(NextResponse.json({
+        ok: true,
+        removedUploadId: upload.id,
+        removedUploadIds: linkedUploads.map((item) => item.id),
+      }), requestContext);
     }
 
     const locationId = String(body?.locationId ?? "").trim();
@@ -640,6 +728,13 @@ export async function DELETE(request: Request) {
         ),
         requestContext,
       );
+    }
+
+    if (isRetryableDatabaseConnectivityError(error)) {
+      logServerError("upload_delete_database_unavailable", error, {
+        requestId: requestContext.requestId,
+      });
+      return withRequestHeaders(getDatabaseUnavailableResponse(), requestContext);
     }
 
     logServerError("upload_delete_failed", error, {

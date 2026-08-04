@@ -328,7 +328,11 @@ export function LocationWorkspaceView({
               <button
                 type="button"
                 onClick={() => onRunCertification(location.id)}
-                className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
+                className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                  workflow.readyForCertification
+                    ? "border-[rgba(0,163,68,0.28)] bg-[rgba(0,163,68,0.12)] text-[#087A38] hover:border-[var(--success)] hover:bg-[rgba(0,163,68,0.18)]"
+                    : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--text)] hover:text-[var(--text)]"
+                }`}
               >
                 Run Certification
               </button>

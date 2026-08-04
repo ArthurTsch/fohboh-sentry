@@ -37,7 +37,9 @@ type ReferenceRow = {
   amount?: number;
   candidateAmounts?: number[];
   externalRefId?: string;
+  lineText?: string;
   rowNumber?: number;
+  postedDate?: string;
   settledDate?: string;
 };
 
@@ -155,9 +157,11 @@ function parseUploadMetrics(value: unknown): UploadMetricsLike | null {
 }
 
 function deriveReconciliationExceptions({
+  certificationPeriod,
   moduleId,
   uploads,
 }: {
+  certificationPeriod: string;
   moduleId: "M01" | "M02";
   uploads: Array<{
     artifact_key: string;
@@ -176,7 +180,7 @@ function deriveReconciliationExceptions({
   const posUpload = uploads.find((upload) => upload.artifact_key.endsWith("pos"));
   const bankUpload = uploads.find((upload) => upload.artifact_key.endsWith("bank"));
   if (!posUpload || !bankUpload) {
-    return [];
+    return { exceptions: [], notes: [], warnings: [] };
   }
 
   const posMetrics = parseUploadMetrics(posUpload.validation_summary);
@@ -184,10 +188,12 @@ function deriveReconciliationExceptions({
   const payoutRows = posMetrics?.payoutReferenceRows ?? [];
   const depositRows = bankMetrics?.depositReferenceRows ?? [];
   if (payoutRows.length === 0 && depositRows.length === 0) {
-    return [];
+    return { exceptions: [], notes: [], warnings: [] };
   }
 
   const exceptions: string[] = [];
+  const notes: string[] = [];
+  const warnings: string[] = [];
   const usedDepositIndexes = new Set<number>();
 
   for (const payoutRow of payoutRows) {
@@ -215,6 +221,13 @@ function deriveReconciliationExceptions({
 
     if (exactAmountMatch) {
       usedDepositIndexes.add(exactAmountMatch.index);
+      const payoutMonth = getReferenceMonth(payoutRow.settledDate);
+      const depositMonth = getReferenceMonth(getDepositSettlementDate(exactAmountMatch.depositRow));
+      if (payoutMonth && depositMonth && payoutMonth !== depositMonth) {
+        warnings.push(
+          `${moduleId} payout ID ${payoutRef} is dated ${formatReferenceMonth(payoutMonth)} in the payout export but ${formatReferenceMonth(depositMonth)} in the bank description. The reference and amount match, so this is treated as a timing warning rather than a reconciliation error.`,
+        );
+      }
       continue;
     }
 
@@ -240,12 +253,59 @@ function deriveReconciliationExceptions({
     const depositRef = normalizeReferenceId(depositRow.externalRefId);
     const depositAmount = typeof depositRow.amount === "number" ? depositRow.amount : 0;
     if (!depositRef || depositAmount <= 0) return;
-    exceptions.push(
-      `${moduleId} deposit ID ${depositRef} for ${formatAmount(depositAmount)} appears in bank statement evidence but not in the payout export.`,
-    );
+    const depositMonth = getReferenceMonth(getDepositSettlementDate(depositRow));
+    const targetMonth = getCertificationPeriodMonth(certificationPeriod);
+    if (depositMonth && targetMonth && depositMonth < targetMonth) {
+      notes.push(
+        `${moduleId} deposit ID ${depositRef} for ${formatAmount(depositAmount)} is a ${formatReferenceMonth(depositMonth)} payout posted in the ${certificationPeriod} bank statement. It is retained as prior-period carryover context and does not block certification.`,
+      );
+    } else {
+      exceptions.push(
+        `${moduleId} deposit ID ${depositRef} for ${formatAmount(depositAmount)} appears in bank statement evidence but not in the payout export.`,
+      );
+    }
   });
 
-  return [...new Set(exceptions)];
+  return {
+    exceptions: [...new Set(exceptions)],
+    notes: [...new Set(notes)],
+    warnings: [...new Set(warnings)],
+  };
+}
+
+function getDepositSettlementDate(row: ReferenceRow) {
+  if (row.settledDate) return row.settledDate;
+  const descriptorMatch = row.lineText?.match(/\bDEP\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\b/i);
+  const postedMatch = row.postedDate?.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!descriptorMatch || !postedMatch) return undefined;
+  const month = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+    .indexOf(descriptorMatch[1].toLowerCase()) + 1;
+  const postedMonth = Number(postedMatch[1]);
+  let year = Number(postedMatch[3]);
+  if (month - postedMonth > 6) year -= 1;
+  return `${year}-${String(month).padStart(2, "0")}-${String(Number(descriptorMatch[2])).padStart(2, "0")}`;
+}
+
+function getReferenceMonth(value?: string) {
+  if (!value) return null;
+  const isoMatch = value.match(/^(\d{4})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}`;
+  const usMatch = value.match(/^(\d{1,2})\/\d{1,2}\/(\d{4})$/);
+  return usMatch ? `${usMatch[2]}-${String(Number(usMatch[1])).padStart(2, "0")}` : null;
+}
+
+function getCertificationPeriodMonth(period: string) {
+  const match = period.match(/^([A-Za-z]+)\s+(\d{4})/);
+  if (!match) return null;
+  const month = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+    .indexOf(match[1].toLowerCase()) + 1;
+  return month > 0 ? `${match[2]}-${String(month).padStart(2, "0")}` : null;
+}
+
+function formatReferenceMonth(value: string) {
+  const [year, month] = value.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC", year: "numeric" })
+    .format(new Date(Date.UTC(year, month - 1, 1)));
 }
 
 function sampleSignalsProblem(sample: Record<string, unknown>) {
@@ -792,8 +852,13 @@ export async function GET(request: Request) {
           uploadLocationId && moduleId
             ? uploads.filter((upload) => upload.location_id === uploadLocationId && upload.module === moduleId)
             : [];
-        const reconciliationExceptions =
-          moduleId ? deriveReconciliationExceptions({ moduleId, uploads: moduleUploads }) : [];
+        const reconciliation = moduleId
+          ? deriveReconciliationExceptions({
+              certificationPeriod: report.period,
+              moduleId,
+              uploads: moduleUploads,
+            })
+          : { exceptions: [], notes: [], warnings: [] };
         const sealedSchema =
           persistedCaar && moduleId
             ? sealedSchemas.find((row) => row.location_id === persistedCaar.location_id && row.module === moduleId) ?? null
@@ -844,7 +909,9 @@ export async function GET(request: Request) {
             }),
             module: moduleId,
             passedRuleCitations: buildRuleCitationSummaries(passedCitations),
-            reconciliationExceptions,
+            reconciliationExceptions: reconciliation.exceptions,
+            reconciliationNotes: reconciliation.notes,
+            reconciliationWarnings: reconciliation.warnings,
             ruleCitations: buildRuleCitationSummaries(problemCitations),
             ruleSetVersion: certRun?.rule_set_version ?? null,
             sealedAt: persistedCaar?.sealed_at?.toISOString() ?? null,

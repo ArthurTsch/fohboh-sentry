@@ -112,6 +112,8 @@ export type CaarTraceability = {
   module: "M01" | "M02" | "M03" | null;
   passedRuleCitations: CaarRuleCitationSummary[];
   reconciliationExceptions: string[];
+  reconciliationNotes?: string[];
+  reconciliationWarnings?: string[];
   ruleCitations: CaarRuleCitationSummary[];
   ruleSetVersion: string | null;
   sealedAt: string | null;
