@@ -1,4 +1,13 @@
+import { useMemo, useState } from "react";
 import type { CaarRecord } from "../types";
+import {
+  CaarDateControls,
+  type CaarDateOrder,
+  getCaarPeriodKey,
+  getCaarPeriodLabel,
+  getCaarPeriodOptions,
+  organizeCaarRecords,
+} from "../ui/caar-date-controls";
 import { HelpTip, SectionCard } from "../ui/primitives";
 
 export function CaarListView({
@@ -10,6 +19,26 @@ export function CaarListView({
   onOpenCaar: (record: CaarRecord) => void;
   records: CaarRecord[];
 }) {
+  const [periodFilter, setPeriodFilter] = useState("all");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const [dateOrder, setDateOrder] = useState<CaarDateOrder>("newest");
+  const locationOptions = useMemo(
+    () => [...new Map(records.map((record) => [record.locationId, record.locationName])).entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((left, right) => left.name.localeCompare(right.name)),
+    [records],
+  );
+  const locationRecords = useMemo(
+    () => locationFilter === "all" ? records : records.filter((record) => record.locationId === locationFilter),
+    [locationFilter, records],
+  );
+  const periodOptions = useMemo(() => getCaarPeriodOptions(locationRecords), [locationRecords]);
+  const effectivePeriodFilter =
+    periodFilter === "all" || periodOptions.includes(periodFilter) ? periodFilter : "all";
+  const visibleRecords = useMemo(
+    () => organizeCaarRecords(locationRecords, effectivePeriodFilter, dateOrder),
+    [dateOrder, effectivePeriodFilter, locationRecords],
+  );
   const total = records.length;
   const certified = records.filter((record) => record.status === "Certified").length;
   const filed = Math.max(0, certified - 1);
@@ -25,6 +54,17 @@ export function CaarListView({
       </div>
 
       <SectionCard className="overflow-hidden p-0">
+        <CaarDateControls
+          count={visibleRecords.length}
+          location={locationFilter}
+          locations={locationOptions}
+          onLocationChange={setLocationFilter}
+          onOrderChange={setDateOrder}
+          onPeriodChange={setPeriodFilter}
+          order={dateOrder}
+          period={effectivePeriodFilter}
+          periods={periodOptions}
+        />
         <div className="hidden grid-cols-[140px_160px_120px_1fr_110px_140px_150px] gap-3 bg-[var(--panel-soft)] px-5 py-3 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)] lg:grid">
           <HeaderWithTip
             label="CAAR ID"
@@ -112,15 +152,25 @@ export function CaarListView({
         </div>
 
         <div>
-          {records.map((record) => {
+          {visibleRecords.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-[var(--muted)]">
+              No CAARs match the selected certification period.
+            </div>
+          ) : null}
+          {visibleRecords.map((record, index) => {
             const courtReady = record.status === "Certified";
             const sealHash = buildSealHash(record.id);
+            const periodKey = getCaarPeriodKey(record.period);
+            const previousPeriodKey = index > 0 ? getCaarPeriodKey(visibleRecords[index - 1].period) : null;
 
             return (
-              <div
-                key={record.id}
-                className="grid gap-3 border-t border-[var(--border)] px-5 py-4 first:border-t-0 lg:grid-cols-[140px_160px_120px_1fr_110px_140px_150px]"
-              >
+              <div key={record.id}>
+                {periodKey !== previousPeriodKey ? (
+                  <div className="border-t border-[var(--border)] bg-white px-5 py-3 font-[family-name:var(--font-display)] text-lg font-bold text-[var(--text)]">
+                    {getCaarPeriodLabel(periodKey)}
+                  </div>
+                ) : null}
+                <div className="grid gap-3 border-t border-[var(--border)] px-5 py-4 lg:grid-cols-[140px_160px_120px_1fr_110px_140px_150px]">
                 <span className="font-[family-name:var(--font-mono)] text-[12px] text-[var(--info)]">{record.id}</span>
                 <span className="text-[12px] text-[var(--text)]">{record.locationName}</span>
                 <span>
@@ -163,6 +213,7 @@ export function CaarListView({
                     PDF
                   </button>
                 </span>
+              </div>
               </div>
             );
           })}

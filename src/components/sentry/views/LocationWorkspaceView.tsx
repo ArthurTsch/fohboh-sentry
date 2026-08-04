@@ -10,6 +10,14 @@ import type {
 } from "../types";
 import { LocationSourceSettingsModal } from "../overlays/LocationSourceSettingsModal";
 import { HelpTip, SectionCard } from "../ui/primitives";
+import {
+  CaarDateControls,
+  type CaarDateOrder,
+  getCaarPeriodKey,
+  getCaarPeriodLabel,
+  getCaarPeriodOptions,
+  organizeCaarRecords,
+} from "../ui/caar-date-controls";
 import { ActionNotice, ReadinessChecklist, WorkflowContextBar, WorkflowProgress } from "../ui/workflow-ux";
 import { formatCurrency } from "../utils";
 import { resolveVendorKey } from "../vendor-catalog";
@@ -56,6 +64,8 @@ export function LocationWorkspaceView({
 }) {
   const [tab, setTab] = useState<LocationWorkspaceTab>("dashboard");
   const [showManageSources, setShowManageSources] = useState(false);
+  const [caarPeriodFilter, setCaarPeriodFilter] = useState("all");
+  const [caarDateOrder, setCaarDateOrder] = useState<CaarDateOrder>("newest");
   const canManageSources = role === "Admin" || role === "SuperAdmin" || role === "WGS Manager";
   const locationCaars = useMemo(() => {
     const seenCaarIds = new Set<string>();
@@ -67,6 +77,13 @@ export function LocationWorkspaceView({
       return true;
     });
   }, [caars, location.id]);
+  const caarPeriodOptions = useMemo(() => getCaarPeriodOptions(locationCaars), [locationCaars]);
+  const effectiveCaarPeriodFilter =
+    caarPeriodFilter === "all" || caarPeriodOptions.includes(caarPeriodFilter) ? caarPeriodFilter : "all";
+  const visibleLocationCaars = useMemo(
+    () => organizeCaarRecords(locationCaars, effectiveCaarPeriodFilter, caarDateOrder),
+    [caarDateOrder, effectiveCaarPeriodFilter, locationCaars],
+  );
   const locationWorkspaces = useMemo(
     () => workspaces.filter((workspace) => workspace.locationId === location.id),
     [location.id, workspaces],
@@ -583,22 +600,45 @@ export function LocationWorkspaceView({
       ) : null}
 
       {tab === "caars" ? (
-        <SectionCard>
-          <div className="mb-4 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+        <SectionCard className="overflow-hidden p-0">
+          <div className="px-5 pt-5 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
             CAARs for {location.name}
           </div>
+          <div className="mt-4">
+            <CaarDateControls
+              count={visibleLocationCaars.length}
+              onOrderChange={setCaarDateOrder}
+              onPeriodChange={setCaarPeriodFilter}
+              order={caarDateOrder}
+              period={effectiveCaarPeriodFilter}
+              periods={caarPeriodOptions}
+            />
+          </div>
           {locationCaars.length === 0 ? (
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm text-[var(--muted)]">
+            <div className="m-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm text-[var(--muted)]">
               No CAAR has been generated for this location yet.
             </div>
+          ) : visibleLocationCaars.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-[var(--muted)]">
+              No CAARs match the selected certification period.
+            </div>
           ) : (
-            <div className="space-y-3">
-              {locationCaars.map((record) => (
-                <button
+            <div>
+              {visibleLocationCaars.map((record, index) => {
+                const periodKey = getCaarPeriodKey(record.period);
+                const previousPeriodKey = index > 0 ? getCaarPeriodKey(visibleLocationCaars[index - 1].period) : null;
+                return (
+                <div key={`${record.locationId}:${record.id}`}>
+                  {periodKey !== previousPeriodKey ? (
+                    <div className="border-t border-[var(--border)] bg-white px-5 py-3 font-[family-name:var(--font-display)] text-lg font-bold text-[var(--text)]">
+                      {getCaarPeriodLabel(periodKey)}
+                    </div>
+                  ) : null}
+                  <button
                   key={`${record.locationId}:${record.id}`}
                   type="button"
                   onClick={() => onOpenCaar(record)}
-                  className="grid w-full gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--text)] md:grid-cols-[1.4fr_0.8fr_0.8fr_0.7fr]"
+                  className="grid w-full gap-3 border-t border-[var(--border)] bg-[var(--surface)] p-5 text-left transition hover:bg-white md:grid-cols-[1.4fr_0.8fr_0.8fr_0.7fr]"
                 >
                   <div>
                     <div className="font-semibold text-[var(--text)]">{record.id}</div>
@@ -623,7 +663,9 @@ export function LocationWorkspaceView({
                     <div className="mt-2 text-sm font-semibold text-[var(--text)]">{record.amount}</div>
                   </div>
                 </button>
-              ))}
+                </div>
+                );
+              })}
             </div>
           )}
         </SectionCard>
