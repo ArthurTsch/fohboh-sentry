@@ -168,7 +168,9 @@ function buildCanonicalPayload({
         );
   const ruleCitations = runRecords.flatMap((run) =>
     run.assessment.ruleCitations.map((citation) => ({
+      disposition: citation.disposition,
       fired_count: citation.firedCount,
+      module: run.module,
       rule_id: citation.ruleId,
       rule_version: citation.ruleVersion,
       sample_evidence: citation.sampleEvidence.map((sample) => ({
@@ -179,7 +181,9 @@ function buildCanonicalPayload({
     })),
   );
   const overallRuleCitations = certification.overallRuleCitations.map((citation) => ({
+    disposition: citation.disposition,
     fired_count: citation.firedCount,
+    module: "CAAR",
     rule_id: citation.ruleId,
     rule_version: citation.ruleVersion,
     sample_evidence: citation.sampleEvidence.map((sample) => ({
@@ -188,6 +192,21 @@ function buildCanonicalPayload({
     })),
     variance_cents: citation.varianceCents,
   }));
+
+  const evidenceTrace = runRecords.flatMap((run) => [
+    ...run.uploadIds.map((uploadId) => ({
+      artifact: `Upload #${uploadId}`,
+      module: run.module,
+      source: "Persisted source artifact",
+      trace: `uploads_v2#${uploadId} -> cert_runs_v2#${run.id}`,
+    })),
+    ...run.schemaRegistryIds.map((schemaId) => ({
+      artifact: `Schema #${schemaId}`,
+      module: run.module,
+      source: "Sealed schema registry",
+      trace: `schema_registry_v2#${schemaId} -> cert_runs_v2#${run.id}`,
+    })),
+  ]);
 
   return {
     attestation: {
@@ -206,6 +225,16 @@ function buildCanonicalPayload({
           ? "Variance = Actual processor fees - Expected processor fees"
           : "Variance = Actual DSP fees - Expected DSP fees",
     },
+    evidence_trace: evidenceTrace,
+    field_audit: [
+      { field: "CAAR ID", source: "Persisted CAAR record", value: record.id },
+      { field: "Module", source: "Certification run", value: runRecords[0]?.module ?? "M01" },
+      { field: "Certification Period", source: "Certification request", value: record.period },
+      { field: "Trust Score", source: "Deterministic trust engine", value: String(certification.trustScore) },
+      { field: "Certified Variance", source: "Deterministic calculation trace", value: record.amount },
+      { field: "Rule Set", source: "Locked certification run", value: certification.ruleSetVersion },
+      { field: "Seal Timestamp", source: "Immutable CAAR artifact", value: toIsoMinute(sealedAt) },
+    ],
     caar_external_id: record.id,
     certification_class: certificationClass,
     chain_of_custody: [
@@ -347,6 +376,25 @@ function buildCanonicalPayload({
     recoverable_variance_cents: Math.round(certification.amountValue * 100),
     remediation_steps: remediationSteps,
     rule_citations: [...ruleCitations, ...overallRuleCitations],
+    score_deductions: record.dimensions
+      .filter((dimension) => dimension.score < 100)
+      .map((dimension) => {
+        const weightPercent = Number.parseFloat(dimension.weight) || 0;
+        const pointsLost = weightPercent * (1 - dimension.score / 100);
+        return {
+          calculation: `${dimension.score}/100 x ${weightPercent}% = ${(weightPercent - pointsLost).toFixed(2)} earned; ${pointsLost.toFixed(2)} lost`,
+          dimension: dimension.name,
+          points_lost: Number(pointsLost.toFixed(2)),
+          score: dimension.score,
+          weight_percent: weightPercent,
+        };
+      }),
+    trust_gates: Object.entries(certification.overallTrustGates).map(([gate, result]) => ({
+      detail: result.detail,
+      gate,
+      rule_ids: result.canonicalRuleIds,
+      score: result.scorePct,
+    })),
     schema_version: "1.0",
     sealed_at: toIsoMinute(sealedAt),
     system_health: {
@@ -373,60 +421,293 @@ function buildCanonicalPayload({
   };
 }
 
-function buildTextPdfBuffer(
-  lines: string[],
+type PdfSection = { title: string; subtitle?: string; rows: string[] };
+
+function pdfSafe(value: unknown) {
+  return String(value ?? "-")
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7E]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pdfEscape(value: string) {
+  return pdfSafe(value).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function wrapPdfText(value: unknown, maxCharacters = 88) {
+  const words = pdfSafe(value).split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    if (!current) current = word;
+    else if (`${current} ${word}`.length <= maxCharacters) current += ` ${word}`;
+    else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : ["-"];
+}
+
+function buildProfessionalPdfBuffer(
+  payload: ReturnType<typeof buildCanonicalPayload>,
+  sections: PdfSection[],
   metadata: Record<string, string>,
 ) {
-  const safeLines = lines.map((line) =>
-    line.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)"),
+  const pages: string[][] = [];
+  let commands: string[] = [];
+  let y = 742;
+  const text = (value: unknown, x: number, size: number, font = "F1", color = "0.12 0.12 0.14") => {
+    commands.push(`${color} rg BT /${font} ${size} Tf ${x} ${y} Td (${pdfEscape(String(value))}) Tj ET`);
+  };
+  const pageFrame = () => {
+    commands.push("0.82 0.10 0.12 rg 0 782 612 10 re f", "0.96 0.96 0.95 rg 0 0 612 34 re f");
+    y = 762;
+    text("FOHBOH  |  CERTIFIED AUDIT & RECOVERY", 42, 7, "F2", "0.36 0.36 0.40");
+    y = 18;
+    text(`${payload.caar_external_id}  |  SEALED ${payload.sealed_at}`, 42, 7, "F1", "0.42 0.42 0.46");
+    y = 716;
+  };
+  const finishPage = () => {
+    pages.push(commands);
+    commands = [];
+    y = 716;
+    pageFrame();
+  };
+  const ensure = (height: number) => {
+    if (y - height < 50) finishPage();
+  };
+  const paragraph = (value: unknown, options?: { bold?: boolean; color?: string; indent?: number; size?: number }) => {
+    const size = options?.size ?? 9;
+    const lines = wrapPdfText(value, options?.indent ? 80 : 88);
+    ensure(lines.length * 13 + 5);
+    for (const line of lines) {
+      text(line, 48 + (options?.indent ?? 0), size, options?.bold ? "F2" : "F1", options?.color);
+      y -= 13;
+    }
+  };
+
+  pageFrame();
+  commands.push(
+    "0.055 0.09 0.15 rg 0 548 612 202 re f",
+    "0.82 0.10 0.12 rg 42 526 82 5 re f",
+    "0.93 0.94 0.95 rg 42 443 165 62 re f",
+    "0.93 0.94 0.95 rg 224 443 165 62 re f",
+    "0.93 0.94 0.95 rg 406 443 164 62 re f",
   );
-  const linesPerPage = 42;
-  const pageChunks = [];
-  for (let index = 0; index < safeLines.length; index += linesPerPage) {
-    pageChunks.push(safeLines.slice(index, index + linesPerPage));
+  y = 704;
+  text("FOHBOH  /  MGE CERTIFICATION ENGINE", 42, 8, "F2", "0.92 0.25 0.27");
+  y -= 34;
+  text("CAAR REPORT", 42, 29, "F2", "1 1 1");
+  y -= 38;
+  text(payload.module_label, 42, 15, "F1", "0.88 0.90 0.93");
+  y -= 25;
+  text(`${payload.location.name}  /  ${payload.period}`, 42, 10, "F1", "0.70 0.75 0.82");
+  y = 481;
+  text("TRUST SCORE", 55, 7, "F2", "0.42 0.44 0.48");
+  y -= 25;
+  text(`${payload.composite_trust_score} / 100`, 55, 19, "F2", "0.08 0.12 0.18");
+  y = 481;
+  text("RELEASE STATUS", 237, 7, "F2", "0.42 0.44 0.48");
+  y -= 25;
+  text(payload.court_admissible ? "CERTIFIED" : "REMEDIATION", 237, 14, "F2", payload.court_admissible ? "0.08 0.45 0.25" : "0.76 0.12 0.14");
+  y = 481;
+  text("CERTIFIED VARIANCE", 419, 7, "F2", "0.42 0.44 0.48");
+  y -= 25;
+  text(`$${(payload.recoverable_variance_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`, 419, 14, "F2", "0.08 0.12 0.18");
+  y = 408;
+  text("REPORT CONTROL", 42, 8, "F2", "0.60 0.18 0.19");
+  y -= 24;
+  const overview = [
+    ["Certification class", payload.certification_class],
+    ["CAAR identifier", payload.caar_external_id],
+    ["Rule set", payload.engine.rule_set_version],
+    ["Sealed at", payload.sealed_at],
+  ];
+  for (const [label, value] of overview) {
+    commands.push(`0.86 0.86 0.86 RG 42 ${y - 8} 528 1 re S`);
+    text(label.toUpperCase(), 42, 7, "F2", "0.45 0.45 0.49");
+    text(value, 190, 9, "F2", "0.14 0.14 0.17");
+    y -= 29;
   }
+  y -= 10;
+  paragraph(payload.limits_text, { color: "0.30 0.30 0.34" });
+  finishPage();
+
+  text("REPORT CONTENTS", 42, 20, "F2", "0.08 0.12 0.18");
+  y -= 20;
+  paragraph("A structured record of certification status, score construction, source evidence, rule findings, and attestation.", { color: "0.42 0.42 0.46" });
+  y -= 15;
+  sections.forEach((section, index) => {
+    ensure(35);
+    commands.push(`0.82 0.10 0.12 rg 42 ${y - 4} 22 22 re f`);
+    text(String(index + 1).padStart(2, "0"), 48, 8, "F2", "1 1 1");
+    text(section.title, 78, 10, "F2", "0.12 0.14 0.18");
+    commands.push(`0.87 0.87 0.87 RG 78 ${y - 11} 492 1 re S`);
+    y -= 34;
+  });
+  finishPage();
+
+  for (const [sectionIndex, section] of sections.entries()) {
+    const minimumSectionHeight = section.title.includes("MQ6 Dimensions")
+      ? 430
+      : section.title === "Current Workflow"
+        ? 340
+        : section.title.includes("Certification")
+          ? 250
+          : section.title === "Exhibit Coverage"
+            ? 300
+            : section.title === "Attestation"
+              ? 220
+              : 140;
+    ensure(minimumSectionHeight);
+    text(`SECTION ${String(sectionIndex + 1).padStart(2, "0")}`, 42, 7, "F2", "0.72 0.14 0.16");
+    y -= 25;
+    text(section.title.toUpperCase(), 42, 16, "F2", "0.08 0.12 0.18");
+    y -= 20;
+    commands.push(`0.82 0.10 0.12 rg 42 ${y + 6} 72 3 re f`);
+    y -= 7;
+    if (section.subtitle) {
+      paragraph(section.subtitle, { color: "0.42 0.42 0.46", size: 8 });
+    }
+    y -= 4;
+    const sectionRows = section.rows.length > 0 ? section.rows : ["No findings recorded for this section."];
+    for (const [rowIndex, row] of sectionRows.entries()) {
+      if (section.title.includes("MQ6 Dimensions")) {
+        const [label = "Dimension", rawScore = "0/100", badge = "REVIEW", detail = ""] = row.split(" | ");
+        const score = Math.max(0, Math.min(100, Number.parseFloat(rawScore) || 0));
+        const detailLines = wrapPdfText(detail, 78);
+        ensure(55 + detailLines.length * 11);
+        text(label.toUpperCase(), 48, 8, "F2", "0.16 0.18 0.22");
+        text(`${score}/100`, 490, 8, "F2", score >= 85 ? "0.08 0.45 0.25" : score >= 60 ? "0.78 0.48 0.08" : "0.76 0.12 0.14");
+        y -= 14;
+        commands.push(`0.89 0.90 0.91 rg 48 ${y} 430 7 re f`);
+        commands.push(`${score >= 85 ? "0.10 0.55 0.31" : score >= 60 ? "0.92 0.60 0.12" : "0.82 0.10 0.12"} rg 48 ${y} ${Math.max(3, 4.3 * score)} 7 re f`);
+        commands.push(`${score >= 85 ? "0.90 0.97 0.92" : score >= 60 ? "1 0.96 0.84" : "1 0.91 0.91"} rg 493 ${y - 3} 65 14 re f`);
+        y += 1;
+        text(badge, 506, 7, "F2", score >= 85 ? "0.08 0.45 0.25" : score >= 60 ? "0.63 0.36 0.04" : "0.72 0.10 0.12");
+        y -= 18;
+        for (const line of detailLines) {
+          text(line, 48, 7.5, "F1", "0.42 0.42 0.46");
+          y -= 11;
+        }
+        y -= 12;
+        continue;
+      }
+
+      if (section.title === "Current Workflow" && rowIndex >= 2) {
+        const [event = row, assessment = ""] = row.split(" | ");
+        ensure(47);
+        commands.push("0.82 0.10 0.12 rg " + `48 ${y - 7} 22 22 re f`);
+        text(String(rowIndex - 1).padStart(2, "0"), 54, 7, "F2", "1 1 1");
+        text(event, 82, 8.5, "F2", "0.16 0.18 0.22");
+        y -= 16;
+        paragraph(assessment, { color: "0.42 0.42 0.46", indent: 34, size: 7.5 });
+        if (rowIndex < sectionRows.length - 1) commands.push(`0.84 0.84 0.85 RG 59 ${y - 2} 1 13 re S`);
+        y -= 9;
+        continue;
+      }
+
+      if (section.title === "Score Deduction Ledger" && row.includes(" | ")) {
+        const [dimension, calculation] = row.split(" | ");
+        const lostMatch = calculation.match(/([0-9.]+) lost/i);
+        const pointsLost = lostMatch ? Number.parseFloat(lostMatch[1]) : 0;
+        ensure(48);
+        commands.push("0.98 0.94 0.94 rg " + `42 ${y - 28} 528 38 re f`, "0.82 0.10 0.12 rg " + `42 ${y - 28} 4 38 re f`);
+        text(dimension, 54, 8.5, "F2", "0.16 0.18 0.22");
+        text(`-${pointsLost.toFixed(2)} PTS`, 488, 8, "F2", "0.76 0.12 0.14");
+        y -= 16;
+        text(calculation, 54, 7.5, "F1", "0.42 0.42 0.46");
+        y -= 31;
+        continue;
+      }
+
+      if ((section.title === "Blocking Rules" || section.title === "Score-Reducing Rules") && row.includes(" | ")) {
+        const [ruleId, ...metadata] = row.split(" | ");
+        ensure(39);
+        const blockingRule = section.title === "Blocking Rules";
+        commands.push(`${blockingRule ? "1 0.90 0.90" : "1 0.96 0.84"} rg 42 ${y - 21} 68 29 re f`);
+        text(ruleId, 53, 8, "F2", blockingRule ? "0.72 0.10 0.12" : "0.62 0.36 0.04");
+        text(metadata.join("  /  "), 122, 7.5, "F1", "0.28 0.28 0.32");
+        commands.push(`0.88 0.88 0.87 RG 42 ${y - 25} 528 1 re S`);
+        y -= 38;
+        continue;
+      }
+
+      if (section.title === "Exhibit Coverage" && row.includes(" | ")) {
+        const [exhibitId, status, source, description] = row.split(" | ");
+        const verified = /SEALED|VERIFIED/i.test(status);
+        const descriptionLines = wrapPdfText(description, 60);
+        ensure(39 + descriptionLines.length * 10);
+        commands.push(`${verified ? "0.90 0.97 0.92" : "0.94 0.94 0.94"} rg 42 ${y - 20} 68 27 re f`);
+        text(exhibitId, 53, 8, "F2", verified ? "0.08 0.45 0.25" : "0.35 0.35 0.38");
+        text(source, 122, 8, "F2", "0.16 0.18 0.22");
+        text(status, 443, 7, "F2", verified ? "0.08 0.45 0.25" : "0.45 0.45 0.48");
+        y -= 15;
+        for (const line of descriptionLines) {
+          text(line, 122, 7.5, "F1", "0.42 0.42 0.46");
+          y -= 10;
+        }
+        commands.push(`0.88 0.88 0.87 RG 42 ${y - 3} 528 1 re S`);
+        y -= 13;
+        continue;
+      }
+
+      if (section.title === "Attestation" && rowIndex === 0) {
+        ensure(82);
+        commands.push(
+          "0.055 0.09 0.15 rg " + `42 ${y - 62} 528 70 re f`,
+          "0.82 0.10 0.12 RG 50 " + `${y - 54} 54 54 re S`,
+        );
+        text("SEALED", 58, 9, "F2", "0.92 0.25 0.27");
+        y -= 18;
+        text("CAAR", 60, 13, "F2", "1 1 1");
+        y += 18;
+        text("IMMUTABLE CERTIFICATION RECORD", 122, 9, "F2", "1 1 1");
+        y -= 18;
+        text(row, 122, 7.5, "F1", "0.76 0.80 0.86");
+        y -= 62;
+        continue;
+      }
+
+      const rowLines = wrapPdfText(row, 82);
+      ensure(rowLines.length * 12 + 19);
+      const boxHeight = rowLines.length * 12 + 11;
+      commands.push(
+        `0.985 0.985 0.98 rg 42 ${y - boxHeight + 7} 528 ${boxHeight} re f`,
+        `0.88 0.88 0.87 RG 42 ${y - boxHeight + 7} 528 ${boxHeight} re S`,
+        `0.82 0.10 0.12 rg 42 ${y - boxHeight + 7} 3 ${boxHeight} re f`,
+      );
+      for (const [index, line] of rowLines.entries()) {
+        text(line, 54, 8.5, index === 0 ? "F2" : "F1", index === 0 ? "0.16 0.16 0.18" : "0.30 0.30 0.34");
+        y -= 12;
+      }
+      y -= 10;
+    }
+    y -= 12;
+  }
+  if (commands.length > 0) pages.push(commands);
 
   const objects = ["<< /Type /Catalog /Pages 2 0 R >>"];
-  const pageObjectNumbers: number[] = [];
-  const contentObjectNumbers: number[] = [];
-  const fontObjectNumber = 3 + pageChunks.length * 2;
-  const infoObjectNumber = fontObjectNumber + 1;
-  const kidsRefs = pageChunks
-    .map((_, index) => `${3 + index * 2} 0 R`)
-    .join(" ");
-  objects.push(`<< /Type /Pages /Count ${pageChunks.length} /Kids [${kidsRefs}] >>`);
-
-  pageChunks.forEach((chunk, index) => {
+  const fontRegular = 3 + pages.length * 2;
+  const fontBold = fontRegular + 1;
+  const infoObjectNumber = fontBold + 1;
+  objects.push(`<< /Type /Pages /Count ${pages.length} /Kids [${pages.map((_, index) => `${3 + index * 2} 0 R`).join(" ")}] >>`);
+  pages.forEach((pageCommands, index) => {
     const pageObjectNumber = 3 + index * 2;
     const contentObjectNumber = pageObjectNumber + 1;
-    pageObjectNumbers.push(pageObjectNumber);
-    contentObjectNumbers.push(contentObjectNumber);
     const content = [
-      "BT",
-      "/F1 10 Tf",
-      "50 760 Td",
-      "13 TL",
-      ...chunk.map((line, lineIndex) => `${lineIndex === 0 ? "" : "T* " }(${line}) Tj`.trim()),
-      "ET",
+      ...pageCommands,
+      `0.42 0.42 0.46 rg BT /F1 7 Tf 530 18 Td (PAGE ${index + 1} / ${pages.length}) Tj ET`,
     ].join("\n");
-    objects.push(
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjectNumber} 0 R /Resources << /Font << /F1 ${fontObjectNumber} 0 R >> >> >>`,
-    );
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents ${contentObjectNumber} 0 R /Resources << /Font << /F1 ${fontRegular} 0 R /F2 ${fontBold} 0 R >> >> >>`);
     objects.push(`<< /Length ${Buffer.byteLength(content, "utf8")} >>\nstream\n${content}\nendstream`);
   });
-
   objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
-  const infoEntries = Object.entries(metadata)
-    .map(
-      ([key, value]) =>
-        `/${key.replace(/[^A-Za-z0-9]/g, "_")} (${value
-          .replace(/\\/g, "\\\\")
-          .replace(/\(/g, "\\(")
-          .replace(/\)/g, "\\)")})`,
-    )
-    .join(" ");
-  objects.push(`<< ${infoEntries} >>`);
-
+  objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+  objects.push(`<< ${Object.entries(metadata).map(([key, value]) => `/${key.replace(/[^A-Za-z0-9]/g, "_")} (${pdfEscape(value)})`).join(" ")} >>`);
   let pdf = "%PDF-1.4\n";
   const offsets: number[] = [];
   objects.forEach((object, index) => {
@@ -434,90 +715,55 @@ function buildTextPdfBuffer(
     pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
   });
   const xrefOffset = Buffer.byteLength(pdf, "utf8");
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += "0000000000 65535 f \n";
-  offsets.forEach((offset) => {
-    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
-  });
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.forEach((offset) => { pdf += `${String(offset).padStart(10, "0")} 00000 n \n`; });
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info ${infoObjectNumber} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
   return Buffer.from(pdf, "utf8");
 }
 
-function buildPdfLines(payload: ReturnType<typeof buildCanonicalPayload>) {
+function buildPdfSections(payload: ReturnType<typeof buildCanonicalPayload>): PdfSection[] {
   const mq6Rows = Object.entries(payload.mq6 as Record<string, { badge: string; detail: string; score_pct: number }>);
-  const lines = [
-    `Certified Automated Audit & Recovery Report`,
-    `CAAR ID: ${payload.caar_external_id}`,
-    `Module: ${payload.module_label}`,
-    `Location: ${payload.location.name}`,
-    `Period: ${payload.period}`,
-    `Trust Score: ${payload.composite_trust_score}`,
-    `Certification Class: ${payload.certification_class}`,
-    `Certified Release: ${payload.court_admissible ? "YES" : "NO"}`,
-    `Recoverable Variance Cents: ${payload.recoverable_variance_cents}`,
-    `Seal Timestamp: ${payload.sealed_at}`,
-    `Integrity Hash: ${payload.attestation.integrity_hash}`,
-    "",
-    "Report Summary",
-    ...payload.rule_citations.slice(0, 6).map(
-      (citation, index) =>
-        `${index + 1}. ${citation.rule_id} | count=${citation.fired_count} | variance=${citation.variance_cents}`,
-    ),
-    "",
-    "Deterministic Law & Findings",
-    ...payload.calculation_trace.fields.map((field) => `${field.label}: ${field.value}`),
-    `Formula: ${payload.calculation_trace.formula}`,
-    "",
-    "MQ6 Dimensions:",
-    ...mq6Rows.map(
-      ([name, dimension]) =>
-        `${name}: ${dimension.score_pct} | ${dimension.badge} | ${dimension.detail}`,
-    ),
-    "",
-    "Exhibit Registry",
-    ...payload.exhibits.map(
-      (exhibit) =>
-        `${exhibit.exhibit_id} | ${exhibit.source} | ${exhibit.status} | ${exhibit.integrity} | ${exhibit.description}`,
-    ),
-    "",
-    "Reconciliation Proof",
-    ...payload.reconciliation_proof.map(
-      (row) => `${row.control}: ${row.status} | ${row.assessment}`,
-    ),
-    "",
-    "Chain of Custody",
-    ...payload.chain_of_custody.map(
-      (row) => `${row.event}: ${row.status} | ${row.assessment}`,
-    ),
-    "",
-    "Required Remediation",
-    ...(payload.remediation_steps.length > 0
-      ? payload.remediation_steps.map((step) => `${step.step_id} | ${step.owner} | ${step.action}`)
-      : ["No remediation required."]),
-    "",
-    "Architecture Status",
-    `Loop A: ${payload.loop_a.status}`,
-    ...payload.loop_a.items,
-    `Loop B: ${payload.loop_b.status}`,
-    ...payload.loop_b.items,
-    "",
-    "Evidence & Provenance",
-    `Previous CAAR SHA256: ${payload.prev_caar_sha256 ?? "none"}`,
-    `Vault Contract Version: ${payload.vault.contract_config_version}`,
-    ...payload.vault.schema_registry_versions.map(
-      (row) => `Schema Registry | ${row.vendor} | version ${row.version}`,
-    ),
-    "",
-    "Attestation",
-    `Sealed By: ${payload.attestation.sealed_by_actor}`,
-    `Timestamp: ${payload.attestation.timestamp}`,
-    `Seal Hash: ${payload.attestation.integrity_hash}`,
-    "",
-    "Limitations",
-    payload.limitations_text,
+  const blocking = payload.rule_citations.filter((row) => row.disposition === "blocking");
+  const scoreRuleIds = new Set(payload.trust_gates.filter((gate) => gate.score < 100).flatMap((gate) => gate.rule_ids));
+  const scoreReducing = payload.rule_citations.filter((row) => row.disposition !== "blocking" && scoreRuleIds.has(row.rule_id));
+  const citationRow = (row: (typeof payload.rule_citations)[number]) =>
+    `${row.rule_id} | v${row.rule_version} | ${row.module ?? "CAAR"} | fired ${row.fired_count} time(s) | variance $${(row.variance_cents / 100).toFixed(2)}`;
+  return [
+    { title: "Current Workflow", subtitle: "The certified workflow state captured when this report was sealed.", rows: [
+      `State: ${payload.workflow.state} | Authenticated: ${payload.workflow.authenticated ? "Yes" : "No"} | Authorized: ${payload.workflow.authorized ? "Yes" : "No"}`,
+      `Dispute eligible: ${payload.workflow.dispute_eligible ? "Yes" : "No"} | Manual review required: ${payload.workflow.manual_review_required ? "Yes" : "No"}`,
+      ...payload.chain_of_custody.map((row) => `${row.event} - ${row.status} | ${row.assessment}`),
+    ] },
+    { title: `${payload.module_label} Certification`, subtitle: "Certified outcome and deterministic calculation basis.", rows: [
+      `Certification class: ${payload.certification_class} | Release: ${payload.court_admissible ? "Certified" : "Not certified"}`,
+      ...payload.calculation_trace.fields.map((field) => `${field.label}: ${field.value}`),
+      `Formula: ${payload.calculation_trace.formula}`,
+      ...payload.reconciliation_proof.map((row) => `${row.control} - ${row.status} | ${row.assessment}`),
+    ] },
+    { title: "Score Deduction Ledger", subtitle: "Every displayed deduction shows the score, weight, earned points, and points not earned.", rows: payload.score_deductions.map((row) => `${row.dimension} | ${row.calculation}`) },
+    { title: "Field Audit", subtitle: "Report fields and the persisted source used to support each value.", rows: payload.field_audit.map((row) => `${row.field}: ${row.value} | Source: ${row.source}`) },
+    { title: "Evidence Trace", subtitle: "Lineage from persisted evidence and governed schemas into the certification run.", rows: payload.evidence_trace.map((row) => `${row.module} | ${row.artifact} | ${row.source} | ${row.trace}`) },
+    { title: "Supporting Diagnostics | MQ6 Dimensions", subtitle: "The six evidence-quality dimensions that form the composite trust score.", rows: mq6Rows.map(([name, row]) => `${name.replace(/_/g, " ")} | ${row.score_pct}/100 | ${row.badge} | ${row.detail}`) },
+    { title: "Evidence & Provenance", subtitle: "Governed configuration and historical chain used by this sealed report.", rows: [
+      `Previous CAAR SHA-256: ${payload.prev_caar_sha256 ?? "None - first report in chain"}`,
+      `Vault contract version: ${payload.vault.contract_config_version}`,
+      ...payload.vault.schema_registry_versions.map((row) => `Schema registry | ${row.vendor} | version ${row.version}`),
+    ] },
+    { title: "Settlement Timing Context", subtitle: "Timing and bank tie-out requirements for the selected certification period.", rows: [
+      `Certification period: ${payload.period} | Cadence: ${String(payload.calculation_trace.fields.find((row) => row.label === "Cadence")?.value ?? "monthly_final")}`,
+      ...payload.reconciliation_proof.map((row) => `${row.control}: ${row.assessment}`),
+      ...payload.loop_b.items,
+    ] },
+    { title: "Exhibit Coverage", subtitle: "Artifacts registered with this CAAR and their integrity state.", rows: payload.exhibits.map((row) => `${row.exhibit_id} | ${row.status} / ${row.integrity} | ${row.source} | ${row.description}`) },
+    { title: "Attestation", subtitle: "Integrity statement for the immutable report artifact.", rows: [
+      `Sealed by: ${payload.attestation.sealed_by_actor} | Timestamp: ${payload.attestation.timestamp}`,
+      `Integrity hash: ${payload.attestation.integrity_hash}`,
+      `Blocking rules: ${blocking.length} | Score-reducing rules: ${scoreReducing.length}`,
+      payload.limitations_text,
+    ] },
+    { title: "Blocking Rules", subtitle: "Rules that independently prevent certified release.", rows: blocking.map(citationRow) },
+    { title: "Score-Reducing Rules", subtitle: "Rules linked to a trust gate below 100 that reduce the score without independently blocking release.", rows: scoreReducing.map(citationRow) },
   ];
-
-  return lines;
 }
 
 function normalizeCsvValue(value: string) {
@@ -730,7 +976,7 @@ export async function persistGeneratedCaar(
   };
   const canonicalBuffer = Buffer.from(stableStringify(canonicalPayload), "utf8");
   const canonicalSha = createHash("sha256").update(canonicalBuffer).digest("hex");
-  const pdfBuffer = buildTextPdfBuffer(buildPdfLines(canonicalPayload), {
+  const pdfBuffer = buildProfessionalPdfBuffer(canonicalPayload, buildPdfSections(canonicalPayload), {
     Author: "FohBoh MGE v1.0",
     CAAR_ID: record.id,
     Keywords: "caar,fohboh,mge,sealed",
