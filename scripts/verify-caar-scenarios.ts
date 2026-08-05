@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { buildCertificationResult } from "@/components/sentry/caar-engine";
+import {
+  buildCertificationResult,
+  type HistoricalCertificationSnapshot,
+} from "@/components/sentry/caar-engine";
 import { uploadModules } from "@/components/sentry/data";
 import { resolveVendorName } from "@/components/sentry/vendor-catalog";
 import { isInformationalRuleCitation } from "@/lib/mge/citation-disposition";
@@ -161,6 +164,7 @@ async function main() {
 
   await verifyM02VendorIsolation();
   await verifyM02ContractVendorNormalization();
+  await verifyLoopBPeriodDeduplication();
   verifyCitationDispositions();
   verifyCanonicalRegistryIntegrity();
   if (failures.length > 0) {
@@ -289,6 +293,8 @@ async function runVendorScenario(
   config: ScenarioConfig,
   vendor: VendorConfig,
   contractVendorKey = vendor.vendorKey,
+  history: HistoricalCertificationSnapshot[] = [],
+  period?: string,
 ) {
   const artifactIntakeState: Record<string, Awaited<ReturnType<typeof validateUploadArtifact>>> = {};
   const artifactContractState: Record<string, Record<string, string>> = {};
@@ -326,7 +332,9 @@ async function runVendorScenario(
     artifactContractState,
     artifactIntakeState,
     cadence: "monthly_final",
+    history,
     location: testLocation(vendor.moduleId),
+    period,
     runAt: new Date("2026-07-15T12:00:00Z"),
     scopeModules: [vendor.moduleId],
     scopeVendorKey: vendor.moduleId === "M02" ? vendor.vendorKey : undefined,
@@ -334,6 +342,29 @@ async function runVendorScenario(
       (module) => module.accountId === ACCOUNT_ID && module.id === vendor.moduleId,
     ),
   });
+}
+
+async function verifyLoopBPeriodDeduplication() {
+  const toast = VENDORS.find((item) => item.vendorKey === "toast")!;
+  const duplicateReruns: HistoricalCertificationSnapshot[] = [
+    { completedAt: "2026-08-01T00:00:00Z", moduleId: "M01", period: "June 2026", recoveryValue: 0, ruleIds: ["R088"], trustScore: 80 },
+    { completedAt: "2026-08-02T00:00:00Z", moduleId: "M01", period: "June 2026", recoveryValue: 0, ruleIds: ["R088"], trustScore: 82 },
+    { completedAt: "2026-08-03T00:00:00Z", moduleId: "M01", period: "July 2026", recoveryValue: 0, ruleIds: ["R088"], trustScore: 82 },
+  ];
+  const result = await runVendorScenario(
+    SCENARIOS[0],
+    toast,
+    toast.vendorKey,
+    duplicateReruns,
+    "June 2026",
+  );
+  const invalidLoopB = result.overallRuleCitations.filter((citation) =>
+    citation.ruleId === "R154" || citation.ruleId === "R157",
+  );
+  if (invalidLoopB.length > 0) {
+    throw new Error("Loop B must not treat same-period reruns or recurring informational rules as historical patterns.");
+  }
+  console.log("[PASS] Loop B deduplicates certification periods and ignores recurring informational rules.");
 }
 
 async function verifyM02ContractVendorNormalization() {

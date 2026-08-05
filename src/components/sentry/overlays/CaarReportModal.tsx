@@ -828,19 +828,30 @@ function RuleCitationCell({
   rule: CaarRuleCitationRow;
 }) {
   const tip = describeRuleCitation(rule, moduleId, evidenceRows, disposition);
+  const simpleReason = buildSimpleRuleReason(rule, disposition);
+  const useSimpleTip = disposition === "blocking_problem" || disposition === "informational";
+  const formalRule = buildFormalIfThen(rule.ruleId, tip.ruleText);
 
   return (
     <div className="flex items-center gap-2">
       <span>{rule.ruleId}</span>
       <HelpTip
-        title={`Rule Citation · ${rule.ruleId}`}
-        sections={[
-          { label: "Canonical Definition", text: tip.canonicalDefinition },
-          { label: "Rule", text: tip.ruleText },
-          { label: "Evidence", text: tip.evidence },
-        ]}
-        footerLabel="Canonical Link"
-        footerValue={tip.footer}
+        title={`${rule.ruleId} · Why this appears`}
+        sections={useSimpleTip
+          ? [
+              { label: disposition === "blocking_problem" ? "Why It Blocks" : "Why It Is Listed", text: simpleReason },
+              { label: "IF", text: formalRule.ifText },
+              { label: "THEN", text: formalRule.thenText },
+              { label: "Calculation", text: tip.calculation },
+              { label: "Proof in Documents", text: tip.evidence },
+            ]
+          : [
+              { label: "Canonical Definition", text: tip.canonicalDefinition },
+              { label: "Rule", text: tip.ruleText },
+              { label: "Evidence", text: tip.evidence },
+            ]}
+        footerLabel={useSimpleTip ? undefined : "Canonical Link"}
+        footerValue={useSimpleTip ? undefined : tip.footer}
       />
     </div>
   );
@@ -858,21 +869,81 @@ function VarianceCitationCell({
   rule: CaarRuleCitationRow;
 }) {
   const tip = describeRuleCitation(rule, moduleId, evidenceRows, disposition);
+  const useSimpleTip = disposition === "blocking_problem" || disposition === "informational";
+  const formalRule = buildFormalIfThen(rule.ruleId, tip.ruleText);
 
   return (
     <div className="flex items-center gap-2">
       <span>{rule.varianceDisplay}</span>
       <HelpTip
-        title={`Variance Detail · ${rule.ruleId}`}
-        sections={[
-          { label: "Calculation", text: tip.calculation },
-          { label: "Evidence", text: tip.evidence },
-        ]}
-        footerLabel="Sample Evidence"
-        footerValue={`${rule.sampleEvidenceCount} persisted entr${rule.sampleEvidenceCount === 1 ? "y" : "ies"}`}
+        title={`${rule.ruleId} · Why this appears`}
+        sections={useSimpleTip
+          ? [
+              { label: "Simple Explanation", text: buildSimpleRuleReason(rule, disposition) },
+              { label: "IF", text: formalRule.ifText },
+              { label: "THEN", text: formalRule.thenText },
+              { label: "Calculation", text: tip.calculation },
+              { label: "Proof in Documents", text: tip.evidence },
+            ]
+          : [
+              { label: "Calculation", text: tip.calculation },
+              { label: "Evidence", text: tip.evidence },
+            ]}
+        footerLabel={useSimpleTip ? undefined : "Sample Evidence"}
+        footerValue={useSimpleTip ? undefined : `${rule.sampleEvidenceCount} persisted entr${rule.sampleEvidenceCount === 1 ? "y" : "ies"}`}
       />
     </div>
   );
+}
+
+const SIMPLE_RULE_REASONS: Record<string, string> = {
+  R001: "The source file was received and saved for this module. This is a tracking record, not a problem.",
+  R002: "The app identified which module and provider the source belongs to. This is a tracking record, not a problem.",
+  R003: "The app selected the parser needed to read the uploaded file. This is a tracking record, not a problem.",
+  R004: "The file was read successfully and produced values the engine could use. This is a tracking record, not a problem.",
+  R088: "The proven recovery amount is below the $250 review threshold. This does not lower the score or create a claim.",
+  R116: "The required data is complete, so TG01 received its recorded score. This is a score record, not another failure.",
+  R118: "The required source files passed the authenticity checks, so TG02 received its recorded score. This is a score record, not another failure.",
+  R120: "The required vendor and contract terms were found. This is a contract-check record, not a problem.",
+  R121: "No contract expiration date shows that the contract had expired during this period. This is a tracking record, not a problem.",
+  R122: "The processor total and POS total differ by more than the allowed limit, so TG04 received its recorded score. The exact amounts appear in the Score Deduction Ledger.",
+  R126: "The app checked whether all required files cover the selected month. This record stores the resulting TG06 score.",
+  R128: "The app calculated the fee-check score from the reviewed fees and proven variance. This record stores the resulting TG07 score.",
+  R129: "The fee difference is within the allowed range. This is a passed calculation record, not a problem.",
+  R135: "The score before TG11 is below 85, so the report cannot be released as certified.",
+  R136: "The app added the weighted trust-gate points and applied any system penalty. This record stores the final score.",
+  R140: "The final score is between 80 and 84, so the report is marked Needs Remediation.",
+  R146: "The score before TG11 is below 85, so final CAAR eligibility was not unlocked.",
+  R151: "The evidence export cannot be created until the report reaches the release threshold.",
+  R178: "The report was sent to manual review because it did not pass all release checks.",
+};
+
+function buildSimpleRuleReason(rule: CaarRuleCitationRow, disposition: CitationDisposition) {
+  const known = SIMPLE_RULE_REASONS[rule.ruleId];
+  if (known) return known;
+  const rawDetail = rule.sampleEvidence.find((sample) => typeof sample.detail === "string")?.detail;
+  const detail = typeof rawDetail === "string"
+    ? rawDetail
+        .replace(/\bgoverned\b/gi, "approved")
+        .replace(/\bpersisted\b/gi, "saved")
+        .replace(/\bcomposite\b/gi, "overall")
+        .replace(/\bcertification\b/gi, "review")
+        .split(/(?<=[.!?])\s+/)[0]
+    : null;
+  if (disposition === "blocking_problem") {
+    return detail ?? "This rule is listed because a required check failed and currently blocks release.";
+  }
+  return `${detail ?? "The app completed this calculation or tracking step."} This record does not add another penalty.`;
+}
+
+function buildFormalIfThen(ruleId: string, fallback: string) {
+  const runtimeRule = RUNTIME_RULE_MAP.get(ruleId);
+  const canonicalId = runtimeRule?.canonicalRuleIds[0] ?? ruleId;
+  const clause = findCanonicalRuleClause(canonicalId);
+  return {
+    ifText: clause?.ifCondition?.trim() || fallback || "The engine evaluates the saved evidence required by this rule.",
+    thenText: clause?.thenAction?.trim() || runtimeRule?.note || "The engine records the result and applies any required score or release effect.",
+  };
 }
 
 function isWeeklyPreliminaryRecord(record: CaarRecord, ruleSetVersion: string | null) {

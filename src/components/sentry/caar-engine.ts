@@ -281,8 +281,10 @@ export function buildCertificationResult({
     100,
   );
   const crossModule = buildCrossModuleSummary(activeModules);
+  const resolvedPeriod = period ?? `${MONTH_NAMES[evaluationDate.getUTCMonth()]} ${evaluationDate.getUTCFullYear()}`;
   const loopB = buildLoopBResult({
     cadence,
+    currentPeriod: resolvedPeriod,
     currentModules: activeModules,
     history,
     trustScore,
@@ -297,7 +299,6 @@ export function buildCertificationResult({
     roundMoney(activeModules.reduce((sum, module) => sum + module.recoveryValue, 0)),
   );
   const stamp = evaluationDate.toISOString().replace(/[-:TZ.]/g, "").slice(2, 14);
-  const resolvedPeriod = period ?? `${MONTH_NAMES[evaluationDate.getUTCMonth()]} ${evaluationDate.getUTCFullYear()}`;
   const record: CaarRecord = {
     accountId: location.accountId,
     amount: formatCurrency(amountValue),
@@ -576,7 +577,7 @@ function buildOverallCanonicalRuleCitations({
     if (!hasRecertify) {
       citations.push(
         buildOverallCitation("R159", {
-          detail: "Loop B re-certification trigger evaluated and did not require a mandatory historical recertification path.",
+          detail: `No dedicated R159 baseline-deviation trigger was promoted. Overall Loop B status: ${loopB.status}.`,
           status: loopB.status,
         }),
       );
@@ -1003,7 +1004,7 @@ function assessModule({
       label: artifact.label,
       metrics: intake?.hash && intake.schema && intake.fields ? intake.metrics : undefined,
       schema: Boolean(intake?.schema || manualReady),
-      type: artifact.type,
+      type: inferArtifactType(intake?.fileName, artifact.type),
       updatedAt: intake?.updatedAt,
       uploaded: Boolean(intake?.uploaded || manualReady),
     };
@@ -1059,6 +1060,16 @@ function resolveArtifactIntake(
       return rightReady - leftReady;
     });
   return matches[0] ?? null;
+}
+
+function inferArtifactType(
+  fileName: string | undefined,
+  fallback: "CSV" | "PDF" | "Manual Entry",
+) {
+  const normalized = fileName?.trim().toLowerCase() ?? "";
+  if (normalized.endsWith(".pdf")) return "PDF" as const;
+  if (normalized.endsWith(".csv")) return "CSV" as const;
+  return fallback;
 }
 
 function resolveContractValues(
@@ -1402,11 +1413,13 @@ function buildCrossModuleSummary(modules: ModuleAssessment[]): CrossModuleSummar
 
 function buildLoopBResult({
   cadence,
+  currentPeriod,
   currentModules,
   history,
   trustScore,
 }: {
   cadence: "monthly_final" | "weekly_preliminary";
+  currentPeriod: string;
   currentModules: ModuleAssessment[];
   history: HistoricalCertificationSnapshot[];
   trustScore: number;
@@ -1421,8 +1434,17 @@ function buildLoopBResult({
     };
   }
 
-  const relevantHistory = history
-    .slice()
+  const latestByModulePeriod = new Map<string, HistoricalCertificationSnapshot>();
+  for (const entry of history) {
+    if (entry.period === currentPeriod) continue;
+    const key = `${entry.moduleId}:${entry.period}`;
+    const existing = latestByModulePeriod.get(key);
+    if (!existing || (entry.completedAt ?? "") > (existing.completedAt ?? "")) {
+      latestByModulePeriod.set(key, entry);
+    }
+  }
+
+  const relevantHistory = [...latestByModulePeriod.values()]
     .sort((left, right) =>
       (left.completedAt ?? "").localeCompare(right.completedAt ?? ""),
     )
@@ -1438,11 +1460,12 @@ function buildLoopBResult({
     }
 
     const recoverySeries = [...moduleHistory.map((entry) => entry.recoveryValue), currentModule.recoveryValue];
+    const trendWindow = recoverySeries.slice(-4);
     if (
-      recoverySeries.length >= 4 &&
-      recoverySeries
-        .slice(-4)
-        .every((value, index, values) => index === 0 || value >= values[index - 1])
+      trendWindow.length === 4 &&
+      trendWindow[trendWindow.length - 1] > 0 &&
+      trendWindow.every((value, index, values) => index === 0 || value >= values[index - 1]) &&
+      trendWindow.some((value, index, values) => index > 0 && value > values[index - 1])
     ) {
       const occurrenceCount = 4;
       const consistencyFactor = 1;
@@ -1450,7 +1473,7 @@ function buildLoopBResult({
         Math.min(1, (occurrenceCount * consistencyFactor) / Math.max(windowSize, 1)),
       );
       findings.push({
-        affectedPeriods: moduleHistory.slice(-3).map((entry) => entry.period),
+        affectedPeriods: [...moduleHistory.slice(-3).map((entry) => entry.period), currentPeriod],
         caarEligible: confidenceScore >= 0.85 && trustScore >= 85,
         confidenceScore,
         detail:
@@ -1464,6 +1487,7 @@ function buildLoopBResult({
 
     const previousRuleIds = moduleHistory.flatMap((entry) => entry.ruleIds);
     const recurringRuleId = currentModule.ruleCitations
+      .filter((citation) => citation.disposition === "blocking" || citation.disposition === "monetary")
       .map((citation) => citation.ruleId)
       .find((ruleId) => previousRuleIds.filter((entry) => entry === ruleId).length >= 2);
     if (recurringRuleId) {
