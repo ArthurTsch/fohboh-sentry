@@ -3,6 +3,7 @@ import type {
   CaarEvidenceTrace,
   CaarProvenanceKind,
   CaarRecord,
+  CaarScoreDeduction,
   IntakeState,
   UploadArtifact,
   UploadModule,
@@ -318,8 +319,9 @@ export function CaarReportModal({
               {scoreDeductions.map((deduction) => (
                 <div key={deduction.gate} className={`rounded-2xl border p-4 ${deduction.supported ? "border-[var(--border)] bg-[var(--surface)]" : "border-[rgba(214,48,49,0.25)] bg-[rgba(214,48,49,0.05)]"}`}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="font-[family-name:var(--font-display)] text-lg font-bold text-[var(--text)]">
-                      {deduction.gate} · −{deduction.pointsLost.toFixed(2)} points {deduction.consequential ? "(eligibility consequence)" : "(direct deduction)"}
+                    <div className="flex items-center gap-2 font-[family-name:var(--font-display)] text-lg font-bold text-[var(--text)]">
+                      <span>{deduction.gate} · −{deduction.pointsLost.toFixed(2)} points {deduction.consequential ? "(eligibility consequence)" : "(direct deduction)"}</span>
+                      <TrustGateHelp deduction={deduction} />
                     </div>
                     <span className={`rounded-full px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] ${deduction.supported ? "bg-[rgba(0,200,83,0.08)] text-[var(--success)]" : "bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"}`}>
                       {deduction.supported ? "Backed" : "Unsupported deduction"}
@@ -1959,6 +1961,42 @@ function ScoreLedgerStat({ accent = false, label, value }: { accent?: boolean; l
         {value}
       </div>
     </div>
+  );
+}
+
+const TRUST_GATE_HELP: Record<string, { name: string; purpose: string; scoring: string }> = {
+  TG01: { name: "Data Completeness", purpose: "Checks whether the required fields and core records for the active module are present.", scoring: "Full credit requires at least 90% governed data completeness; missing POS data caps the result." },
+  TG02: { name: "Source Authenticity", purpose: "Checks that required source files exist and carry intact persisted integrity hashes.", scoring: "Full credit requires complete authenticated source evidence; partial provenance or a missing critical source reduces the gate." },
+  TG03: { name: "Vendor Profile Currency", purpose: "Checks that governed contract or vendor-profile terms exist and are valid for the certification period.", scoring: "Missing terms score zero; an explicitly expired contract is partial; complete, unexpired terms receive full credit." },
+  TG04: { name: "POS Reconciliation", purpose: "Compares the provider or processor transaction basis with the POS transaction basis for the same period.", scoring: "A gap up to 1% receives full credit, 1–5% receives partial credit, and a gap above 5% scores zero." },
+  TG05: { name: "Duplicate Absence", purpose: "Checks the governed transaction set for duplicate or duplicate-like records.", scoring: "No duplicates receive full credit; detected duplicates reduce the gate according to the observed duplicate rate." },
+  TG06: { name: "Period Coverage", purpose: "Checks whether all required artifacts cover the selected certification period, including monthly bank evidence.", scoring: "A fully governed monthly package receives full credit; present but incompletely governed or missing artifacts receive partial credit." },
+  TG07: { name: "Fee Legitimacy", purpose: "Measures whether calculated fees agree with governed contract terms and the reviewed fee volume.", scoring: "The gate is weighted by the certified fee-variance percentage; larger supported variances reduce the score." },
+  TG08: { name: "KPI Formula Currency", purpose: "Checks that the governed formulas and contract inputs were valid throughout the certification period.", scoring: "Current, fully governed formula inputs receive full credit; incomplete or split-period governance reduces the gate." },
+  TG09: { name: "Audit Trail Integrity", purpose: "Checks that uploads, governed configuration, execution, and results have complete traceable lineage.", scoring: "Complete lineage receives full credit; missing processing or provenance events reduce the result." },
+  TG10: { name: "Narrative Hash Readiness", purpose: "Checks whether the governed calculation and audit trail are ready to be sealed into the CAAR narrative.", scoring: "Full credit requires both TG08 and TG09 to be fully satisfied." },
+  TG11: { name: "CAAR Eligibility", purpose: "Controls whether the report clears the final CAAR release threshold.", scoring: "The subtotal from TG01–TG10 must reach 85. If it does not, TG11 contributes zero of its 6 available points." },
+  SYS: { name: "System Health", purpose: "Applies deductions for persisted engine-health conditions such as rule drift or integrity failures.", scoring: "Only explicit system-health events may deduct points, and every penalty must identify its triggering event." },
+};
+
+function TrustGateHelp({ deduction }: { deduction: CaarScoreDeduction }) {
+  const definition = TRUST_GATE_HELP[deduction.gate] ?? {
+    name: "Trust Gate",
+    purpose: "A weighted control used by the certification engine.",
+    scoring: "The persisted gate score is multiplied by its documented weight.",
+  };
+  return (
+    <HelpTip
+      title={`${deduction.gate} · ${definition.name}`}
+      sections={[
+        { label: "What It Checks", text: definition.purpose },
+        { label: "How It Scores", text: definition.scoring },
+        { label: "This CAAR", text: deduction.calculation },
+        { label: "Persisted Evidence", text: deduction.evidence.join(" ") || "No supporting evidence was persisted." },
+      ]}
+      footerLabel="Rules"
+      footerValue={deduction.ruleIds.join(", ") || "No rule citation persisted"}
+    />
   );
 }
 
