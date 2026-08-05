@@ -116,6 +116,7 @@ export type CaarScoreDeduction = {
 };
 
 export type CaarTraceability = {
+  blockingRuleCitations?: CaarRuleCitationSummary[];
   certCompletedAt: string | null;
   certRunId: number | null;
   courtAdmissible: boolean | null;
@@ -129,6 +130,8 @@ export type CaarTraceability = {
   reconciliationWarnings?: string[];
   ruleCitations: CaarRuleCitationSummary[];
   scoreDeductions?: CaarScoreDeduction[];
+  scoreNeutralRuleCitations?: CaarRuleCitationSummary[];
+  scoreReducingRuleCitations?: CaarRuleCitationSummary[];
   ruleSetVersion: string | null;
   sealedAt: string | null;
 };

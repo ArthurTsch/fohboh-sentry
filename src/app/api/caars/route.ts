@@ -948,10 +948,17 @@ export async function GET(request: Request) {
           persistedCaar?.module === "M01" || persistedCaar?.module === "M02" ? persistedCaar.module : null;
         const certRun = persistedCaar ? certRunById.get(persistedCaar.cert_run_id) ?? null : null;
         const citations = certRun ? ruleCitationsByRun.get(certRun.id) ?? [] : [];
-        const informationalCitations = citations.filter(isInformationalRuleCitation);
-        const actionableCitations = citations.filter((citation) => !isInformationalRuleCitation(citation));
-        const problemCitations = actionableCitations.filter(isProblemRuleCitation);
-        const passedCitations = actionableCitations.filter((citation) => !isProblemRuleCitation(citation));
+        const scoreDeductions = buildScoreDeductions(citations);
+        const scoreReducingRuleIds = new Set(scoreDeductions.flatMap((deduction) => deduction.ruleIds));
+        const problemCitations = citations.filter(isProblemRuleCitation);
+        const problemCitationIds = new Set(problemCitations.map((citation) => citation.rule_id));
+        const scoreReducingCitations = citations.filter(
+          (citation) => !problemCitationIds.has(citation.rule_id) && scoreReducingRuleIds.has(citation.rule_id),
+        );
+        const scoreReducingCitationIds = new Set(scoreReducingCitations.map((citation) => citation.rule_id));
+        const scoreNeutralCitations = citations.filter(
+          (citation) => !problemCitationIds.has(citation.rule_id) && !scoreReducingCitationIds.has(citation.rule_id),
+        );
         const uploadLocationId = report.restaurant_id ?? null;
         const moduleUploads =
           uploadLocationId && moduleId
@@ -990,6 +997,7 @@ export async function GET(request: Request) {
           restaurantId: report.restaurant_id,
           status: persistedCaar?.court_admissible ? "Certified" : "Needs Remediation",
           traceability: {
+            blockingRuleCitations: buildRuleCitationSummaries(problemCitations),
             certCompletedAt: certRun?.completed_at?.toISOString() ?? null,
             certRunId: certRun?.id ?? null,
             courtAdmissible: persistedCaar?.court_admissible ?? null,
@@ -1012,14 +1020,16 @@ export async function GET(request: Request) {
               sealedContract,
               sealedSchema,
             }),
-            informationalRuleCitations: buildRuleCitationSummaries(informationalCitations),
+            informationalRuleCitations: buildRuleCitationSummaries(scoreNeutralCitations.filter(isInformationalRuleCitation)),
             module: moduleId,
-            passedRuleCitations: buildRuleCitationSummaries(passedCitations),
+            passedRuleCitations: buildRuleCitationSummaries(scoreNeutralCitations.filter((citation) => !isInformationalRuleCitation(citation))),
             reconciliationExceptions: reconciliation.exceptions,
             reconciliationNotes: reconciliation.notes,
             reconciliationWarnings: reconciliation.warnings,
             ruleCitations: buildRuleCitationSummaries(problemCitations),
-            scoreDeductions: buildScoreDeductions(citations),
+            scoreDeductions,
+            scoreNeutralRuleCitations: buildRuleCitationSummaries(scoreNeutralCitations),
+            scoreReducingRuleCitations: buildRuleCitationSummaries(scoreReducingCitations),
             ruleSetVersion: certRun?.rule_set_version ?? null,
             sealedAt: persistedCaar?.sealed_at?.toISOString() ?? null,
           },

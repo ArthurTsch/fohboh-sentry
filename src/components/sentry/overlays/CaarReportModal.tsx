@@ -70,8 +70,12 @@ export function CaarReportModal({
   const integrityReady = exhibits.every((row) => row.integrity === "Verified" || row.integrity === "Sealed");
   const evidenceRows = traceability?.evidence ?? [];
   const fieldAudit = traceability?.fieldAudit ?? [];
-  const informationalRuleCitations = traceability?.informationalRuleCitations ?? [];
-  const passedRuleCitations = traceability?.passedRuleCitations ?? [];
+  const blockingRuleCitations = traceability?.blockingRuleCitations ?? traceability?.ruleCitations ?? [];
+  const scoreReducingRuleCitations = traceability?.scoreReducingRuleCitations ?? [];
+  const scoreNeutralRuleCitations = traceability?.scoreNeutralRuleCitations ?? [
+    ...(traceability?.informationalRuleCitations ?? []),
+    ...(traceability?.passedRuleCitations ?? []),
+  ];
   const reconciliationExceptions = traceability?.reconciliationExceptions ?? [];
   const reconciliationNotes = traceability?.reconciliationNotes ?? [];
   const reconciliationWarnings = traceability?.reconciliationWarnings ?? [];
@@ -88,11 +92,9 @@ export function CaarReportModal({
       Boolean(traceability?.sealedAt) ||
       evidenceRows.length > 0 ||
       fieldAudit.length > 0 ||
-      informationalRuleCitations.length > 0 ||
-      passedRuleCitations.length > 0 ||
+      scoreReducingRuleCitations.length > 0 ||
+      scoreNeutralRuleCitations.length > 0 ||
       ruleCitations.length > 0);
-  const monetaryRuleCitations = ruleCitations.filter((row) => !isZeroVarianceDisplay(row.varianceDisplay));
-  const blockingRuleCitations = ruleCitations.filter((row) => isZeroVarianceDisplay(row.varianceDisplay));
   const ruleSetVersion = traceability?.ruleSetVersion ?? null;
   const certificationDate = traceability?.sealedAt ?? traceability?.certCompletedAt ?? "Not persisted";
   const unsupportedFieldAudit = fieldAudit.filter((row) => !row.supported);
@@ -593,10 +595,9 @@ export function CaarReportModal({
               <AttestRow label="Certification Run" value={traceability?.certRunId ? `cert_runs_v2#${traceability.certRunId}` : "Not linked"} />
               <AttestRow label="Rule Set Version" value={ruleSetVersion ?? "Not persisted"} />
               <AttestRow label="Certification Timestamp" value={certificationDate} />
-              <AttestRow label="Monetary Rule Citations" value={String(monetaryRuleCitations.length)} />
-              <AttestRow label="Blocking Rule Citations" value={String(blockingRuleCitations.length)} />
-              <AttestRow label="Informational Rule Citations" value={String(informationalRuleCitations.length)} />
-              <AttestRow label="Passed Rule Citations" value={String(passedRuleCitations.length)} />
+              <AttestRow label="Blocking Rules" value={String(blockingRuleCitations.length)} />
+              <AttestRow label="Score-Reducing Rules" value={String(scoreReducingRuleCitations.length)} />
+              <AttestRow label="Non-Blocking Rules" value={String(scoreNeutralRuleCitations.length)} />
               <AttestRow
                 label="Integrity Hash"
                 value={
@@ -610,65 +611,18 @@ export function CaarReportModal({
           </ReportCard>
         </div>
 
-        <ReportCard
-          eyebrow="Rule Citations"
-          title={
-            !hasPersistedTraceability
-              ? "Rule-citation trace unavailable"
-              : monetaryRuleCitations.length > 0
-                ? "Persisted monetary rule-engine findings"
-                : "No persisted monetary rule citations"
-          }
-          sub="Only stored rules with attributed dollar variance are shown here. Zero-dollar blocking controls are separated below."
-        >
-          {!hasPersistedTraceability ? (
-            <div className="rounded-2xl border border-[rgba(214,48,49,0.18)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]">
-              Stored rule-citation lineage is missing for this CAAR record. The summary row exists, but the linked certification-run trace was not recovered.
-            </div>
-          ) : monetaryRuleCitations.length > 0 ? (
-            <SimpleTable
-              columns={["Rule", "Version", "Fired", "Variance", "Sample Evidence"]}
-              rows={monetaryRuleCitations.map((row) => [
-                <RuleCitationCell
-                  key={`${row.ruleId}:${row.ruleVersion}`}
-                  evidenceRows={evidenceRows}
-                  rule={row}
-                  moduleId={moduleId}
-                  disposition="monetary_problem"
-                />,
-                row.ruleVersion,
-                String(row.firedCount),
-                <VarianceCitationCell
-                  key={`${row.ruleId}:${row.ruleVersion}:variance`}
-                  evidenceRows={evidenceRows}
-                  rule={row}
-                  moduleId={moduleId}
-                  disposition="monetary_problem"
-                />,
-                `${row.sampleEvidenceCount} sample entries`,
-              ])}
-            />
-          ) : (
-            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
-              No persisted monetary rule citations were found for this CAAR. Dollar-attributed findings are only shown
-              when the stored engine output assigns non-zero variance to a rule.
-            </div>
-          )}
-        </ReportCard>
-
         <details className="rounded-[28px] border border-[var(--border)] bg-white">
           <summary className="cursor-pointer list-none px-6 py-5">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">
-                  Blocking Controls
+                  Blocking Rules
                 </div>
                 <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
-                  Non-monetary blocking rule findings
+                  Rules that block release
                 </div>
                 <div className="mt-1 text-sm text-[var(--muted)]">
-                  Expand to inspect stored rule citations that block release or mark a control failure without assigning
-                  direct dollar variance.
+                  These rules independently prevent certified release until their underlying condition is resolved.
                 </div>
               </div>
               <div className="rounded-full border border-[var(--border)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
@@ -683,24 +637,24 @@ export function CaarReportModal({
               </div>
             ) : blockingRuleCitations.length > 0 ? (
               <SimpleTable
-                columns={["Rule", "Version", "Issue", "Recorded", "Sample Evidence"]}
+                columns={["Rule", "Version", "Why it blocks", "Variance", "Evidence"]}
                 rows={blockingRuleCitations.map((row) => [
                   <RuleCitationCell
                     key={`${row.ruleId}:${row.ruleVersion}:blocking`}
                     evidenceRows={evidenceRows}
                     rule={row}
                     moduleId={moduleId}
-                    disposition="blocking_problem"
+                    disposition={isZeroVarianceDisplay(row.varianceDisplay) ? "blocking_problem" : "monetary_problem"}
                   />,
                   row.ruleVersion,
                   buildBlockingIssueSummary(row, moduleId, evidenceRows),
-                  String(row.firedCount),
+                  row.varianceDisplay,
                   `${row.sampleEvidenceCount} sample entr${row.sampleEvidenceCount === 1 ? "y" : "ies"}`,
                 ])}
               />
             ) : (
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
-                No non-monetary blocking citations were persisted for this CAAR.
+                No blocking rules were persisted for this CAAR.
               </div>
             )}
           </div>
@@ -711,47 +665,47 @@ export function CaarReportModal({
             <div className="flex items-center justify-between gap-4">
               <div>
                 <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--info)]">
-                  Informational Records
+                  Score-Reducing Rules
                 </div>
                 <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
-                  Calculation and tracking records
+                  Rules that reduce the score without blocking by themselves
                 </div>
                 <div className="mt-1 text-sm text-[var(--muted)]">
-                  These records do not independently establish a violation. Their calculated values may still explain the certification status.
+                  These rules remove weighted points, but only the final release gates decide whether the CAAR is blocked.
                 </div>
               </div>
               <div className="rounded-full border border-[rgba(27,106,201,0.2)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--info)]">
-                {hasPersistedTraceability ? `${informationalRuleCitations.length} stored` : "Trace missing"}
+                {hasPersistedTraceability ? `${scoreReducingRuleCitations.length} stored` : "Trace missing"}
               </div>
             </div>
           </summary>
           <div className="border-t border-[rgba(27,106,201,0.16)] px-6 py-6">
-            {informationalRuleCitations.length > 0 ? (
+            {scoreReducingRuleCitations.length > 0 ? (
               <SimpleTable
-                columns={["Rule", "Version", "Meaning", "Variance", "Sample Evidence"]}
-                rows={informationalRuleCitations.map((row) => [
+                columns={["Rule", "Version", "Score effect", "Variance", "Evidence"]}
+                rows={scoreReducingRuleCitations.map((row) => [
                   <RuleCitationCell
-                    key={`${row.ruleId}:${row.ruleVersion}:informational`}
+                    key={`${row.ruleId}:${row.ruleVersion}:score-reducing`}
                     evidenceRows={evidenceRows}
                     rule={row}
                     moduleId={moduleId}
-                    disposition="informational"
+                    disposition="score_reducing"
                   />,
                   row.ruleVersion,
-                  buildInformationalMeaning(row),
+                  buildScoreReducingMeaning(row, scoreDeductions),
                   <VarianceCitationCell
-                    key={`${row.ruleId}:${row.ruleVersion}:informational:variance`}
+                    key={`${row.ruleId}:${row.ruleVersion}:score-reducing:variance`}
                     evidenceRows={evidenceRows}
                     rule={row}
                     moduleId={moduleId}
-                    disposition="informational"
+                    disposition="score_reducing"
                   />,
                   `${row.sampleEvidenceCount} sample entr${row.sampleEvidenceCount === 1 ? "y" : "ies"}`,
                 ])}
               />
             ) : (
               <div className="rounded-2xl border border-[var(--border)] bg-white p-4 text-sm leading-7 text-[var(--muted)]">
-                No informational rule records were persisted for this CAAR.
+                No rules reduced the score without independently blocking release.
               </div>
             )}
           </div>
@@ -762,17 +716,17 @@ export function CaarReportModal({
             <div className="flex items-center justify-between gap-4">
               <div>
                 <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
-                  Passed Controls
+                  Non-Blocking Rules
                 </div>
                 <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
-                  Persisted passed rule traces
+                  Rules that do not block and do not reduce the score
                 </div>
                 <div className="mt-1 text-sm text-[var(--muted)]">
-                  Expand to inspect rules that were evaluated and passed without attributed variance.
+                  These rules record successful checks, calculations, or workflow tracking with no score deduction.
                 </div>
               </div>
               <div className="rounded-full border border-[var(--border)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
-                {hasPersistedTraceability ? `${passedRuleCitations.length} stored` : "Trace missing"}
+                {hasPersistedTraceability ? `${scoreNeutralRuleCitations.length} stored` : "Trace missing"}
               </div>
             </div>
           </summary>
@@ -781,32 +735,32 @@ export function CaarReportModal({
               <div className="rounded-2xl border border-[rgba(214,48,49,0.18)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]">
                 Stored passed-control traces are unavailable because the linked certification-run lineage is missing for this CAAR.
               </div>
-            ) : passedRuleCitations.length > 0 ? (
+            ) : scoreNeutralRuleCitations.length > 0 ? (
               <SimpleTable
-                columns={["Rule", "Version", "Recorded", "Variance", "Sample Evidence"]}
-                rows={passedRuleCitations.map((row) => [
+                columns={["Rule", "Version", "Meaning", "Variance", "Evidence"]}
+                rows={scoreNeutralRuleCitations.map((row) => [
                   <RuleCitationCell
-                    key={`${row.ruleId}:${row.ruleVersion}:passed`}
+                    key={`${row.ruleId}:${row.ruleVersion}:neutral`}
                     evidenceRows={evidenceRows}
                     rule={row}
                     moduleId={moduleId}
-                    disposition="passed"
+                    disposition="neutral"
                   />,
                   row.ruleVersion,
-                  String(row.firedCount),
+                  buildInformationalMeaning(row),
                   <VarianceCitationCell
-                    key={`${row.ruleId}:${row.ruleVersion}:passed:variance`}
+                    key={`${row.ruleId}:${row.ruleVersion}:neutral:variance`}
                     evidenceRows={evidenceRows}
                     rule={row}
                     moduleId={moduleId}
-                    disposition="passed"
+                    disposition="neutral"
                   />,
                   `${row.sampleEvidenceCount} sample entr${row.sampleEvidenceCount === 1 ? "y" : "ies"}`,
                 ])}
               />
             ) : (
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
-                No passed control-trace citations were persisted for this CAAR.
+                No score-neutral rules were persisted for this CAAR.
               </div>
             )}
           </div>
@@ -829,7 +783,7 @@ function RuleCitationCell({
 }) {
   const tip = describeRuleCitation(rule, moduleId, evidenceRows, disposition);
   const simpleReason = buildSimpleRuleReason(rule, disposition);
-  const useSimpleTip = disposition === "blocking_problem" || disposition === "informational";
+  const useSimpleTip = disposition !== "passed";
   const formalRule = buildFormalIfThen(rule.ruleId, tip.ruleText);
 
   return (
@@ -839,7 +793,7 @@ function RuleCitationCell({
         title={`${rule.ruleId} · Why this appears`}
         sections={useSimpleTip
           ? [
-              { label: disposition === "blocking_problem" ? "Why It Blocks" : "Why It Is Listed", text: simpleReason },
+              { label: disposition === "blocking_problem" || disposition === "monetary_problem" ? "Why It Blocks" : "Why It Is Listed", text: simpleReason },
               { label: "IF", text: formalRule.ifText },
               { label: "THEN", text: formalRule.thenText },
               { label: "Calculation", text: tip.calculation },
@@ -869,7 +823,7 @@ function VarianceCitationCell({
   rule: CaarRuleCitationRow;
 }) {
   const tip = describeRuleCitation(rule, moduleId, evidenceRows, disposition);
-  const useSimpleTip = disposition === "blocking_problem" || disposition === "informational";
+  const useSimpleTip = disposition !== "passed";
   const formalRule = buildFormalIfThen(rule.ruleId, tip.ruleText);
 
   return (
@@ -930,8 +884,13 @@ function buildSimpleRuleReason(rule: CaarRuleCitationRow, disposition: CitationD
         .replace(/\bcertification\b/gi, "review")
         .split(/(?<=[.!?])\s+/)[0]
     : null;
-  if (disposition === "blocking_problem") {
+  if (disposition === "blocking_problem" || disposition === "monetary_problem") {
     return detail ?? "This rule is listed because a required check failed and currently blocks release.";
+  }
+  if (disposition === "score_reducing") {
+    return detail
+      ? `${detail} This rule reduces the score but does not block release by itself.`
+      : "This rule reduced the weighted score but does not block release by itself.";
   }
   return `${detail ?? "The app completed this calculation or tracking step."} This record does not add another penalty.`;
 }
@@ -1043,6 +1002,17 @@ function buildBlockingIssueSummary(
   return `${conciseRule.slice(0, 137)}...`;
 }
 
+function buildScoreReducingMeaning(
+  rule: CaarRuleCitationRow,
+  deductions: CaarScoreDeduction[],
+) {
+  const matching = deductions.filter((deduction) => deduction.ruleIds.includes(rule.ruleId));
+  const points = matching.reduce((sum, deduction) => sum + deduction.pointsLost, 0);
+  return points > 0
+    ? `Supports ${points.toFixed(2)} weighted point${points === 1 ? "" : "s"} of score reduction; it does not block release by itself.`
+    : "Contributes to a reduced trust gate, but does not block release by itself.";
+}
+
 function buildInformationalMeaning(rule: CaarRuleCitationRow) {
   if (rule.ruleId === "R046") {
     return "Recovery is at or below the review threshold. Retained for cumulative tracking; no certification action.";
@@ -1101,7 +1071,13 @@ type RuleCitationTip = {
 
 type RuleTooltipOverride = Omit<RuleCitationTip, "canonicalDefinition">;
 
-type CitationDisposition = "monetary_problem" | "blocking_problem" | "informational" | "passed";
+type CitationDisposition =
+  | "monetary_problem"
+  | "blocking_problem"
+  | "score_reducing"
+  | "neutral"
+  | "informational"
+  | "passed";
 type CaarRuleCitationRow = NonNullable<CaarRecord["traceability"]>["ruleCitations"][number];
 type RuleCitationSample = Record<string, string | number | boolean | null>;
 
