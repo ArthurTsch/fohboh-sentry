@@ -3,6 +3,7 @@ type Cadence = "monthly_final" | "weekly_preliminary";
 
 type Metrics = {
   adjustmentAmount?: number;
+  amexOptBlueVarianceAmount?: number;
   basisAmount?: number;
   chargebackCount?: number;
   commissionRateAppliedAvg?: number;
@@ -12,9 +13,12 @@ type Metrics = {
   deliveryOrderCount?: number;
   duplicateOrderCount?: number;
   duplicateTransactionCount?: number;
+  duplicateTransactionAmount?: number;
   errorChargeAmount?: number;
+  earlyTerminationFeeAmount?: number;
   feeAmount?: number;
   interchangeFeeAmount?: number;
+  interchangeMismatchAmount?: number;
   marketingFeeAmount?: number;
   mcCreditAmount?: number;
   mcCreditFeeAmount?: number;
@@ -28,11 +32,32 @@ type Metrics = {
   payoutAmount?: number;
   payoutReferenceRows?: ReferenceRow[];
   refundCount?: number;
+  annualFeeAmount?: number;
+  avsDowngradeAmount?: number;
+  chargebackFeeAmount?: number;
+  cvvDowngradeAmount?: number;
+  dccFeeAmount?: number;
+  debitSurchargeAmount?: number;
+  equipmentRentalFeeAmount?: number;
+  internationalFeeExcessAmount?: number;
+  lateSettlementDowngradeAmount?: number;
+  missedVolumeDiscountAmount?: number;
+  monthlyMinimumFeeAmount?: number;
+  partialAuthDuplicateAmount?: number;
+  pciNonComplianceFeeAmount?: number;
+  processorReversalShortfallAmount?: number;
+  rateIncreaseVarianceAmount?: number;
+  refundProcessingFeeAmount?: number;
+  restrictedSurchargeAmount?: number;
+  retrievalFeeAmount?: number;
+  statementFeeAmount?: number;
   serviceFeeAmount?: number;
+  surchargeFeeAmount?: number;
   settlementLagDaysAvg?: number;
   taxRemittedAmount?: number;
   tipAmount?: number;
   transactionCount?: number;
+  uncontractedFeeAmount?: number;
   voidCount?: number;
   visaCreditAmount?: number;
   visaCreditFeeAmount?: number;
@@ -102,6 +127,7 @@ export type SystemHealthResult = {
 };
 
 export type RuleCitation = {
+  disposition: "blocking" | "informational" | "monetary" | "passed";
   firedCount: number;
   ruleId: string;
   ruleVersion: string;
@@ -281,6 +307,7 @@ const M01_RULES: DeterministicRule[] = [
       if (unexplained <= 1 || residualVariance <= 1) return null;
       const variance = Math.min(unexplained, residualVariance);
       return {
+        disposition: "monetary",
         firedCount: 1,
         ruleId: "MFR-BIL-15",
         ruleVersion: RULE_VERSION,
@@ -302,15 +329,17 @@ const M01_RULES: DeterministicRule[] = [
       const actualFees = numberValue(statement.feeAmount);
       const txnFee = numberValue(contract.txn_fee);
       const monthlyFee = numberValue(contract.monthly_fee);
+      const interchangeFees = numberValue(statement.interchangeFeeAmount);
       const transactionCount = Math.max(0, roundCurrency(numberValue(statement.transactionCount)));
       if (basisAmount <= 0 || markupBps <= 0 || actualFees <= 0 || residualVariance <= 1) return null;
       const observedRateBps =
-        ((actualFees - transactionCount * txnFee - monthlyFee) / Math.max(basisAmount, 1)) * 10000;
+        ((actualFees - interchangeFees - transactionCount * txnFee - monthlyFee) / Math.max(basisAmount, 1)) * 10000;
       const excessRateBps = observedRateBps - markupBps;
       if (excessRateBps <= 5) return null;
       const variance = Math.min(roundCurrency((basisAmount * excessRateBps) / 10000), residualVariance);
       if (variance <= 1) return null;
       return {
+        disposition: "monetary",
         firedCount: 1,
         ruleId: "MFR-MRK-03",
         ruleVersion: RULE_VERSION,
@@ -319,6 +348,7 @@ const M01_RULES: DeterministicRule[] = [
           basis_amount: basisAmount,
           contracted_markup_bps: markupBps,
           excess_rate_bps: roundCurrency(excessRateBps),
+          observed_interchange_fees: interchangeFees,
         }],
         varianceCents: dollarsToCents(variance),
       };
@@ -342,6 +372,7 @@ const M01_RULES: DeterministicRule[] = [
       const variance = Math.min(roundCurrency(excessPerTxn * transactionCount), residualVariance);
       if (variance <= 1) return null;
       return {
+        disposition: "monetary",
         firedCount: 1,
         ruleId: "MFR-MRK-05",
         ruleVersion: RULE_VERSION,
@@ -554,16 +585,13 @@ const M01_RULES: DeterministicRule[] = [
       const statement = context.statement?.metrics;
       if (!statement || residualVariance <= 1) return null;
       const duplicateTransactionCount = numberValue(statement.duplicateTransactionCount);
-      const feeAmount = numberValue(statement.feeAmount);
-      const transactionCount = Math.max(1, numberValue(statement.transactionCount));
-      if (duplicateTransactionCount <= 0 || feeAmount <= 0) return null;
-      const averageFee = feeAmount / transactionCount;
-      const variance = Math.min(roundCurrency(averageFee * duplicateTransactionCount), residualVariance);
+      const duplicateTransactionAmount = numberValue(statement.duplicateTransactionAmount);
+      if (duplicateTransactionCount <= 0 || duplicateTransactionAmount <= 0) return null;
+      const variance = Math.min(roundCurrency(duplicateTransactionAmount), residualVariance);
       if (variance <= 1) return null;
       return buildCitation("R060", Math.round(duplicateTransactionCount), variance, {
-        average_fee: roundCurrency(averageFee),
+        duplicate_transaction_amount: duplicateTransactionAmount,
         duplicate_transaction_count: duplicateTransactionCount,
-        transaction_count: transactionCount,
       });
     },
   },
@@ -588,6 +616,11 @@ const M01_RULES: DeterministicRule[] = [
       );
       const observedVisaCredit = numberValue(statement.visaCreditFeeAmount);
       const observedMcCredit = numberValue(statement.mcCreditFeeAmount);
+      const visaRateGoverned = numberValue(contract.visa_credit_rate_pct) > 0;
+      const mcRateGoverned = numberValue(contract.mastercard_credit_rate_pct) > 0;
+      if ((observedVisaCredit > 0 && !visaRateGoverned) || (observedMcCredit > 0 && !mcRateGoverned)) {
+        return null;
+      }
       const totalExcess = Math.max(0, observedVisaCredit - expectedVisaCredit) + Math.max(0, observedMcCredit - expectedMcCredit);
       if (totalExcess <= 1) return null;
       const variance = Math.min(roundCurrency(totalExcess), residualVariance);
@@ -607,13 +640,13 @@ const M01_RULES: DeterministicRule[] = [
     evaluate: (context, residualVariance) => {
       const statement = context.statement?.metrics;
       if (!statement || residualVariance <= 1) return null;
-      const errorChargeAmount = numberValue(statement.errorChargeAmount);
-      if (errorChargeAmount <= 1) return null;
-      const variance = Math.min(roundCurrency(errorChargeAmount), residualVariance);
+      const reversalShortfall = numberValue(statement.processorReversalShortfallAmount);
+      if (reversalShortfall <= 1) return null;
+      const variance = Math.min(roundCurrency(reversalShortfall), residualVariance);
       if (variance <= 1) return null;
       return buildCitation("R086", 1, variance, {
-        error_charge_amount: errorChargeAmount,
-        note: "Processor-side error or reversal charge persisted in governed source evidence.",
+        processor_reversal_shortfall_amount: reversalShortfall,
+        note: "A processor reversal was identified and its amount is below the originally certified variance.",
       });
     },
   },
@@ -623,13 +656,13 @@ const M01_RULES: DeterministicRule[] = [
     version: RULE_VERSION,
     evaluate: (context, residualVariance) => {
       const lagDays = numberValue(context.statement?.metrics?.settlementLagDaysAvg);
-      const payoutAmount = numberValue(context.statement?.metrics?.payoutAmount);
-      if (lagDays <= 2 || payoutAmount <= 0 || residualVariance <= 1) return null;
-      const variance = Math.min(roundCurrency(payoutAmount * Math.min((lagDays - 2) * 0.0025, 0.05)), residualVariance);
+      const downgradeAmount = numberValue(context.statement?.metrics?.lateSettlementDowngradeAmount);
+      if (lagDays <= 2 || downgradeAmount <= 0 || residualVariance <= 1) return null;
+      const variance = Math.min(roundCurrency(downgradeAmount), residualVariance);
       if (variance <= 1) return null;
       return buildCitation("R063", 1, variance, {
         average_settlement_lag_days: lagDays,
-        payout_amount: payoutAmount,
+        late_settlement_downgrade_amount: downgradeAmount,
       });
     },
   },
@@ -642,15 +675,13 @@ const M01_RULES: DeterministicRule[] = [
       const contract = context.contract;
       if (!statement || !contract || residualVariance <= 1) return null;
       const monthlyFee = numberValue(contract.monthly_fee);
-      const feeAmount = numberValue(statement.feeAmount);
-      const basisAmount = numberValue(statement.basisAmount);
-      if (monthlyFee <= 0 || feeAmount <= monthlyFee || basisAmount > 5000) return null;
-      const variance = Math.min(roundCurrency(Math.max(0, feeAmount - monthlyFee) * 0.15), residualVariance);
+      const minimumFeeCharged = numberValue(statement.monthlyMinimumFeeAmount);
+      if (monthlyFee <= 0 || minimumFeeCharged <= 0) return null;
+      const variance = Math.min(roundCurrency(minimumFeeCharged), residualVariance);
       if (variance <= 1) return null;
       return buildCitation("R068", 1, variance, {
-        basis_amount: basisAmount,
         contracted_monthly_minimum: monthlyFee,
-        observed_fee_amount: feeAmount,
+        observed_monthly_minimum_fee: minimumFeeCharged,
       });
     },
   },
@@ -668,14 +699,12 @@ const M01_RULES: DeterministicRule[] = [
     evaluate: (context, residualVariance) => {
       const statement = context.statement?.metrics;
       const refundCount = numberValue(statement?.refundCount);
-      const feeAmount = numberValue(statement?.feeAmount);
-      const transactionCount = Math.max(1, numberValue(statement?.transactionCount));
-      if (!statement || refundCount <= 0 || feeAmount <= 0 || residualVariance <= 1) return null;
-      const averageFee = feeAmount / transactionCount;
-      const variance = Math.min(roundCurrency(averageFee * refundCount), residualVariance);
+      const refundFeeAmount = numberValue(statement?.refundProcessingFeeAmount);
+      if (!statement || refundCount <= 0 || refundFeeAmount <= 0 || residualVariance <= 1) return null;
+      const variance = Math.min(roundCurrency(refundFeeAmount), residualVariance);
       if (variance <= 1) return null;
       return buildCitation("R072", Math.round(refundCount), variance, {
-        average_fee: roundCurrency(averageFee),
+        refund_processing_fee_amount: refundFeeAmount,
         refund_count: refundCount,
       });
     },
@@ -686,13 +715,18 @@ const M01_RULES: DeterministicRule[] = [
     version: RULE_VERSION,
     evaluate: (context, residualVariance) => {
       const chargebackCount = numberValue(context.statement?.metrics?.chargebackCount);
-      const chargebackFee = numberValue(context.contract?.chargeback_fee);
-      if (chargebackCount <= 0 || chargebackFee <= 0 || residualVariance <= 1) return null;
-      const variance = Math.min(roundCurrency(chargebackCount * chargebackFee), residualVariance);
+      const chargebackFeeCap = numberValue(context.contract?.chargeback_fee);
+      const observedChargebackFees = numberValue(context.statement?.metrics?.chargebackFeeAmount);
+      if (chargebackCount <= 0 || chargebackFeeCap <= 0 || observedChargebackFees <= 0 || residualVariance <= 1) return null;
+      const variance = Math.min(
+        roundCurrency(Math.max(0, observedChargebackFees - chargebackCount * chargebackFeeCap)),
+        residualVariance,
+      );
       if (variance <= 1) return null;
       return buildCitation("R073", Math.round(chargebackCount), variance, {
         chargeback_count: chargebackCount,
-        chargeback_fee: chargebackFee,
+        contracted_chargeback_fee_cap: chargebackFeeCap,
+        observed_chargeback_fees: observedChargebackFees,
       });
     },
   },
@@ -704,14 +738,13 @@ const M01_RULES: DeterministicRule[] = [
       const statement = context.statement?.metrics;
       const contract = context.contract;
       if (!statement || !contract || residualVariance <= 1) return null;
-      const monthlyFee = numberValue(contract.monthly_fee);
-      const serviceFeePool = numberValue(statement.serviceFeeAmount) + numberValue(statement.otherFeeAmount);
-      if (serviceFeePool <= monthlyFee || monthlyFee < 0) return null;
-      const variance = Math.min(roundCurrency(Math.max(0, serviceFeePool - monthlyFee)), residualVariance);
+      const pciFeeAmount = numberValue(statement.pciNonComplianceFeeAmount);
+      if (!truthyContractFlag(contract, "pci_compliant") || pciFeeAmount <= 0) return null;
+      const variance = Math.min(roundCurrency(pciFeeAmount), residualVariance);
       if (variance <= 1) return null;
       return buildCitation("R075", 1, variance, {
-        contracted_monthly_fee: monthlyFee,
-        service_fee_pool: roundCurrency(serviceFeePool),
+        pci_compliant: true,
+        pci_non_compliance_fee_amount: pciFeeAmount,
       });
     },
   },
@@ -728,10 +761,11 @@ const M01_RULES: DeterministicRule[] = [
       const feeAmount = numberValue(statement.feeAmount);
       const txnFee = numberValue(contract.txn_fee);
       const monthlyFee = numberValue(contract.monthly_fee);
+      const interchangeFees = numberValue(statement.interchangeFeeAmount);
       const transactionCount = Math.max(0, roundCurrency(numberValue(statement.transactionCount)));
       if (basisAmount <= 0 || markupBps <= 0 || feeAmount <= 0) return null;
       const observedRateBps =
-        ((feeAmount - transactionCount * txnFee - monthlyFee) / Math.max(basisAmount, 1)) * 10000;
+        ((feeAmount - interchangeFees - transactionCount * txnFee - monthlyFee) / Math.max(basisAmount, 1)) * 10000;
       const excessRateBps = observedRateBps - markupBps;
       if (excessRateBps <= 0) return null;
       const variance = Math.min(roundCurrency((basisAmount * excessRateBps) / 10000), residualVariance);
@@ -739,6 +773,7 @@ const M01_RULES: DeterministicRule[] = [
       return buildCitation("R078", 1, variance, {
         contracted_markup_bps: markupBps,
         excess_rate_bps: roundCurrency(excessRateBps),
+        observed_interchange_fees: interchangeFees,
         observed_rate_bps: roundCurrency(observedRateBps),
       });
     },
@@ -751,12 +786,19 @@ const M01_RULES: DeterministicRule[] = [
       const statement = context.statement?.metrics;
       const contract = context.contract;
       if (!statement || !contract || residualVariance <= 1) return null;
-      const actualFees = numberValue(statement.feeAmount);
-      const expectedTotal = computeExpectedM01Fees(statement, contract);
-      const unexplained = roundCurrency(actualFees - expectedTotal);
-      if (unexplained <= 1) return null;
-      const variance = Math.min(unexplained, residualVariance);
-      return buildCitation("R083", 1, variance, buildM01FeeGapSample(statement, contract, actualFees, expectedTotal, variance));
+      const statementFeeAmount = numberValue(statement.statementFeeAmount);
+      const contractedStatementFee = numberValue(contract.statement_fee_amount);
+      const electronicStatements = truthyContractFlag(contract, "electronic_statements_enabled");
+      const excess = electronicStatements
+        ? statementFeeAmount
+        : Math.max(0, statementFeeAmount - contractedStatementFee);
+      if (excess <= 1) return null;
+      const variance = Math.min(roundCurrency(excess), residualVariance);
+      return buildCitation("R083", 1, variance, {
+        contracted_statement_fee: contractedStatementFee,
+        electronic_statements_enabled: electronicStatements,
+        observed_statement_fee: statementFeeAmount,
+      });
     },
   },
   {
@@ -768,18 +810,14 @@ const M01_RULES: DeterministicRule[] = [
       const contract = context.contract;
       if (!statement || !contract || residualVariance <= 1) return null;
       const basisAmount = numberValue(statement.basisAmount);
-      const feeAmount = numberValue(statement.feeAmount);
-      const contractRateBps = numberValue(contract.markup_bps);
-      if (basisAmount <= 0 || feeAmount <= 0 || contractRateBps <= 0) return null;
-      const observedRateBps = (feeAmount / basisAmount) * 10000;
-      const deltaBps = observedRateBps - contractRateBps;
-      if (deltaBps <= 15) return null;
-      const variance = Math.min(roundCurrency((basisAmount * deltaBps) / 10000), residualVariance);
+      const rateIncreaseVariance = numberValue(statement.rateIncreaseVarianceAmount);
+      if (basisAmount <= 0 || rateIncreaseVariance <= 0 || !truthyContractFlag(contract, "rate_increase_notice_missing")) return null;
+      const variance = Math.min(roundCurrency(rateIncreaseVariance), residualVariance);
       if (variance <= 1) return null;
       return buildCitation("R085", 1, variance, {
-        contracted_rate_bps: contractRateBps,
-        observed_rate_bps: roundCurrency(observedRateBps),
-        rate_delta_bps: roundCurrency(deltaBps),
+        basis_amount: basisAmount,
+        rate_increase_notice_missing: true,
+        rate_increase_variance_amount: rateIncreaseVariance,
       });
     },
   },
@@ -805,6 +843,7 @@ const M02_RULES: DeterministicRule[] = [
       );
       if (observedRate <= expectedRate + 0.5 || variance <= 1) return null;
       return {
+        disposition: "monetary",
         firedCount: 1,
         ruleId: "DSP-COM-04",
         ruleVersion: RULE_VERSION,
@@ -848,6 +887,7 @@ const M02_RULES: DeterministicRule[] = [
       );
       if (variance <= 1) return null;
       return {
+        disposition: "monetary",
         firedCount: 1,
         ruleId: "DSP-COM-05",
         ruleVersion: RULE_VERSION,
@@ -1012,6 +1052,7 @@ const M02_RULES: DeterministicRule[] = [
       const variance = Math.min(roundCurrency(avgFeePerOrder * duplicateCount), residualVariance);
       if (variance <= 1) return null;
       return {
+        disposition: "monetary",
         firedCount: duplicateCount,
         ruleId: "DSP-DUP-01",
         ruleVersion: RULE_VERSION,
@@ -1045,6 +1086,7 @@ const M02_RULES: DeterministicRule[] = [
       );
       if (variance <= 1) return null;
       return {
+        disposition: "monetary",
         firedCount: 1,
         ruleId: "DSP-VAR-11",
         ruleVersion: RULE_VERSION,
@@ -1427,12 +1469,12 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
     dimensions,
     trustGates,
   });
-  const ruleCitations = [
+  const ruleCitations = capAttributedMonetaryCitations([
     ...loopARuleCitations,
     ...governanceRuleCitations,
     ...ingestionRuleCitations,
     ...trustGateRuleCitations,
-  ];
+  ], recoveryValue);
   const { score, certificationZone } = computeTrustScoreFromTrustGates(trustGates, systemHealth);
   const findingClass = classifyFindingClass(ruleCitations, context);
   const findings = buildOperationalFindings(
@@ -1487,6 +1529,9 @@ function runLoopA(context: RuleContext, recoveryValue: number) {
   let residualVariance = Math.max(0, recoveryValue);
 
   for (const rule of rules) {
+    if (context.moduleId === "M01" && !COURT_SUPPORTED_M01_RULE_IDS.has(rule.id)) {
+      continue;
+    }
     const citation = rule.evaluate(context, residualVariance);
     if (!citation) continue;
     citations.push(citation);
@@ -1494,6 +1539,31 @@ function runLoopA(context: RuleContext, recoveryValue: number) {
   }
 
   return citations;
+}
+
+const COURT_SUPPORTED_M01_RULE_IDS = new Set([
+  "R060",
+  "R063",
+  "R064",
+  "R068",
+  "R072",
+  "R073",
+  "R075",
+  "R078",
+  "R083",
+  "R085",
+  "R086",
+]);
+
+function capAttributedMonetaryCitations(citations: RuleCitation[], recoveryValue: number) {
+  let remainingCents = dollarsToCents(Math.max(0, recoveryValue));
+  return citations.flatMap((citation) => {
+    if (citation.disposition !== "monetary") return [citation];
+    const attributedCents = Math.min(Math.max(0, citation.varianceCents), remainingCents);
+    if (attributedCents <= 0) return [];
+    remainingCents -= attributedCents;
+    return [{ ...citation, varianceCents: attributedCents }];
+  });
 }
 
 function buildCanonicalGovernanceCitations({
@@ -1525,10 +1595,15 @@ function buildCanonicalGovernanceCitations({
   const systematicVariance = Math.abs(centsToDollars(varianceCents)) >= Math.max(50, recoveryValue * 0.2);
 
   if (context.moduleId === "M01") {
-    if (numberValue(context.statement?.metrics?.errorChargeAmount) > 0) {
+    const mfrErrorRate = numberValue(context.statement?.metrics?.feeAmount) > 0
+      ? Math.abs(centsToDollars(varianceCents)) / numberValue(context.statement?.metrics?.feeAmount)
+      : 0;
+    if (mfrErrorRate > 0.03) {
       citations.push(buildNarrativeCitation("R087", {
-        detail: "Processor-side error charges remain present in governed source evidence.",
-        error_charge_amount: numberValue(context.statement?.metrics?.errorChargeAmount),
+        detail: "Certified MFR variance exceeds 3% of the processing fees reviewed.",
+        error_rate_pct: roundCurrency(mfrErrorRate * 100),
+        processing_fees_reviewed: numberValue(context.statement?.metrics?.feeAmount),
+        variance_cents: varianceCents,
       }));
     }
     if (recoveryValue < 250) {
@@ -1543,39 +1618,9 @@ function buildCanonicalGovernanceCitations({
         detail: "Governed contract values are missing for this MFR workspace.",
       }));
     }
-    if (systematicVariance) {
-      citations.push(buildNarrativeCitation("R091", {
-        detail: "Observed MFR variance is systematic enough to require remediation before release.",
-        recovery_value: recoveryValue,
-        variance_cents: varianceCents,
-      }));
-    }
-    if (!periodComplete) {
-      citations.push(buildNarrativeCitation("R092", {
-        detail: "The current MFR evidence package is period-incomplete.",
-        has_agreement: hasAgreement,
-        has_bank: hasBank,
-        has_pos: hasPos,
-        has_statement: hasStatement,
-      }));
-    }
     if (trustGates.TG07.scorePct < 85 || trustGates.TG10.scorePct < 100) {
       citations.push(buildNarrativeCitation("R093", {
         detail: "MFR trust-score contribution remains below the final release gate.",
-        tg07: trustGates.TG07.scorePct,
-        tg10: trustGates.TG10.scorePct,
-      }));
-    }
-    if (!auditComplete) {
-      citations.push(buildNarrativeCitation("R094", {
-        auditability_score: dimensions.Auditability,
-        detail: "Audit lineage is incomplete for this MFR certification set.",
-      }));
-    }
-    if (!gateReady || !systemHealth.masterSystemHealthy) {
-      citations.push(buildNarrativeCitation("R095", {
-        detail: "Final MFR narrative token set is not releasable because governance or health gates remain open.",
-        master_system_healthy: systemHealth.masterSystemHealthy,
         tg07: trustGates.TG07.scorePct,
         tg10: trustGates.TG10.scorePct,
       }));
@@ -1889,6 +1934,7 @@ function buildCanonicalIngestionCitations(context: RuleContext) {
       detail: hasDateRange
         ? "Date-range validation produced a usable governed certification window."
         : "Date-range validation could not be confirmed from the active governed package.",
+      date_range_ready: hasDateRange,
       settlement_lag_days_avg: numberValue(statementMetrics?.settlementLagDaysAvg),
     }),
     buildNarrativeCitation("R012", {
@@ -1936,12 +1982,18 @@ function buildCanonicalTrustGateCitations({
   const duplicateDetected =
     numberValue(context.statement?.metrics?.duplicateOrderCount) > 0 ||
     numberValue(context.statement?.metrics?.duplicateTransactionCount) > 0;
-  const contractAgeDays = (() => {
-    const contractEffectiveDate = parseDateValue(context.contract?.effective_date);
-    return contractEffectiveDate === null
-      ? null
-      : Math.floor((context.evaluationDate.getTime() - contractEffectiveDate.getTime()) / (1000 * 60 * 60 * 24));
-  })();
+  const contractExpirationDate = parseDateValue(
+    context.contract?.expiration_date ||
+    context.contract?.contract_expiration_date ||
+    context.contract?.expires_on,
+  );
+  const contractExpired = Boolean(
+    contractExpirationDate && contractExpirationDate.getTime() < context.evaluationDate.getTime(),
+  );
+  const formulaChangedDuringPeriod = truthyContractFlag(
+    context.contract,
+    "formula_version_changed_during_period",
+  );
   const tg07VarianceCitations = new Set([
     "MFR-BIL-15",
     "R083",
@@ -1952,6 +2004,12 @@ function buildCanonicalTrustGateCitations({
     "R091",
   ]);
   const narrativeReady = trustGates.TG08.scorePct >= 100 && trustGates.TG09.scorePct >= 100;
+  const processorBasis = numberValue(context.statement?.metrics?.basisAmount);
+  const posBasis = numberValue(context.pos?.metrics?.basisAmount);
+  const reconciliationDifference = Math.abs(processorBasis - posBasis);
+  const reconciliationDifferencePct = processorBasis > 0
+    ? (reconciliationDifference / processorBasis) * 100
+    : null;
 
   const citations = [
     buildNarrativeCitation("R116", {
@@ -1979,19 +2037,24 @@ function buildCanonicalTrustGateCitations({
     buildNarrativeCitation("R120", {
       detail:
         context.contract && contractFieldCount(context.contract) >= 3
-          ? "Vendor profile is present for the certification period."
+          ? "Vendor profile terms are present. Profile-update age was not inferred from the contract effective date."
           : "Vendor profile is absent for the certification period.",
       contract_fields: context.contract ? contractFieldCount(context.contract) : 0,
     }),
     buildNarrativeCitation("R121", {
       detail:
-        contractAgeDays !== null && contractAgeDays <= 180
-          ? "Contract currency remains within the governed freshness window."
-          : "Contract currency is stale or not provable for the governed period.",
-      contract_age_days: contractAgeDays,
+        contractExpired
+          ? "The governed contract expiration date precedes the certification evaluation date."
+          : "No expired contract date is recorded for the certification period.",
+      contract_expiration_date: contractExpirationDate?.toISOString() ?? null,
+      contract_expired: contractExpired,
     }),
     buildNarrativeCitation("R122", {
       detail: `TG04 POS reconciliation resolved at ${trustGates.TG04.scorePct}.`,
+      difference_amount: roundCurrency(reconciliationDifference),
+      difference_percent: reconciliationDifferencePct === null ? null : roundCurrency(reconciliationDifferencePct),
+      pos_basis: roundCurrency(posBasis),
+      processor_basis: roundCurrency(processorBasis),
       tg04_score: trustGates.TG04.scorePct,
     }),
     buildNarrativeCitation("R123", {
@@ -2016,6 +2079,10 @@ function buildCanonicalTrustGateCitations({
     }),
     buildNarrativeCitation("R126", {
       detail: `TG06 period coverage resolved at ${trustGates.TG06.scorePct}.`,
+      agreement_present: Boolean(context.agreement?.uploaded),
+      bank_present: Boolean(context.bank?.uploaded),
+      pos_present: Boolean(context.pos?.uploaded),
+      processor_present: Boolean(context.statement?.uploaded),
       tg06_score: trustGates.TG06.scorePct,
     }),
     buildNarrativeCitation("R127", {
@@ -2052,9 +2119,10 @@ function buildCanonicalTrustGateCitations({
     }),
     buildNarrativeCitation("R132", {
       detail:
-        trustGates.TG08.scorePct >= 100
-          ? "No mid-period formula change risk remains in the governed package."
-          : "A mid-period or incomplete formula risk remains in the governed package.",
+        formulaChangedDuringPeriod
+          ? "A governed formula-version change is recorded during the certification period."
+          : "No governed mid-period formula-version change is recorded.",
+      formula_version_changed_during_period: formulaChangedDuringPeriod,
       tg08_score: trustGates.TG08.scorePct,
     }),
     buildNarrativeCitation("R133", {
@@ -2152,11 +2220,14 @@ function computeTrustGateScores({
     statementBasis > 0 && posBasis > 0
       ? relativeDelta(statementBasis, posBasis) * 100
       : null;
-  const contractEffectiveDate = parseDateValue(context.contract?.effective_date);
-  const contractAgeDays =
-    contractEffectiveDate === null
-      ? null
-      : Math.floor((context.evaluationDate.getTime() - contractEffectiveDate.getTime()) / (1000 * 60 * 60 * 24));
+  const contractExpirationDate = parseDateValue(
+    context.contract?.expiration_date ||
+    context.contract?.contract_expiration_date ||
+    context.contract?.expires_on,
+  );
+  const contractExpired = Boolean(
+    contractExpirationDate && contractExpirationDate.getTime() < context.evaluationDate.getTime(),
+  );
   const statementPresent = Boolean(context.statement?.uploaded);
   const posPresent = Boolean(context.pos?.uploaded);
   const agreementPresent = Boolean(context.agreement?.uploaded);
@@ -2208,14 +2279,14 @@ function computeTrustGateScores({
     "TG03",
     !context.contract || contractFieldCount(context.contract) < 3
       ? 0
-      : contractAgeDays !== null && contractAgeDays > 180
+      : contractExpired
         ? 50
         : 100,
     !context.contract || contractFieldCount(context.contract) < 3
       ? "No governed vendor profile / contract terms are available for the certification period."
-      : contractAgeDays !== null && contractAgeDays > 180
-        ? "Vendor profile is present but older than the 180-day currency window."
-        : "Vendor profile and contract terms are current for the certification period.",
+      : contractExpired
+        ? "The governed contract expiration date precedes the certification evaluation date."
+        : "Vendor profile terms are present and no expired contract date is recorded.",
     ["R120", "R121"],
   );
 
@@ -2253,18 +2324,22 @@ function computeTrustGateScores({
     "TG06",
     cadence === "weekly_preliminary"
       ? Math.max(75, dimensions["Data Freshness"])
-      : coreStructuredPackageReady
-        ? 75
-      : allRequiredArtifactsPresent
-        ? Math.max(80, dimensions["Data Freshness"])
-        : 40,
+      : allRequiredArtifactsGoverned
+        ? 100
+        : allRequiredArtifactsPresent
+          ? Math.max(80, dimensions["Data Freshness"])
+          : coreStructuredPackageReady
+            ? 75
+            : 40,
     cadence === "weekly_preliminary"
       ? "Weekly preliminary coverage is accepted without the final bank evidence gate."
-      : coreStructuredPackageReady
-        ? "Core source artifacts cover the active period, but monthly-final release is still awaiting the bank tie-out package."
-      : allRequiredArtifactsPresent
-        ? "Required certification artifacts cover the active period without a visible evidence gap."
-        : "One or more required period artifacts are missing, so coverage remains incomplete.",
+      : allRequiredArtifactsGoverned
+        ? "All required monthly-final artifacts, including governed bank evidence, cover the active period."
+        : allRequiredArtifactsPresent
+          ? "All required files are present, but one or more artifacts still lacks governed field, schema, or integrity validation."
+          : coreStructuredPackageReady
+            ? "Core source artifacts cover the active period, but monthly-final release is still awaiting the bank tie-out package."
+            : "One or more required period artifacts are missing, so coverage remains incomplete.",
     ["R126", "R127"],
   );
 
@@ -2880,6 +2955,7 @@ function buildCitation(
   sampleEvidence: Record<string, unknown>,
 ): RuleCitation {
   return {
+    disposition: varianceDollars !== 0 ? "monetary" : "blocking",
     firedCount,
     ruleId,
     ruleVersion: RULE_VERSION,
@@ -2890,12 +2966,65 @@ function buildCitation(
 
 function buildNarrativeCitation(ruleId: string, sampleEvidence: Record<string, unknown>): RuleCitation {
   return {
+    disposition: resolveNarrativeCitationDisposition(ruleId, sampleEvidence),
     firedCount: 1,
     ruleId,
     ruleVersion: RULE_VERSION,
     sampleEvidence: [sampleEvidence],
     varianceCents: 0,
   };
+}
+
+function resolveNarrativeCitationDisposition(
+  ruleId: string,
+  sample: Record<string, unknown>,
+): RuleCitation["disposition"] {
+  const bool = (key: string) => sample[key] === true;
+  const number = (key: string) => typeof sample[key] === "number" ? sample[key] as number : 0;
+
+  if (["R002", "R003", "R016", "R045", "R046", "R048", "R051", "R053", "R088", "R089", "R093", "R098", "R107", "R108", "R109", "R110", "R111", "R112", "R113", "R116", "R118", "R122", "R126", "R128", "R129"].includes(ruleId)) {
+    return "informational";
+  }
+
+  switch (ruleId) {
+    case "R001": return bool("uploaded") ? "informational" : "blocking";
+    case "R004": return bool("metrics_present") ? "informational" : "blocking";
+    case "R005":
+    case "R007":
+    case "R008":
+    case "R009": return bool("schema_ready") ? "passed" : "blocking";
+    case "R006": return bool("governed_fields_ready") ? "passed" : "blocking";
+    case "R010": return number("duplicate_order_count") > 0 || number("duplicate_transaction_count") > 0 ? "blocking" : "passed";
+    case "R011": return bool("date_range_ready") ? "passed" : "blocking";
+    case "R012": return number("normalized_amount_basis") > 0 ? "passed" : "blocking";
+    case "R013": return bool("negative_signal_detected") ? "blocking" : "passed";
+    case "R014": return number("contract_fields") >= 3 ? "passed" : "blocking";
+    case "R015": return bool("source_uploaded") && bool("pos_uploaded") && bool("agreement_uploaded") && bool("bank_uploaded") ? "passed" : "blocking";
+    case "R096": return bool("royalty_source_uploaded") ? "informational" : "blocking";
+    case "R097": return number("certified_gross_sales") > 0 ? "informational" : "blocking";
+    case "R102": return number("marketing_variance") > 0 ? "blocking" : "passed";
+    case "R103": return number("variance_pct") > 1 ? "blocking" : "passed";
+    case "R104": return bool("chronic_underreport_pattern") ? "blocking" : "passed";
+    case "R105": return sample.contract_age_days === null ? "blocking" : "informational";
+    case "R106": return bool("agreement_uploaded") ? "passed" : "blocking";
+    case "R114": return number("auditability_score") >= 100 ? "passed" : "blocking";
+    case "R115": return bool("gate_ready") && bool("marketing_ready") && bool("royalty_ready") ? "passed" : "blocking";
+    case "R117": return bool("pos_uploaded") ? "passed" : "blocking";
+    case "R119": return bool("source_hash") && bool("pos_hash") ? "passed" : "blocking";
+    case "R120": return number("contract_fields") >= 3 ? "informational" : "blocking";
+    case "R121": return bool("contract_expired") ? "blocking" : "informational";
+    case "R123": return number("reconciliation_score") >= 85 ? "passed" : "blocking";
+    case "R124": return bool("duplicate_detected") ? "informational" : "passed";
+    case "R125": return number("duplicate_order_count") > 0 || number("duplicate_transaction_count") > 0 ? "blocking" : "passed";
+    case "R127": return number("tg06_score") < 75 ? "blocking" : "passed";
+    case "R130": return bool("high_variance_flag") ? "blocking" : "passed";
+    case "R131": return number("tg08_score") >= 100 ? "passed" : "blocking";
+    case "R132": return bool("formula_version_changed_during_period") ? "blocking" : "passed";
+    case "R133": return number("tg09_score") >= 100 ? "passed" : "blocking";
+    case "R134": return number("tg08_score") >= 100 && number("tg09_score") >= 100 ? "passed" : "blocking";
+    case "R135": return number("tg11_score") >= 100 ? "passed" : "blocking";
+    default: return "blocking";
+  }
 }
 
 function dedupeRuleCitations(citations: RuleCitation[]) {
@@ -2920,16 +3049,11 @@ function buildSupplementalM01CanonicalCitations(
   const vendor = resolveVendorName(context);
   const actualFees = numberValue(statement.feeAmount);
   const basisAmount = numberValue(statement.basisAmount);
-  const otherFees = numberValue(statement.otherFeeAmount) + numberValue(statement.serviceFeeAmount);
   const debitVolume = numberValue(statement.visaDebitAmount) + numberValue(statement.mcDebitAmount);
   const duplicateTxnCount = numberValue(statement.duplicateTransactionCount);
   const chargebackCount = numberValue(statement.chargebackCount);
   const amexVolume = numberValue(statement.visaCreditAmount) + numberValue(statement.mcCreditAmount);
-  const transactionCount = Math.max(1, numberValue(statement.transactionCount));
   const effectiveRatePct = basisAmount > 0 ? (actualFees / basisAmount) * 100 : 0;
-  const expectedTotal = computeExpectedM01Fees(statement, contract);
-  const keyedPressure = transactionCount > 0 ? roundCurrency((otherFees / transactionCount) * 100) : 0;
-  const markupVariance = Math.max(0, roundCurrency(actualFees - expectedTotal));
   const surchargeRatePct = numberValue(contract.surcharge_rate_pct || contract.applied_surcharge_rate_pct);
   const surchargeCapPct = Math.min(
     4,
@@ -2939,15 +3063,6 @@ function buildSupplementalM01CanonicalCitations(
   const volumeDiscountThreshold = numberValue(contract.volume_discount_threshold || contract.discount_threshold_volume);
   const expectedVolumeDiscountPct = numberValue(contract.volume_discount_pct || contract.discount_rate_pct);
 
-  if (debitVolume > 0 && markupVariance > 0) {
-    citations.push(buildCitation("R056", 1, Math.min(markupVariance, Math.max(recoveryValue, markupVariance)), {
-      debit_volume: debitVolume,
-      detail: "Observed interchange-side fee burden remains above the governed category expectation for debit mix.",
-      expected_fee_amount: expectedTotal,
-      observed_fee_amount: actualFees,
-      unexplained_fee_delta: markupVariance,
-    }));
-  }
   if (textValue(contract.sic_code) && textValue(contract.certified_sic_code) && textValue(contract.sic_code) !== textValue(contract.certified_sic_code)) {
     citations.push(buildNarrativeCitation("R057", {
       certified_sic_code: textValue(contract.certified_sic_code),
@@ -2963,11 +3078,11 @@ function buildSupplementalM01CanonicalCitations(
       observed_fee_amount: actualFees,
     }));
   }
-  if (otherFees > Math.max(5, numberValue(contract.monthly_fee)) && !truthyContractFlag(contract, "other_fees_authorized")) {
-    citations.push(buildCitation("R059", 1, Math.min(otherFees, Math.max(recoveryValue, otherFees)), {
-      authorized_monthly_fee: numberValue(contract.monthly_fee),
-      detail: "Observed non-interchange fee pool exceeds governed recurring fees without explicit authorization.",
-      observed_other_fee_pool: roundCurrency(otherFees),
+  const uncontractedFeeAmount = numberValue(statement.uncontractedFeeAmount);
+  if (uncontractedFeeAmount > 0) {
+    citations.push(buildCitation("R059", 1, Math.min(uncontractedFeeAmount, Math.max(recoveryValue, uncontractedFeeAmount)), {
+      detail: "Source evidence identifies a fee line with no corresponding governed contract term.",
+      uncontracted_fee_amount: uncontractedFeeAmount,
     }));
   }
   if (
@@ -2977,104 +3092,112 @@ function buildSupplementalM01CanonicalCitations(
   ) {
     const surchargedVolume = Math.max(debitVolume, basisAmount);
     const excessRatePct = Math.max(0, surchargeRatePct - surchargeCapPct);
-    const surchargeVariance = roundCurrency((surchargedVolume * excessRatePct) / 100);
-    citations.push(buildCitation("R061", 1, Math.min(Math.max(surchargeVariance, otherFees), Math.max(recoveryValue, 0)), {
-      applied_surcharge_rate_pct: surchargeRatePct,
-      detail: "The governed surcharge rate exceeds the contractual or network cap.",
-      max_surcharge_rate_pct: surchargeCapPct,
-      surcharged_volume: surchargedVolume,
-    }));
-  }
-  if (debitVolume > 0 && otherFees > 0 && truthyContractFlag(contract, "surcharge_enabled")) {
-    citations.push(buildCitation("R062", 1, Math.min(otherFees, Math.max(recoveryValue, otherFees)), {
-      debit_volume: debitVolume,
-      detail: "Debit volume is present while surcharge-side fee pressure remains in the statement.",
-      surcharge_fee_pool: roundCurrency(otherFees),
-    }));
-  }
-  if (keyedPressure > 10 && truthyContractFlag(contract, "avs_required")) {
-    citations.push(buildNarrativeCitation("R065", {
-      avs_required: true,
-      detail: "Keyed or card-not-present pressure remains high despite governed AVS controls.",
-      keyed_fee_pressure_bps: keyedPressure,
-    }));
-  }
-  if (keyedPressure > 10 && truthyContractFlag(contract, "cvv_required")) {
-    citations.push(buildNarrativeCitation("R066", {
-      cvv_required: true,
-      detail: "Card-not-present fee pressure remains high despite governed CVV controls.",
-      keyed_fee_pressure_bps: keyedPressure,
-    }));
-  }
-  if (duplicateTxnCount > 0 && !truthyContractFlag(contract, "partial_auth_enabled")) {
-    citations.push(buildCitation("R067", Math.max(1, Math.round(duplicateTxnCount)), Math.min(actualFees, Math.max(recoveryValue, actualFees * 0.1)), {
-      detail: "Duplicate transaction behavior is inconsistent with a no-partial-auth governed profile.",
-      duplicate_transaction_count: duplicateTxnCount,
-      partial_auth_enabled: false,
-    }));
-  }
-  if (numberValue(contract.termination_fee_amount) > 0 && otherFees >= numberValue(contract.termination_fee_amount) && !truthyContractFlag(contract, "early_termination_triggered")) {
-    citations.push(buildCitation("R069", 1, numberValue(contract.termination_fee_amount), {
-      detail: "Termination-fee-sized charge appears without governed early termination trigger state.",
-      observed_other_fee_pool: roundCurrency(otherFees),
-      termination_fee_amount: numberValue(contract.termination_fee_amount),
-    }));
-  }
-  if (truthyContractFlag(contract, "surcharge_enabled") && surchargeRestrictedState(contract) && otherFees > 0) {
-    citations.push(buildCitation("R071", 1, Math.min(otherFees, Math.max(recoveryValue, otherFees)), {
-      detail: "Surcharge-side fee pressure appears in a surcharge-restricted jurisdiction.",
-      governed_state: textValue(contract.state || contract.jurisdiction),
-      surcharge_fee_pool: roundCurrency(otherFees),
-    }));
-  }
-  if (chargebackCount > 0 && numberValue(contract.chargeback_fee) > 0 && otherFees > 0) {
-    citations.push(buildCitation("R074", Math.max(1, Math.round(chargebackCount)), Math.min(roundCurrency(chargebackCount * numberValue(contract.chargeback_fee)), Math.max(recoveryValue, 0)), {
-      chargeback_count: chargebackCount,
-      chargeback_fee: numberValue(contract.chargeback_fee),
-      detail: "Chargeback-side fee pressure remains attributable to retrieval or representment handling.",
-    }));
-  }
-  if ((debitVolume > 0 || amexVolume > 0) && markupVariance > 0) {
-    citations.push(buildCitation("R076", 1, Math.min(markupVariance, Math.max(recoveryValue, markupVariance)), {
-      card_mix_volume: roundCurrency(debitVolume + amexVolume),
-      detail: "Observed statement fees remain above the governed interchange-table expectation for the active card mix.",
-      expected_fee_amount: expectedTotal,
-      observed_fee_amount: actualFees,
-    }));
-  }
-  if (vendor.includes("amex") || textValue(contract.amex_program).includes("optblue")) {
-    const feeShare = basisAmount > 0 ? roundCurrency((actualFees / basisAmount) * 100) : 0;
-    if (amexVolume > 0 && feeShare > 2.5) {
-      citations.push(buildCitation("R077", 1, Math.min(roundCurrency(actualFees * 0.12), Math.max(recoveryValue, 0)), {
-        amex_program: textValue(contract.amex_program) || "optblue",
-        amex_volume_proxy: amexVolume,
-        observed_effective_rate_pct: feeShare,
+    const surchargeVariance = Math.min(
+      roundCurrency((surchargedVolume * excessRatePct) / 100),
+      numberValue(statement.surchargeFeeAmount),
+    );
+    if (surchargeVariance > 0) {
+      citations.push(buildCitation("R061", 1, Math.min(surchargeVariance, Math.max(recoveryValue, surchargeVariance)), {
+        applied_surcharge_rate_pct: surchargeRatePct,
+        detail: "The identified surcharge rate exceeds the contractual or network cap.",
+        max_surcharge_rate_pct: surchargeCapPct,
+        surcharge_fee_amount: numberValue(statement.surchargeFeeAmount),
+        surcharged_volume: surchargedVolume,
       }));
     }
   }
-  if (truthyContractFlag(contract, "equipment_inactive") && otherFees > 0) {
-    citations.push(buildCitation("R080", 1, Math.min(otherFees, Math.max(recoveryValue, otherFees)), {
-      detail: "Fee pressure remains even though the governed contract marks inactive equipment.",
-      observed_other_fee_pool: roundCurrency(otherFees),
+  const debitSurchargeAmount = numberValue(statement.debitSurchargeAmount);
+  if (debitVolume > 0 && debitSurchargeAmount > 0) {
+    citations.push(buildCitation("R062", 1, Math.min(debitSurchargeAmount, Math.max(recoveryValue, debitSurchargeAmount)), {
+      debit_volume: debitVolume,
+      detail: "The source evidence identifies a surcharge applied to debit-card volume.",
+      debit_surcharge_amount: debitSurchargeAmount,
     }));
   }
-  if (truthyContractFlag(contract, "international_card_mix") && otherFees > 0) {
-    citations.push(buildCitation("R081", 1, Math.min(roundCurrency(otherFees * 0.35), Math.max(recoveryValue, 0)), {
-      detail: "International-card mix flag is active while extra fee pressure remains on the statement.",
-      observed_other_fee_pool: roundCurrency(otherFees),
+  if (numberValue(statement.avsDowngradeAmount) > 0 && truthyContractFlag(contract, "avs_required")) {
+    citations.push(buildNarrativeCitation("R065", {
+      avs_downgrade_amount: numberValue(statement.avsDowngradeAmount),
+      avs_required: true,
+      detail: "The source evidence identifies an AVS-related downgrade while AVS is contractually required.",
     }));
   }
-  if (!truthyContractFlag(contract, "dcc_allowed") && otherFees > 0 && textValue(contract.currency_mode).includes("conversion")) {
-    citations.push(buildCitation("R082", 1, Math.min(roundCurrency(otherFees * 0.4), Math.max(recoveryValue, 0)), {
-      currency_mode: textValue(contract.currency_mode),
-      detail: "Dynamic currency conversion-style pressure appears without governed DCC permission.",
-      observed_other_fee_pool: roundCurrency(otherFees),
+  if (numberValue(statement.cvvDowngradeAmount) > 0 && truthyContractFlag(contract, "cvv_required")) {
+    citations.push(buildNarrativeCitation("R066", {
+      cvv_required: true,
+      cvv_downgrade_amount: numberValue(statement.cvvDowngradeAmount),
+      detail: "The source evidence identifies a CVV-related downgrade while CVV is contractually required.",
     }));
   }
-  if (numberValue(contract.annual_fee_amount) <= 0 && otherFees >= 99) {
-    citations.push(buildCitation("R084", 1, Math.min(otherFees, Math.max(recoveryValue, otherFees)), {
-      detail: "A material recurring/annual-style fee pool is present without a governed annual fee term.",
-      observed_other_fee_pool: roundCurrency(otherFees),
+  const partialAuthDuplicateAmount = numberValue(statement.partialAuthDuplicateAmount);
+  if (duplicateTxnCount > 0 && partialAuthDuplicateAmount > 0) {
+    citations.push(buildCitation("R067", Math.max(1, Math.round(duplicateTxnCount)), Math.min(partialAuthDuplicateAmount, Math.max(recoveryValue, partialAuthDuplicateAmount)), {
+      detail: "The source evidence identifies a duplicate capture caused by partial-authorization handling.",
+      duplicate_transaction_count: duplicateTxnCount,
+      partial_auth_duplicate_amount: partialAuthDuplicateAmount,
+    }));
+  }
+  if (numberValue(statement.earlyTerminationFeeAmount) > 0 && !truthyContractFlag(contract, "early_termination_triggered")) {
+    citations.push(buildCitation("R069", 1, numberValue(statement.earlyTerminationFeeAmount), {
+      detail: "Source evidence identifies an early-termination fee without a governed termination trigger.",
+      early_termination_fee_amount: numberValue(statement.earlyTerminationFeeAmount),
+    }));
+  }
+  const restrictedSurchargeAmount = numberValue(statement.restrictedSurchargeAmount);
+  if (surchargeRestrictedState(contract) && restrictedSurchargeAmount > 0) {
+    citations.push(buildCitation("R071", 1, Math.min(restrictedSurchargeAmount, Math.max(recoveryValue, restrictedSurchargeAmount)), {
+      detail: "The source evidence identifies a surcharge in the governed restricted jurisdiction.",
+      governed_state: textValue(contract.state || contract.jurisdiction),
+      restricted_surcharge_amount: restrictedSurchargeAmount,
+    }));
+  }
+  const retrievalFeeAmount = numberValue(statement.retrievalFeeAmount);
+  if (chargebackCount > 0 && retrievalFeeAmount > 0 && numberValue(contract.retrieval_fee_amount) >= 0) {
+    const retrievalVariance = Math.max(0, retrievalFeeAmount - chargebackCount * numberValue(contract.retrieval_fee_amount));
+    citations.push(buildCitation("R074", Math.max(1, Math.round(chargebackCount)), Math.min(roundCurrency(retrievalVariance), Math.max(recoveryValue, 0)), {
+      chargeback_count: chargebackCount,
+      contracted_retrieval_fee: numberValue(contract.retrieval_fee_amount),
+      detail: "Identified retrieval or representment fees exceed the governed contract rate.",
+      observed_retrieval_fees: retrievalFeeAmount,
+    }));
+  }
+  if (numberValue(statement.interchangeMismatchAmount) > 0) {
+    citations.push(buildCitation("R076", 1, Math.min(numberValue(statement.interchangeMismatchAmount), Math.max(recoveryValue, numberValue(statement.interchangeMismatchAmount))), {
+      card_mix_volume: roundCurrency(debitVolume + amexVolume),
+      detail: "Source evidence identifies applied interchange rates that do not match the governed rate table.",
+      interchange_mismatch_amount: numberValue(statement.interchangeMismatchAmount),
+    }));
+  }
+  if (vendor.includes("amex") || textValue(contract.amex_program).includes("optblue")) {
+    if (amexVolume > 0 && numberValue(statement.amexOptBlueVarianceAmount) > 0) {
+      citations.push(buildCitation("R077", 1, Math.min(numberValue(statement.amexOptBlueVarianceAmount), Math.max(recoveryValue, 0)), {
+        amex_program: textValue(contract.amex_program) || "optblue",
+        amex_optblue_variance_amount: numberValue(statement.amexOptBlueVarianceAmount),
+        amex_volume: amexVolume,
+      }));
+    }
+  }
+  if (truthyContractFlag(contract, "equipment_inactive") && numberValue(statement.equipmentRentalFeeAmount) > 0) {
+    citations.push(buildCitation("R080", 1, Math.min(numberValue(statement.equipmentRentalFeeAmount), Math.max(recoveryValue, numberValue(statement.equipmentRentalFeeAmount))), {
+      detail: "An identified equipment-rental fee was charged for equipment marked inactive.",
+      equipment_rental_fee_amount: numberValue(statement.equipmentRentalFeeAmount),
+    }));
+  }
+  if (numberValue(statement.internationalFeeExcessAmount) > 0) {
+    citations.push(buildCitation("R081", 1, Math.min(numberValue(statement.internationalFeeExcessAmount), Math.max(recoveryValue, 0)), {
+      detail: "An identified international-transaction fee exceeds the governed rate or cap.",
+      international_fee_excess_amount: numberValue(statement.internationalFeeExcessAmount),
+    }));
+  }
+  if (!truthyContractFlag(contract, "dcc_allowed") && numberValue(statement.dccFeeAmount) > 0) {
+    citations.push(buildCitation("R082", 1, Math.min(numberValue(statement.dccFeeAmount), Math.max(recoveryValue, 0)), {
+      dcc_fee_amount: numberValue(statement.dccFeeAmount),
+      detail: "An identified dynamic-currency-conversion fee appears without governed permission.",
+    }));
+  }
+  if (numberValue(contract.annual_fee_amount) <= 0 && numberValue(statement.annualFeeAmount) > 0) {
+    citations.push(buildCitation("R084", 1, Math.min(numberValue(statement.annualFeeAmount), Math.max(recoveryValue, numberValue(statement.annualFeeAmount))), {
+      annual_fee_amount: numberValue(statement.annualFeeAmount),
+      detail: "An identified annual account fee is present without a governed annual-fee term.",
     }));
   }
   if (
@@ -3082,13 +3205,16 @@ function buildSupplementalM01CanonicalCitations(
     && monthlyVolume >= volumeDiscountThreshold
     && expectedVolumeDiscountPct > 0
   ) {
-    const missedDiscount = roundCurrency((basisAmount * expectedVolumeDiscountPct) / 100);
-    citations.push(buildCitation("R079", 1, Math.min(Math.max(missedDiscount, 0), Math.max(recoveryValue, 0)), {
-      detail: "Governed monthly volume is above the discount threshold but no explicit discount relief is reflected in the observed fee burden.",
-      expected_volume_discount_pct: expectedVolumeDiscountPct,
-      monthly_card_volume: monthlyVolume,
-      volume_discount_threshold: volumeDiscountThreshold,
-    }));
+    const missedDiscount = numberValue(statement.missedVolumeDiscountAmount);
+    if (missedDiscount > 0) {
+      citations.push(buildCitation("R079", 1, Math.min(missedDiscount, Math.max(recoveryValue, missedDiscount)), {
+        detail: "Source evidence identifies a contracted volume discount that was not applied.",
+        expected_volume_discount_pct: expectedVolumeDiscountPct,
+        missed_volume_discount_amount: missedDiscount,
+        monthly_card_volume: monthlyVolume,
+        volume_discount_threshold: volumeDiscountThreshold,
+      }));
+    }
   }
   if (recoveryValue >= 250) {
     citations.push(buildNarrativeCitation("R089", {
@@ -3347,12 +3473,13 @@ function moduleRequiresBank(context: RuleContext) {
 
 function computeExpectedM01Fees(metrics: Metrics, contract: Record<string, string>) {
   const basisAmount = numberValue(metrics.basisAmount);
+  const interchangeFees = numberValue(metrics.interchangeFeeAmount);
   const markupBps = numberValue(contract.markup_bps);
   const txnFee = numberValue(contract.txn_fee);
   const monthlyFee = numberValue(contract.monthly_fee);
   const transactionCount = Math.max(0, roundInteger(numberValue(metrics.transactionCount)));
   return roundCurrency(
-    basisAmount * (markupBps / 10000) + (transactionCount * txnFee) + monthlyFee,
+    interchangeFees + basisAmount * (markupBps / 10000) + (transactionCount * txnFee) + monthlyFee,
   );
 }
 
@@ -3372,6 +3499,7 @@ function buildM01FeeGapSample(metrics: Metrics, contract: Record<string, string>
     contracted_monthly_fee: monthlyFee,
     contracted_per_txn_fee: txnFee,
     expected_fee_amount: expectedTotal,
+    expected_interchange_component: numberValue(metrics.interchangeFeeAmount),
     expected_markup_component: markupComponent,
     expected_monthly_component: monthlyFee,
     expected_txn_component: txnComponent,
@@ -3383,20 +3511,20 @@ function buildM01FeeGapSample(metrics: Metrics, contract: Record<string, string>
 function getM01RateTable(contract?: Record<string, string> | null) {
   return {
     mastercard_credit: {
-      fixedCents: numberValue(contract?.mastercard_credit_fixed_cents) || 10,
-      ratePct: numberValue(contract?.mastercard_credit_rate_pct) || 1.85,
+      fixedCents: numberValue(contract?.mastercard_credit_fixed_cents),
+      ratePct: numberValue(contract?.mastercard_credit_rate_pct),
     },
     mastercard_debit: {
-      fixedCents: numberValue(contract?.mastercard_debit_fixed_cents) || 22,
-      ratePct: numberValue(contract?.mastercard_debit_rate_pct) || 0.05,
+      fixedCents: numberValue(contract?.mastercard_debit_fixed_cents),
+      ratePct: numberValue(contract?.mastercard_debit_rate_pct),
     },
     visa_credit: {
-      fixedCents: numberValue(contract?.visa_credit_fixed_cents) || 10,
-      ratePct: numberValue(contract?.visa_credit_rate_pct) || 1.85,
+      fixedCents: numberValue(contract?.visa_credit_fixed_cents),
+      ratePct: numberValue(contract?.visa_credit_rate_pct),
     },
     visa_debit: {
-      fixedCents: numberValue(contract?.visa_debit_fixed_cents) || 22,
-      ratePct: numberValue(contract?.visa_debit_rate_pct) || 0.05,
+      fixedCents: numberValue(contract?.visa_debit_fixed_cents),
+      ratePct: numberValue(contract?.visa_debit_rate_pct),
     },
   };
 }

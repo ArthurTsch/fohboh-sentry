@@ -3042,7 +3042,15 @@ function mapAssignedRestaurantsToLocations(
         restaurant.unit_id?.trim() ||
         restaurant.store_id?.trim() ||
         `LOC-DB-${restaurant.id}`;
-      const modules = parseStoredModules(restaurant.sentry_state?.modules_json);
+      const modules = parseStoredModules(restaurant.sentry_state?.modules_json)
+        .filter((module) => module.label === "M01" || module.label === "M02")
+        .map((module) => ({
+          ...module,
+          score:
+            module.label === "M01"
+              ? restaurant.sentry_state?.m01_score ?? module.score
+              : restaurant.sentry_state?.m02_score ?? module.score,
+        }));
       const persistedStatus = toLocationStatus(restaurant.sentry_state?.status);
       const status =
         restaurant.sentry_state?.completed && persistedStatus === "Onboarding"
@@ -3075,18 +3083,7 @@ function mapAssignedRestaurantsToLocations(
         recovery: restaurant.sentry_state?.recovery_display ?? "$0",
         status,
         lastCertified: restaurant.sentry_state?.last_certified ?? "Pending",
-        modules:
-          modules.length > 0
-            ? modules
-            : [
-                {
-                  label: "Evidence",
-                  score: 0,
-                  note: defaultEvidenceLifecycleNote(
-                    toGovernanceStatus(restaurant.sentry_state?.governance_status),
-                  ),
-                },
-              ],
+        modules,
       };
     });
 }
@@ -3168,18 +3165,6 @@ function toGovernanceStatus(value: string | undefined): "uninitialized" | "draft
   }
 
   return "uninitialized";
-}
-
-function defaultEvidenceLifecycleNote(status: "uninitialized" | "draft" | "sealed") {
-  if (status === "sealed") {
-    return "Governed setup is sealed. Upload the current certification-period evidence package to proceed.";
-  }
-
-  if (status === "draft") {
-    return "Governance work is in progress. WGS must finish and seal the active Schema Registry and Contract Config.";
-  }
-
-  return "Governance has not been initialized yet. Start the WGS onboarding and schema setup workflow first.";
 }
 
 function getRestaurantMarket(restaurant: Pick<DatabaseRestaurant, "city" | "country" | "location" | "state">) {
@@ -3476,9 +3461,7 @@ function applyLifecycleNotesToLocations({
       return location;
     }
 
-    const moduleNotes = new Map<string, { note: string; score: number }>();
-    const overallMissing: string[] = [];
-    const staleItems: string[] = [];
+    const moduleNotes = new Map<string, string>();
 
     for (const moduleId of activeModules) {
       const moduleTemplate = resolveModuleTemplate(uploadState, location.accountId, moduleId);
@@ -3521,10 +3504,6 @@ function applyLifecycleNotesToLocations({
         moduleMissing.push(`${moduleId} schema + contract seal`);
       }
 
-      if (latestUpdatedAt && isStaleArtifactDate(latestUpdatedAt)) {
-        staleItems.push(`${moduleId} evidence is older than 31 days`);
-      }
-
       const note =
         moduleMissing.length === 0
           ? latestUpdatedAt && isStaleArtifactDate(latestUpdatedAt)
@@ -3532,53 +3511,29 @@ function applyLifecycleNotesToLocations({
             : `${moduleId} setup is sealed and the current period evidence package is ready for rerun.`
           : `${moduleId} rerun blocked by missing ${moduleMissing.join(", ")}.`;
 
-      moduleNotes.set(moduleId, {
-        note,
-        score: moduleMissing.length === 0 ? (latestUpdatedAt && isStaleArtifactDate(latestUpdatedAt) ? 74 : 92) : Math.max(35, 100 - moduleMissing.length * 18),
-      });
-      overallMissing.push(...moduleMissing.map((item) => `${moduleId}: ${item}`));
+      moduleNotes.set(moduleId, note);
     }
 
-    const evidenceNote =
-      overallMissing.length === 0
-        ? staleItems.length === 0
-          ? "Static setup is sealed. Only current-period source files are needed for the next certification rerun."
-          : `Static setup is sealed. ${staleItems.join("; ")}. Upload only the new period files before rerun.`
-        : `Static setup is retained. Missing rerun prerequisites: ${overallMissing.join("; ")}.`;
-    const evidenceScore =
-      overallMissing.length === 0
-        ? staleItems.length === 0
-          ? 96
-          : 78
-        : Math.max(30, 95 - overallMissing.length * 10);
-
-    const nextModules = location.modules.map((module) => {
-      if (module.label === "Evidence") {
-        if (module.note !== evidenceNote || module.score !== evidenceScore) {
+    const nextModules = location.modules
+      .filter((module) => module.label === "M01" || module.label === "M02")
+      .map((module) => {
+        const nextState = moduleNotes.get(module.label);
+        if (!nextState) return module;
+        if (module.note !== nextState) {
           changed = true;
           locationChanged = true;
           return {
             ...module,
-            note: evidenceNote,
-            score: evidenceScore,
+            note: nextState,
           };
         }
         return module;
-      }
+      });
 
-      const nextState = moduleNotes.get(module.label);
-      if (!nextState) return module;
-      if (module.note !== nextState.note || module.score !== nextState.score) {
-        changed = true;
-        locationChanged = true;
-        return {
-          ...module,
-          note: nextState.note,
-          score: nextState.score,
-        };
-      }
-      return module;
-    });
+    if (nextModules.length !== location.modules.length) {
+      changed = true;
+      locationChanged = true;
+    }
 
     return locationChanged ? { ...location, modules: nextModules } : location;
   });

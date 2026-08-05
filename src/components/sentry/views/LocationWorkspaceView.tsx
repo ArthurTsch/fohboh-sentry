@@ -260,7 +260,7 @@ export function LocationWorkspaceView({
               {location.id} {location.market ? `• ${location.market}` : ""}
             </div>
             <div className="mt-5 flex flex-wrap gap-2">
-              {location.modules.map((module) => (
+              {location.modules.filter((module) => module.label === "M01" || module.label === "M02").map((module) => (
                 <span
                   key={`${location.id}:${module.label}`}
                   className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${
@@ -544,7 +544,7 @@ export function LocationWorkspaceView({
               />
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {location.modules.map((module) => (
+              {location.modules.filter((module) => module.label === "M01" || module.label === "M02").map((module) => (
                 <div key={`${location.id}:workspace:${module.label}`} className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-semibold text-[var(--text)]">{module.label}</div>

@@ -24,7 +24,7 @@ const M02_VENDORS: VendorCatalogEntry[] = [
   { key: "other", name: "Other" },
 ];
 
-function normalizeVendorToken(value: string) {
+export function normalizeVendorToken(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 

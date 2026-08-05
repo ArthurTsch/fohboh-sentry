@@ -69,17 +69,25 @@ export function CaarReportModal({
   const integrityReady = exhibits.every((row) => row.integrity === "Verified" || row.integrity === "Sealed");
   const evidenceRows = traceability?.evidence ?? [];
   const fieldAudit = traceability?.fieldAudit ?? [];
+  const informationalRuleCitations = traceability?.informationalRuleCitations ?? [];
   const passedRuleCitations = traceability?.passedRuleCitations ?? [];
   const reconciliationExceptions = traceability?.reconciliationExceptions ?? [];
   const reconciliationNotes = traceability?.reconciliationNotes ?? [];
   const reconciliationWarnings = traceability?.reconciliationWarnings ?? [];
   const ruleCitations = traceability?.ruleCitations ?? [];
+  const scoreDeductions = traceability?.scoreDeductions ?? [];
+  const primaryScoreDeductions = scoreDeductions.filter((row) => !row.consequential);
+  const consequentialScoreDeductions = scoreDeductions.filter((row) => row.consequential);
+  const primaryPointsLost = primaryScoreDeductions.reduce((sum, row) => sum + row.pointsLost, 0);
+  const consequentialPointsLost = consequentialScoreDeductions.reduce((sum, row) => sum + row.pointsLost, 0);
+  const pointsToEligibility = Math.max(0, 85 - (record.trustScore + consequentialPointsLost));
   const hasPersistedTraceability =
     Boolean(traceability?.certRunId) &&
     (Boolean(traceability?.ruleSetVersion) ||
       Boolean(traceability?.sealedAt) ||
       evidenceRows.length > 0 ||
       fieldAudit.length > 0 ||
+      informationalRuleCitations.length > 0 ||
       passedRuleCitations.length > 0 ||
       ruleCitations.length > 0);
   const monetaryRuleCitations = ruleCitations.filter((row) => !isZeroVarianceDisplay(row.varianceDisplay));
@@ -91,6 +99,9 @@ export function CaarReportModal({
   const reviewEvidence = evidenceRows.filter((row) => row.status === "review");
   const remediationSteps = [
     ...reconciliationExceptions,
+    ...primaryScoreDeductions.map((row) =>
+      `${row.gate} removed ${row.pointsLost.toFixed(2)} points. ${row.evidence[0] ?? "The deduction lacks persisted supporting evidence and must be re-evaluated."}`,
+    ),
     ...missingEvidence.map((row) => `Upload ${row.label} and persist it for this ${moduleId} certification package.`),
     ...reviewEvidence.map((row) => `Resolve review blockers on ${row.label} before treating it as governed evidence.`),
     ...unsupportedFieldAudit.map((row) => `Backfill ${row.field} from a persisted upload, sealed config, or stored engine output.`),
@@ -112,7 +123,9 @@ export function CaarReportModal({
       ? remediationSteps
       : !claimReady
         ? [
-            lowDimensions.length > 0
+            scoreDeductions.length > 0
+              ? `The Trust Score is ${record.trustScore}/100 because ${scoreDeductions.reduce((sum, row) => sum + row.pointsLost, 0).toFixed(2)} weighted trust-gate points were not earned. Review the deduction ledger below.`
+              : lowDimensions.length > 0
               ? `Trust Score remains below release because these MQ6 dimensions are still under the final gate: ${lowDimensions
                   .map((dimension) => `${dimension.name} (${dimension.score})`)
                   .join(", ")}.`
@@ -286,6 +299,47 @@ export function CaarReportModal({
           </div>
         </section>
 
+        <ReportCard
+          eyebrow="Score Deduction Ledger"
+          title={`${record.trustScore}/100 — complete score calculation`}
+          sub="A deduction is defensible only when its calculation, governing rules, and persisted evidence are shown together."
+        >
+          {scoreDeductions.length > 0 ? (
+            <div className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-4">
+                <ScoreLedgerStat label="Starting points" value="100.00" />
+                <ScoreLedgerStat label="Direct gate loss" value={`−${primaryPointsLost.toFixed(2)}`} />
+                <ScoreLedgerStat label="Eligibility consequence" value={`−${consequentialPointsLost.toFixed(2)}`} />
+                <ScoreLedgerStat label="Final score" value={record.trustScore.toFixed(2)} accent />
+              </div>
+              <div className="rounded-2xl border border-[rgba(27,106,201,0.2)] bg-[rgba(27,106,201,0.04)] p-4 text-sm leading-7 text-[var(--info)]">
+                <strong>Calculation:</strong> 100 − {primaryPointsLost.toFixed(2)} direct gate points − {consequentialPointsLost.toFixed(2)} eligibility points = {record.trustScore.toFixed(2)}. {pointsToEligibility > 0 ? `The pre-eligibility result needs ${pointsToEligibility.toFixed(2)} more weighted point${pointsToEligibility === 1 ? "" : "s"} to reach the 85-point TG11 threshold.` : "The pre-eligibility threshold is satisfied."}
+              </div>
+              {scoreDeductions.map((deduction) => (
+                <div key={deduction.gate} className={`rounded-2xl border p-4 ${deduction.supported ? "border-[var(--border)] bg-[var(--surface)]" : "border-[rgba(214,48,49,0.25)] bg-[rgba(214,48,49,0.05)]"}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="font-[family-name:var(--font-display)] text-lg font-bold text-[var(--text)]">
+                      {deduction.gate} · −{deduction.pointsLost.toFixed(2)} points {deduction.consequential ? "(eligibility consequence)" : "(direct deduction)"}
+                    </div>
+                    <span className={`rounded-full px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] ${deduction.supported ? "bg-[rgba(0,200,83,0.08)] text-[var(--success)]" : "bg-[rgba(214,48,49,0.08)] text-[var(--accent)]"}`}>
+                      {deduction.supported ? "Backed" : "Unsupported deduction"}
+                    </span>
+                  </div>
+                  <div className="mt-2 font-[family-name:var(--font-mono)] text-xs leading-6 text-[var(--muted)]">{deduction.calculation}</div>
+                  <div className="mt-3 space-y-2 text-sm leading-6 text-[var(--text)]">
+                    {deduction.evidence.length > 0 ? deduction.evidence.map((line) => <div key={line}>{line}</div>) : <div>No persisted supporting evidence was found.</div>}
+                  </div>
+                  <div className="mt-3 text-xs text-[var(--muted)]">Rules: {deduction.ruleIds.join(", ") || "none persisted"}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm text-[var(--muted)]">
+              No score deductions are recorded for this certification run.
+            </div>
+          )}
+        </ReportCard>
+
         <div className="grid gap-4 lg:grid-cols-2">
           <ReportCard eyebrow="Certification Output" title="Persisted result summary" sub="Only persisted engine outputs are shown here. Synthetic fee calculations were removed.">
             {traceabilityGap ? (
@@ -365,9 +419,9 @@ export function CaarReportModal({
         </div>
 
         <ReportCard
-          eyebrow="Scoring Methodology | MQ6 Framework"
-          title="Certification basis"
-          sub="Each dimension is rendered directly from the trust engine. No explanatory text may contradict component-level results."
+          eyebrow="Supporting Diagnostics | MQ6 Dimensions"
+          title="Evidence-quality diagnostics — not the final-score arithmetic"
+          sub="These six dimensions describe evidence quality. The official Trust Score is calculated from the eleven weighted trust gates shown in the Score Deduction Ledger above."
         >
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {mq6.map((row) => (
@@ -420,10 +474,7 @@ export function CaarReportModal({
               </>
             ) : (
               <>
-                Composite trust score for this report is <strong>{record.trustScore}/100</strong>.{" "}
-                {claimReady
-                  ? "The CAAR is Certified because the persisted engine output and required evidence package are both present."
-                  : "A high trust score alone is not enough. Unsupported fields, missing uploads, or review-state evidence still block certified release."}
+                These diagnostics produce a separate evidence-quality composite of <strong>{computeDimensionCompositeScore(record)}/100</strong>. They do not produce the official Trust Score of <strong>{record.trustScore}/100</strong>. The official result comes exclusively from TG01–TG11 and any persisted system-health penalty.
               </>
             )}
           </div>
@@ -542,6 +593,7 @@ export function CaarReportModal({
               <AttestRow label="Certification Timestamp" value={certificationDate} />
               <AttestRow label="Monetary Rule Citations" value={String(monetaryRuleCitations.length)} />
               <AttestRow label="Blocking Rule Citations" value={String(blockingRuleCitations.length)} />
+              <AttestRow label="Informational Rule Citations" value={String(informationalRuleCitations.length)} />
               <AttestRow label="Passed Rule Citations" value={String(passedRuleCitations.length)} />
               <AttestRow
                 label="Integrity Hash"
@@ -647,6 +699,57 @@ export function CaarReportModal({
             ) : (
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
                 No non-monetary blocking citations were persisted for this CAAR.
+              </div>
+            )}
+          </div>
+        </details>
+
+        <details className="rounded-[28px] border border-[rgba(27,106,201,0.2)] bg-[rgba(27,106,201,0.03)]">
+          <summary className="cursor-pointer list-none px-6 py-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--info)]">
+                  Informational Records
+                </div>
+                <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+                  Calculation and tracking records
+                </div>
+                <div className="mt-1 text-sm text-[var(--muted)]">
+                  These records do not independently establish a violation. Their calculated values may still explain the certification status.
+                </div>
+              </div>
+              <div className="rounded-full border border-[rgba(27,106,201,0.2)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--info)]">
+                {hasPersistedTraceability ? `${informationalRuleCitations.length} stored` : "Trace missing"}
+              </div>
+            </div>
+          </summary>
+          <div className="border-t border-[rgba(27,106,201,0.16)] px-6 py-6">
+            {informationalRuleCitations.length > 0 ? (
+              <SimpleTable
+                columns={["Rule", "Version", "Meaning", "Variance", "Sample Evidence"]}
+                rows={informationalRuleCitations.map((row) => [
+                  <RuleCitationCell
+                    key={`${row.ruleId}:${row.ruleVersion}:informational`}
+                    evidenceRows={evidenceRows}
+                    rule={row}
+                    moduleId={moduleId}
+                    disposition="informational"
+                  />,
+                  row.ruleVersion,
+                  buildInformationalMeaning(row),
+                  <VarianceCitationCell
+                    key={`${row.ruleId}:${row.ruleVersion}:informational:variance`}
+                    evidenceRows={evidenceRows}
+                    rule={row}
+                    moduleId={moduleId}
+                    disposition="informational"
+                  />,
+                  `${row.sampleEvidenceCount} sample entr${row.sampleEvidenceCount === 1 ? "y" : "ies"}`,
+                ])}
+              />
+            ) : (
+              <div className="rounded-2xl border border-[var(--border)] bg-white p-4 text-sm leading-7 text-[var(--muted)]">
+                No informational rule records were persisted for this CAAR.
               </div>
             )}
           </div>
@@ -867,6 +970,54 @@ function buildBlockingIssueSummary(
   return `${conciseRule.slice(0, 137)}...`;
 }
 
+function buildInformationalMeaning(rule: CaarRuleCitationRow) {
+  if (rule.ruleId === "R046") {
+    return "Recovery is at or below the review threshold. Retained for cumulative tracking; no certification action.";
+  }
+
+  if (rule.ruleId === "R051") {
+    return "Records the M02 Trust Score contribution. A low result may explain release status but is not an independent violation.";
+  }
+
+  if (rule.ruleId === "R088") {
+    return "M01 recovery is at or below the review threshold. Retained for cumulative tracking; no certification action.";
+  }
+
+  if (rule.ruleId === "R089") {
+    return "Records that M01 recovery crossed the routing threshold. This is a routing result, not an independent violation.";
+  }
+
+  if (rule.ruleId === "R091") {
+    return "Legacy record only. A systematic M01 pattern requires the same error across at least three periods; a single-period amount is insufficient.";
+  }
+
+  if (rule.ruleId === "R092") {
+    return "Legacy record only. Missing artifacts do not by themselves prove gaps in merchant-statement period coverage.";
+  }
+
+  if (rule.ruleId === "R093") {
+    return "Records the M01 Trust Score contribution. It is a calculation result, not an independent violation.";
+  }
+
+  if (rule.ruleId === "R094") {
+    return "Audit-finalization record. It does not independently establish that source evidence or a contractual control failed.";
+  }
+
+  if (rule.ruleId === "R095") {
+    return "Narrative-token workflow record. It does not independently establish a contractual violation.";
+  }
+
+  if (rule.ruleId === "R121") {
+    return "No explicit expired-contract date was recorded. An effective date alone is not evidence that a contract expired.";
+  }
+
+  if (rule.ruleId === "R132") {
+    return "No explicit mid-period formula-version change was recorded. General formula readiness is not proof that a version changed.";
+  }
+
+  return "Calculation history only; this record does not independently establish a violation.";
+}
+
 type RuleCitationTip = {
   canonicalDefinition: string;
   calculation: string;
@@ -877,7 +1028,7 @@ type RuleCitationTip = {
 
 type RuleTooltipOverride = Omit<RuleCitationTip, "canonicalDefinition">;
 
-type CitationDisposition = "monetary_problem" | "blocking_problem" | "passed";
+type CitationDisposition = "monetary_problem" | "blocking_problem" | "informational" | "passed";
 type CaarRuleCitationRow = NonNullable<CaarRecord["traceability"]>["ruleCitations"][number];
 type RuleCitationSample = Record<string, string | number | boolean | null>;
 
@@ -1120,18 +1271,24 @@ function describeRuleCitation(
   const outcomeLabel =
     disposition === "passed"
       ? "Passed control"
+      : disposition === "informational"
+        ? "Informational record"
       : disposition === "blocking_problem"
         ? "Blocking control"
         : "Monetary variance control";
   const outcomeText =
     disposition === "passed"
       ? detail ?? "This control was evaluated and did not block release for this persisted CAAR run."
+      : disposition === "informational"
+        ? detail ?? "This rule records calculation or tracking history and does not independently establish a violation."
       : disposition === "blocking_problem"
         ? detail ?? "This control remains a non-monetary blocker for release on this persisted CAAR run."
         : detail ?? "This control attributed non-zero variance on this persisted CAAR run.";
   const whyItAppears =
     disposition === "passed"
       ? "This row is shown in Passed Controls because the rule was recorded for audit traceability and finished without attributed variance."
+      : disposition === "informational"
+        ? "This row is shown in Informational Records because it preserves a calculated result or tracking history rather than asserting an independent violation."
       : disposition === "blocking_problem"
         ? "This row is shown in Blocking Controls because it recorded a release-blocking condition without assigning direct dollar variance."
         : "This row is shown in monetary findings because the stored engine output attributed non-zero dollar variance to this rule.";
@@ -1788,6 +1945,19 @@ function ValueChip({ accent = false, label, value }: { accent?: boolean; label: 
         {label}
       </div>
       <div className={`mt-2 text-2xl font-bold ${accent ? "text-[var(--accent)]" : "text-[var(--text)]"}`}>{value}</div>
+    </div>
+  );
+}
+
+function ScoreLedgerStat({ accent = false, label, value }: { accent?: boolean; label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-white p-4">
+      <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
+        {label}
+      </div>
+      <div className={`mt-2 font-[family-name:var(--font-display)] text-3xl font-extrabold ${accent ? "text-[var(--accent)]" : "text-[var(--text)]"}`}>
+        {value}
+      </div>
     </div>
   );
 }

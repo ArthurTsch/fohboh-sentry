@@ -103,18 +103,32 @@ export type CaarRuleCitationSummary = {
   varianceDisplay: string;
 };
 
+export type CaarScoreDeduction = {
+  calculation: string;
+  consequential: boolean;
+  evidence: string[];
+  gate: string;
+  pointsLost: number;
+  ruleIds: string[];
+  score: number;
+  supported: boolean;
+  weightPercent: number;
+};
+
 export type CaarTraceability = {
   certCompletedAt: string | null;
   certRunId: number | null;
   courtAdmissible: boolean | null;
   evidence: CaarEvidenceTrace[];
   fieldAudit: CaarFieldAudit[];
+  informationalRuleCitations?: CaarRuleCitationSummary[];
   module: "M01" | "M02" | "M03" | null;
   passedRuleCitations: CaarRuleCitationSummary[];
   reconciliationExceptions: string[];
   reconciliationNotes?: string[];
   reconciliationWarnings?: string[];
   ruleCitations: CaarRuleCitationSummary[];
+  scoreDeductions?: CaarScoreDeduction[];
   ruleSetVersion: string | null;
   sealedAt: string | null;
 };

@@ -17,6 +17,7 @@ import {
   type TrustGateName,
   type TrustGateScore,
 } from "@/lib/mge/engine";
+import { normalizeVendorToken } from "./vendor-catalog";
 
 export type CertificationStep = {
   detail: string;
@@ -413,10 +414,23 @@ function buildOverallCanonicalRuleCitations({
   const citations: RuleCitation[] = [];
   const activeModuleIds = activeModules.map((module) => module.moduleId);
   const totalRecovery = roundMoney(activeModules.reduce((sum, module) => sum + module.recoveryValue, 0));
+  const trustGateBreakdown = GATE_ORDER.map((gate) => ({
+    contribution: round(overallTrustGates[gate].scorePct * (GATE_WEIGHTS[gate] / 100)),
+    gate,
+    score: overallTrustGates[gate].scorePct,
+    weight_percent: GATE_WEIGHTS[gate],
+  }));
+  const trustGateSubtotal = round(
+    trustGateBreakdown.reduce((sum, gate) => sum + gate.contribution, 0),
+  );
 
   citations.push(
     buildOverallCitation("R136", {
       detail: "Composite Trust Score was calculated from the persisted TG01-TG11 framework and SYS penalty layer.",
+      final_score: trustScore,
+      system_health_penalty: overallSystemHealth.penaltyPoints,
+      trust_gate_breakdown: JSON.stringify(trustGateBreakdown),
+      trust_gate_subtotal: trustGateSubtotal,
       trust_score: trustScore,
     }),
   );
@@ -1056,8 +1070,13 @@ function resolveContractValues(
   vendorKey?: string,
 ) {
   const prefix = `${accountId}:${locationId}:${moduleId}:${artifactKey}:`;
-  const key = vendorKey
-    ? Object.keys(state).find((candidate) => candidate === `${prefix}${vendorKey}`)
+  const normalizedVendorKey = vendorKey ? normalizeVendorToken(vendorKey) : null;
+  const key = normalizedVendorKey
+    ? Object.keys(state).find(
+        (candidate) =>
+          candidate.startsWith(prefix) &&
+          normalizeVendorToken(candidate.slice(prefix.length)) === normalizedVendorKey,
+      )
     : Object.keys(state).find((candidate) => candidate.startsWith(prefix));
   return key ? state[key] : null;
 }
@@ -1719,6 +1738,12 @@ function buildOverallCitation(
   varianceCents = 0,
 ): RuleCitation {
   return {
+    disposition:
+      varianceCents !== 0
+        ? "monetary"
+        : sampleEvidence.impacts_certification === true
+          ? "blocking"
+          : "informational",
     firedCount: 1,
     ruleId,
     ruleVersion: "mge-v1.0.0",

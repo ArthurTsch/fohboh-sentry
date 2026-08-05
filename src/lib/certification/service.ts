@@ -13,6 +13,7 @@ import type {
   LocationRecord,
   SessionState,
 } from "@/components/sentry/types";
+import { normalizeVendorToken } from "@/components/sentry/vendor-catalog";
 import prisma from "@/lib/prisma";
 import { persistGeneratedCaar } from "@/lib/caar/persistence";
 import { ensureLocationV2ForRestaurant } from "@/lib/production/legacy-sync";
@@ -23,12 +24,12 @@ const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
 const CERTIFICATION_TRANSACTION_MAX_WAIT_MS = 10_000;
 const CERTIFICATION_TRANSACTION_TIMEOUT_MS = 30_000;
 const DIMENSION_WEIGHT_BPS: Record<string, number> = {
-  Auditability: 1000,
+  Auditability: 2000,
   "Cross-System Reconciliation": 2500,
-  "Data Completeness": 2500,
-  "Data Freshness": 500,
-  "Rule Integrity": 2000,
-  "Source Authenticity": 1500,
+  "Data Completeness": 1000,
+  "Data Freshness": 1000,
+  "Rule Integrity": 1500,
+  "Source Authenticity": 2000,
 };
 
 type ScopedRestaurant = {
@@ -134,7 +135,8 @@ function getArtifactStateKey(
   artifactKey: string,
   vendorKey?: string | null,
 ) {
-  return `${accountId}:${locationId}:${moduleId}:${artifactKey}:${vendorKey ?? "global"}`;
+  const normalizedVendorKey = vendorKey ? normalizeVendorToken(vendorKey) : "global";
+  return `${accountId}:${locationId}:${moduleId}:${artifactKey}:${normalizedVendorKey}`;
 }
 
 function toJsonValue(value: unknown) {
@@ -1156,6 +1158,7 @@ export async function executePersistedCertification({
             rule_id: citation.ruleId,
             rule_version: citation.ruleVersion,
             sample_evidence: toJsonValue({
+              disposition: citation.disposition,
               module: assessment.moduleId,
               samples: citation.sampleEvidence,
               uploadIds: moduleUploadIds,
@@ -1181,6 +1184,7 @@ export async function executePersistedCertification({
             rule_id: citation.ruleId,
             rule_version: citation.ruleVersion,
             sample_evidence: toJsonValue({
+              disposition: citation.disposition,
               module: "OVERALL",
               samples: citation.sampleEvidence,
               uploadIds: moduleUploadIds,

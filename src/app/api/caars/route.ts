@@ -7,8 +7,13 @@ import type {
   CaarProvenanceKind,
   CaarRecord,
   CaarRuleCitationSummary,
+  CaarScoreDeduction,
 } from "@/components/sentry/types";
 import { getScopedRestaurantIds } from "@/lib/auth/team-access";
+import {
+  getExplicitCitationDisposition,
+  isInformationalRuleCitation,
+} from "@/lib/mge/citation-disposition";
 
 function parseCurrencyToCents(value: string) {
   const numeric = Number(value.replace(/[^0-9.-]/g, "")) || 0;
@@ -310,10 +315,6 @@ function formatReferenceMonth(value: string) {
 
 function sampleSignalsProblem(sample: Record<string, unknown>) {
   for (const [key, value] of Object.entries(sample)) {
-    if (typeof value === "number" && key.endsWith("_score") && value < 85) {
-      return true;
-    }
-
     if (
       (key === "high_variance_flag" || key === "duplicate_detected") &&
       value === true
@@ -332,6 +333,13 @@ function sampleSignalsProblem(sample: Record<string, unknown>) {
       return true;
     }
 
+    if (
+      (key === "contract_expired" || key === "formula_version_changed_during_period") &&
+      value === true
+    ) {
+      return true;
+    }
+
     if (typeof value === "string") {
       const normalized = value.toLowerCase();
       if (
@@ -344,6 +352,10 @@ function sampleSignalsProblem(sample: Record<string, unknown>) {
           "was not rejected",
           "did not prevent normalization",
           "no negative-value normalization flags",
+          "no expired contract date is recorded",
+          "no governed mid-period formula-version change is recorded",
+          "no high-variance fee condition remains active",
+          "no major period-gap penalty remains active",
           "advanced into deterministic certification",
           "completed and produced governed metrics",
           "has been applied to the governed source artifact",
@@ -383,6 +395,11 @@ function isProblemRuleCitation(row: {
   sample_evidence: unknown;
   variance_cents: bigint;
 }) {
+  const explicitDisposition = getExplicitCitationDisposition(row.sample_evidence);
+  if (explicitDisposition) {
+    return explicitDisposition === "blocking" || explicitDisposition === "monetary";
+  }
+
   if (row.fired_count <= 0) {
     return false;
   }
@@ -546,6 +563,92 @@ function buildRuleCitationSummaries(
     sampleEvidenceCount: parseCitationSamples(row.sample_evidence).length,
     varianceDisplay: formatVarianceDisplay(row.variance_cents),
   }));
+}
+
+const TRUST_GATE_RULES: Record<string, string[]> = {
+  TG01: ["R116", "R117"], TG02: ["R118", "R119"], TG03: ["R120", "R121"],
+  TG04: ["R122", "R123"], TG05: ["R124", "R125"], TG06: ["R126", "R127"],
+  TG07: ["R128", "R129", "R130"], TG08: ["R131", "R132"], TG09: ["R133"],
+  TG10: ["R134"], TG11: ["R135", "R146"],
+};
+
+function buildScoreDeductions(rows: Array<{
+  rule_id: string;
+  sample_evidence: unknown;
+}>): CaarScoreDeduction[] {
+  const scoreRow = rows.find((row) => row.rule_id === "R136");
+  const scoreSample = parseCitationSamples(scoreRow?.sample_evidence)[0];
+  const rawBreakdown = typeof scoreSample?.trust_gate_breakdown === "string"
+    ? scoreSample.trust_gate_breakdown
+    : null;
+  let breakdown: Array<{ gate?: unknown; score?: unknown; weight_percent?: unknown }> = [];
+  try {
+    breakdown = rawBreakdown ? JSON.parse(rawBreakdown) : [];
+  } catch {
+    breakdown = [];
+  }
+
+  const deductions = breakdown.flatMap((entry): CaarScoreDeduction[] => {
+    if (typeof entry.gate !== "string" || typeof entry.score !== "number" || typeof entry.weight_percent !== "number" || entry.score >= 100) {
+      return [];
+    }
+    const ruleIds = TRUST_GATE_RULES[entry.gate] ?? [];
+    const supportingRows = rows.filter((row) => ruleIds.includes(row.rule_id));
+    const samples = supportingRows.flatMap((row) => parseCitationSamples(row.sample_evidence));
+    const evidence = samples.flatMap((sample) => {
+      if (entry.gate === "TG04" && typeof sample.processor_basis === "number" && typeof sample.pos_basis === "number") {
+        const difference = typeof sample.difference_amount === "number"
+          ? sample.difference_amount
+          : Math.abs(sample.processor_basis - sample.pos_basis);
+        const percent = typeof sample.difference_percent === "number" ? sample.difference_percent : null;
+        return [`Processor basis $${sample.processor_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}; POS basis $${sample.pos_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}; difference $${difference.toLocaleString("en-US", { minimumFractionDigits: 2 })}${percent === null ? "" : ` (${percent.toFixed(2)}%)`}.`];
+      }
+      return typeof sample.detail === "string" ? [sample.detail] : [];
+    });
+    if (entry.gate === "TG11" && typeof scoreSample?.trust_gate_subtotal === "number") {
+      evidence.push(
+        `Pre-TG11 subtotal ${scoreSample.trust_gate_subtotal}; eligibility requires at least 85; TG11 therefore contributes 0 points.`,
+      );
+    }
+    const pointsLost = Number((entry.weight_percent * (1 - entry.score / 100)).toFixed(2));
+    const hasRequiredEvidence = entry.gate === "TG04"
+      ? samples.some((sample) =>
+          typeof sample.processor_basis === "number" && sample.processor_basis > 0 &&
+          typeof sample.pos_basis === "number" && sample.pos_basis > 0 &&
+          typeof sample.difference_amount === "number" &&
+          typeof sample.difference_percent === "number",
+        )
+      : evidence.length > 0;
+    return [{
+      calculation: `${entry.gate}: ${entry.score}/100 × ${entry.weight_percent}% = ${(entry.weight_percent - pointsLost).toFixed(2)} points; ${pointsLost.toFixed(2)} points lost.`,
+      consequential: entry.gate === "TG11",
+      evidence: [...new Set(evidence)],
+      gate: entry.gate,
+      pointsLost,
+      ruleIds: supportingRows.map((row) => row.rule_id),
+      score: entry.score,
+      supported: supportingRows.length > 0 && hasRequiredEvidence,
+      weightPercent: entry.weight_percent,
+    }];
+  });
+
+  const systemPenalty = typeof scoreSample?.system_health_penalty === "number"
+    ? scoreSample.system_health_penalty
+    : 0;
+  if (systemPenalty > 0) {
+    deductions.push({
+      calculation: `Trust-gate subtotal minus ${systemPenalty.toFixed(2)} system-health penalty points.`,
+      consequential: false,
+      evidence: ["R136 records a system-health penalty, but the supporting system-health event must be inspected for the triggering condition."],
+      gate: "SYS",
+      pointsLost: systemPenalty,
+      ruleIds: ["R136"],
+      score: 0,
+      supported: false,
+      weightPercent: 0,
+    });
+  }
+  return deductions;
 }
 
 function buildEvidenceRows({
@@ -845,8 +948,10 @@ export async function GET(request: Request) {
           persistedCaar?.module === "M01" || persistedCaar?.module === "M02" ? persistedCaar.module : null;
         const certRun = persistedCaar ? certRunById.get(persistedCaar.cert_run_id) ?? null : null;
         const citations = certRun ? ruleCitationsByRun.get(certRun.id) ?? [] : [];
-        const problemCitations = citations.filter(isProblemRuleCitation);
-        const passedCitations = citations.filter((citation) => !isProblemRuleCitation(citation));
+        const informationalCitations = citations.filter(isInformationalRuleCitation);
+        const actionableCitations = citations.filter((citation) => !isInformationalRuleCitation(citation));
+        const problemCitations = actionableCitations.filter(isProblemRuleCitation);
+        const passedCitations = actionableCitations.filter((citation) => !isProblemRuleCitation(citation));
         const uploadLocationId = report.restaurant_id ?? null;
         const moduleUploads =
           uploadLocationId && moduleId
@@ -907,12 +1012,14 @@ export async function GET(request: Request) {
               sealedContract,
               sealedSchema,
             }),
+            informationalRuleCitations: buildRuleCitationSummaries(informationalCitations),
             module: moduleId,
             passedRuleCitations: buildRuleCitationSummaries(passedCitations),
             reconciliationExceptions: reconciliation.exceptions,
             reconciliationNotes: reconciliation.notes,
             reconciliationWarnings: reconciliation.warnings,
             ruleCitations: buildRuleCitationSummaries(problemCitations),
+            scoreDeductions: buildScoreDeductions(citations),
             ruleSetVersion: certRun?.rule_set_version ?? null,
             sealedAt: persistedCaar?.sealed_at?.toISOString() ?? null,
           },

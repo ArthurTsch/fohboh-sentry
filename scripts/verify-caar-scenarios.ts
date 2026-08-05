@@ -3,6 +3,12 @@ import path from "node:path";
 import { buildCertificationResult } from "@/components/sentry/caar-engine";
 import { uploadModules } from "@/components/sentry/data";
 import { resolveVendorName } from "@/components/sentry/vendor-catalog";
+import { isInformationalRuleCitation } from "@/lib/mge/citation-disposition";
+import {
+  CANONICAL_RULE_CLAUSES,
+  CANONICAL_RULE_COUNT,
+  CANONICAL_RULES,
+} from "@/lib/mge/canonical-registry";
 import { validateUploadArtifact } from "@/lib/uploads/intake";
 
 type ModuleId = "M01" | "M02";
@@ -116,6 +122,12 @@ async function main() {
       const result = await runVendorScenario(scenario, vendor);
       const assessment = result.assessments.find((item) => item.moduleId === vendor.moduleId);
       if (!assessment) throw new Error(`${vendor.moduleId}/${vendor.vendorKey} was not assessed.`);
+      verifyEngineCitationOutcomes(result);
+      if (scenario.withBank && !scenario.badHeaders && assessment.trustGates.TG06.scorePct !== 100) {
+        failures.push(
+          `${vendor.vendorKey}: complete governed monthly evidence must produce TG06=100, received ${assessment.trustGates.TG06.scorePct}.`,
+        );
+      }
       results.push({ assessment, result, scenario });
       console.log(
         `[INFO] ${scenario.name} ${vendor.moduleId}/${resolveVendorName(vendor.moduleId, vendor.vendorKey)} ` +
@@ -148,12 +160,136 @@ async function main() {
   }
 
   await verifyM02VendorIsolation();
+  await verifyM02ContractVendorNormalization();
+  verifyCitationDispositions();
+  verifyCanonicalRegistryIntegrity();
   if (failures.length > 0) {
     throw new Error(`Provider-aware CAAR verification failed:\n- ${failures.join("\n- ")}`);
   }
 }
 
-async function runVendorScenario(config: ScenarioConfig, vendor: VendorConfig) {
+function verifyEngineCitationOutcomes(result: ReturnType<typeof buildCertificationResult>) {
+  const citations = [
+    ...result.assessments.flatMap((assessment) => assessment.ruleCitations),
+    ...result.overallRuleCitations,
+  ];
+
+  for (const citation of citations) {
+    if (!citation.disposition) {
+      throw new Error(`${citation.ruleId} has no explicit citation disposition.`);
+    }
+    if (citation.varianceCents !== 0 && citation.disposition !== "monetary") {
+      throw new Error(`${citation.ruleId} attributes variance without a monetary disposition.`);
+    }
+  }
+
+  for (const assessment of result.assessments) {
+    const attributedCents = assessment.ruleCitations
+      .filter((citation) => citation.disposition === "monetary")
+      .reduce((sum, citation) => sum + citation.varianceCents, 0);
+    const recoveryCents = Math.round(assessment.recoveryValue * 100);
+    if (attributedCents > recoveryCents) {
+      throw new Error(
+        `${assessment.moduleId} citations attribute ${attributedCents} cents against ${recoveryCents} cents of certified recovery.`,
+      );
+    }
+
+    if (assessment.moduleId === "M01") {
+      verifyM01CitationEvidence(assessment.ruleCitations);
+    }
+  }
+}
+
+function verifyM01CitationEvidence(citations: ReturnType<typeof buildCertificationResult>["assessments"][number]["ruleCitations"]) {
+  const unsupportedWithoutIdentifiedCharge = new Set([
+    "R062", "R063", "R065", "R066", "R067", "R068", "R069", "R071", "R072", "R073",
+    "R074", "R075", "R076", "R077", "R079", "R080", "R081", "R082", "R083", "R084", "R085", "R086",
+  ]);
+  const unsupportedGovernanceProxies = new Set(["R091", "R092", "R094", "R095"]);
+  const unexpected = citations.filter(
+    (citation) => unsupportedWithoutIdentifiedCharge.has(citation.ruleId) || unsupportedGovernanceProxies.has(citation.ruleId),
+  );
+
+  if (unexpected.length > 0) {
+    throw new Error(
+      `M01 emitted rules without the required identified charge or canonical evidence: ${unexpected.map((citation) => citation.ruleId).join(", ")}.`,
+    );
+  }
+
+  const belowThreshold = citations.find((citation) => citation.ruleId === "R088");
+  const trustContribution = citations.find((citation) => citation.ruleId === "R093");
+  if (belowThreshold?.disposition !== "informational" || trustContribution?.disposition !== "informational") {
+    throw new Error("M01 threshold and Trust Score contribution records must remain informational.");
+  }
+
+  const reconciliation = citations.find((citation) => citation.ruleId === "R122");
+  const reconciliationSample = reconciliation?.sampleEvidence[0];
+  if (
+    typeof reconciliationSample?.tg04_score === "number" &&
+    reconciliationSample.tg04_score < 100 &&
+    typeof reconciliationSample.processor_basis === "number" &&
+    typeof reconciliationSample.pos_basis === "number" &&
+    reconciliationSample.processor_basis > 0 &&
+    reconciliationSample.pos_basis > 0 &&
+    (typeof reconciliationSample.difference_amount !== "number" ||
+      typeof reconciliationSample.difference_percent !== "number")
+  ) {
+    throw new Error("A TG04 deduction must persist both source bases and the absolute and percentage difference.");
+  }
+}
+
+function verifyCanonicalRegistryIntegrity() {
+  const ruleIds = CANONICAL_RULES.map((rule) => rule.ruleId);
+  const clauseIds = CANONICAL_RULE_CLAUSES.map((rule) => rule.ruleId);
+  const expectedIds = Array.from({ length: 198 }, (_, index) => `R${String(index + 1).padStart(3, "0")}`);
+
+  if (
+    CANONICAL_RULE_COUNT !== 198 ||
+    new Set(ruleIds).size !== 198 ||
+    new Set(clauseIds).size !== 198 ||
+    expectedIds.some((ruleId) => !ruleIds.includes(ruleId) || !clauseIds.includes(ruleId))
+  ) {
+    throw new Error("Canonical registry integrity failed: R001-R198 must be unique and clause-backed.");
+  }
+
+  console.log("[PASS] Canonical registry contains one definition and clause record for every rule R001-R198.");
+}
+
+function verifyCitationDispositions() {
+  const informationalCases = [
+    { rule_id: "R999", sample_evidence: { disposition: "informational", samples: [] } },
+    { rule_id: "R046", sample_evidence: { samples: [{ recovery_value: 0, threshold: 250 }] } },
+    { rule_id: "R051", sample_evidence: { samples: [{ tg07: 0, tg10: 0 }] } },
+    { rule_id: "R088", sample_evidence: { samples: [{ recovery_value: 0, threshold: 250 }] } },
+    { rule_id: "R091", sample_evidence: { samples: [{ recovery_value: 500 }] } },
+    { rule_id: "R092", sample_evidence: { samples: [{ has_statement: false }] } },
+    { rule_id: "R093", sample_evidence: { samples: [{ tg07: 0, tg10: 0 }] } },
+    { rule_id: "R094", sample_evidence: { samples: [{ auditability_score: 67 }] } },
+    { rule_id: "R095", sample_evidence: { samples: [{ tg07: 0, tg10: 0 }] } },
+    { rule_id: "R121", sample_evidence: { samples: [{ contract_age_days: 300 }] } },
+    { rule_id: "R132", sample_evidence: { samples: [{ tg08_score: 0 }] } },
+  ];
+  const blockingCases = [
+    { rule_id: "R046", sample_evidence: { disposition: "blocking", samples: [] } },
+    { rule_id: "R121", sample_evidence: { samples: [{ contract_expired: true }] } },
+    { rule_id: "R132", sample_evidence: { samples: [{ formula_version_changed_during_period: true }] } },
+  ];
+
+  if (
+    informationalCases.some((citation) => !isInformationalRuleCitation(citation)) ||
+    blockingCases.some((citation) => isInformationalRuleCitation(citation))
+  ) {
+    throw new Error("Rule disposition verification failed for calculation or evidence-specific controls.");
+  }
+
+  console.log("[PASS] Rule dispositions separate calculations from evidence-backed control failures.");
+}
+
+async function runVendorScenario(
+  config: ScenarioConfig,
+  vendor: VendorConfig,
+  contractVendorKey = vendor.vendorKey,
+) {
   const artifactIntakeState: Record<string, Awaited<ReturnType<typeof validateUploadArtifact>>> = {};
   const artifactContractState: Record<string, Record<string, string>> = {};
   const settlementKey = vendor.moduleId === "M01" ? "m01-processor" : "m02-settlement";
@@ -180,7 +316,7 @@ async function runVendorScenario(config: ScenarioConfig, vendor: VendorConfig) {
       bankKey,
     );
   }
-  artifactContractState[getKey(vendor.moduleId, contractKey, vendor.vendorKey)] = vendor.contract;
+  artifactContractState[getKey(vendor.moduleId, contractKey, contractVendorKey)] = vendor.contract;
 
   if (settlement.vendorKey !== vendor.vendorKey || pos.vendorKey !== vendor.vendorKey) {
     throw new Error(`${vendor.vendorKey} evidence lost its provider scope during intake.`);
@@ -198,6 +334,33 @@ async function runVendorScenario(config: ScenarioConfig, vendor: VendorConfig) {
       (module) => module.accountId === ACCOUNT_ID && module.id === vendor.moduleId,
     ),
   });
+}
+
+async function verifyM02ContractVendorNormalization() {
+  const scenario = SCENARIOS[0];
+  const cases = [
+    { displayName: "DoorDash", vendor: VENDORS.find((item) => item.vendorKey === "doordash")! },
+    { displayName: "Uber Eats", vendor: VENDORS.find((item) => item.vendorKey === "ubereats")! },
+  ];
+
+  for (const { displayName, vendor } of cases) {
+    const result = await runVendorScenario(scenario, vendor, displayName);
+    const assessment = result.assessments.find((item) => item.moduleId === "M02");
+    const citation = assessment?.ruleCitations.find((item) => item.ruleId === "R014");
+    const sample = citation?.sampleEvidence[0] as { contract_fields?: number; detail?: string } | undefined;
+
+    if (
+      !sample ||
+      (sample.contract_fields ?? 0) < 3 ||
+      sample.detail !== "Vendor profile lookup resolved governed contract values for this module."
+    ) {
+      throw new Error(
+        `M02 vendor normalization failed: ${displayName} did not resolve under ${vendor.vendorKey}.`,
+      );
+    }
+  }
+
+  console.log("[PASS] M02 contract lookup normalizes DoorDash and Uber Eats display names.");
 }
 
 async function verifyM02VendorIsolation() {
