@@ -143,6 +143,8 @@ export type FindingClass =
 
 export type ModuleArtifactState = {
   contractValues?: Record<string, string> | null;
+  detectedFormatKey?: string;
+  detectedFormatName?: string;
   fields: boolean;
   hash: boolean;
   key: string;
@@ -189,6 +191,11 @@ type RuleContext = {
   pos: ModuleArtifactState | null;
   statement: ModuleArtifactState | null;
 };
+
+function usesSettlementTimingBasis(context: RuleContext) {
+  return context.moduleId === "M01" &&
+    Boolean(context.pos?.detectedFormatKey?.includes("payout"));
+}
 
 type DeterministicRule = {
   evaluate: (context: RuleContext, residualVariance: number) => RuleCitation | null;
@@ -2010,6 +2017,7 @@ function buildCanonicalTrustGateCitations({
   const reconciliationDifferencePct = processorBasis > 0
     ? (reconciliationDifference / processorBasis) * 100
     : null;
+  const settlementTimingBasis = usesSettlementTimingBasis(context);
 
   const citations = [
     buildNarrativeCitation("R116", {
@@ -2050,11 +2058,20 @@ function buildCanonicalTrustGateCitations({
       contract_expired: contractExpired,
     }),
     buildNarrativeCitation("R122", {
-      detail: `TG04 POS reconciliation resolved at ${trustGates.TG04.scorePct}.`,
+      detail: settlementTimingBasis
+        ? "The processing-volume total and settled-batch total use different timing bases. The difference is shown as settlement timing context and is not treated as a POS discrepancy or monetary loss."
+        : `TG04 POS reconciliation resolved at ${trustGates.TG04.scorePct}.`,
       difference_amount: roundCurrency(reconciliationDifference),
       difference_percent: reconciliationDifferencePct === null ? null : roundCurrency(reconciliationDifferencePct),
+      gross_settled_batches: roundCurrency(posBasis),
+      net_settled_batches: roundCurrency(numberValue(context.pos?.metrics?.payoutAmount)),
       pos_basis: roundCurrency(posBasis),
       processor_basis: roundCurrency(processorBasis),
+      processor_basis_label: "Gross card-processing volume grouped by fee-charge timing",
+      settlement_basis_label: settlementTimingBasis
+        ? "Gross settled batches grouped by settlement date"
+        : "Independent POS transaction basis",
+      settlement_timing_context: settlementTimingBasis,
       tg04_score: trustGates.TG04.scorePct,
     }),
     buildNarrativeCitation("R123", {
@@ -2220,6 +2237,7 @@ function computeTrustGateScores({
     statementBasis > 0 && posBasis > 0
       ? relativeDelta(statementBasis, posBasis) * 100
       : null;
+  const settlementTimingBasis = usesSettlementTimingBasis(context);
   const contractExpirationDate = parseDateValue(
     context.contract?.expiration_date ||
     context.contract?.contract_expiration_date ||
@@ -2293,6 +2311,8 @@ function computeTrustGateScores({
   const tg04Score =
     dimensions["Cross-System Reconciliation"] <= 0 || reconciliationGapPct === null
       ? 0
+      : settlementTimingBasis
+        ? 100
       : reconciliationGapPct <= 1
         ? 100
         : reconciliationGapPct > 5
@@ -2303,6 +2323,8 @@ function computeTrustGateScores({
     tg04Score,
     dimensions["Cross-System Reconciliation"] <= 0 || reconciliationGapPct === null
       ? "POS and source evidence could not be reconciled for the active period."
+      : settlementTimingBasis
+        ? "The Toast payout export is a settlement schedule, not an independent POS sales basis. Its difference from processing volume is recorded as timing context and does not reduce TG04."
       : reconciliationGapPct <= 1
         ? "POS-to-source reconciliation is within the ±1% tolerance band."
         : reconciliationGapPct > 5
@@ -2651,10 +2673,14 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
       context.pos?.metrics?.payoutAmount ??
       context.statement?.metrics?.payoutAmount,
   );
+  const settlementTimingBasis = usesSettlementTimingBasis(context);
 
   if (statementGoverned && posGoverned && statementBasis > 0 && posBasis > 0) {
     const delta = relativeDelta(statementBasis, posBasis);
-    if (delta <= 0.05) {
+    if (settlementTimingBasis) {
+      score += 25;
+      detailParts.push("Processing volume and settled batches use different timing bases; the difference is retained as timing context and does not count as a POS failure.");
+    } else if (delta <= 0.05) {
       score += 25;
       detailParts.push("POS-to-source basis tied within 5%.");
     } else if (delta <= 0.12) {

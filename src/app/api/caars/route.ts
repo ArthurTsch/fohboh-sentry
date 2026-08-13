@@ -188,17 +188,25 @@ function deriveReconciliationExceptions({
     return { exceptions: [], notes: [], warnings: [] };
   }
 
+  const posValidation = posUpload.validation_summary && typeof posUpload.validation_summary === "object"
+    ? posUpload.validation_summary as { detectedFormatKey?: unknown; detectedFormatName?: unknown }
+    : null;
+  const settlementTimingWarning = moduleId === "M01" &&
+    typeof posValidation?.detectedFormatKey === "string" &&
+    posValidation.detectedFormatKey.includes("payout")
+    ? [`The file in the POS slot was detected as ${String(posValidation.detectedFormatName ?? "a payout export")}. Its gross settled-batch total is grouped by settlement date, while the processor card-volume total is grouped by fee-charge timing. Their difference is timing context, not a POS discrepancy or proven loss.`]
+    : [];
   const posMetrics = parseUploadMetrics(posUpload.validation_summary);
   const bankMetrics = parseUploadMetrics(bankUpload.validation_summary);
   const payoutRows = posMetrics?.payoutReferenceRows ?? [];
   const depositRows = bankMetrics?.depositReferenceRows ?? [];
   if (payoutRows.length === 0 && depositRows.length === 0) {
-    return { exceptions: [], notes: [], warnings: [] };
+    return { exceptions: [], notes: [], warnings: settlementTimingWarning };
   }
 
   const exceptions: string[] = [];
   const notes: string[] = [];
-  const warnings: string[] = [];
+  const warnings: string[] = [...settlementTimingWarning];
   const usedDepositIndexes = new Set<number>();
 
   for (const payoutRow of payoutRows) {
@@ -601,6 +609,12 @@ function buildScoreDeductions(rows: Array<{
           ? sample.difference_amount
           : Math.abs(sample.processor_basis - sample.pos_basis);
         const percent = typeof sample.difference_percent === "number" ? sample.difference_percent : null;
+        if (sample.settlement_timing_context === true) {
+          const net = typeof sample.net_settled_batches === "number"
+            ? `; net settled batches $${sample.net_settled_batches.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+            : "";
+          return [`Gross card-processing volume $${sample.processor_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}; gross settled batches $${sample.pos_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}${net}; timing-basis difference $${difference.toLocaleString("en-US", { minimumFractionDigits: 2 })}${percent === null ? "" : ` (${percent.toFixed(2)}%)`}. This is timing context, not a proven loss.`];
+        }
         return [`Processor basis $${sample.processor_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}; POS basis $${sample.pos_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}; difference $${difference.toLocaleString("en-US", { minimumFractionDigits: 2 })}${percent === null ? "" : ` (${percent.toFixed(2)}%)`}.`];
       }
       return typeof sample.detail === "string" ? [sample.detail] : [];

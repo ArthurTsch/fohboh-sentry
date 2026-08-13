@@ -873,6 +873,10 @@ const SIMPLE_RULE_REASONS: Record<string, string> = {
 };
 
 function buildSimpleRuleReason(rule: CaarRuleCitationRow, disposition: CitationDisposition) {
+  const timingSample = rule.sampleEvidence.find((sample) => sample.settlement_timing_context === true);
+  if (rule.ruleId === "R122" && timingSample) {
+    return "The card-processing total and settled-batch total use different dates. The app shows the difference as settlement timing context; it is not treated as a POS discrepancy, missing money, or a score deduction.";
+  }
   const known = SIMPLE_RULE_REASONS[rule.ruleId];
   if (known) return known;
   const rawDetail = rule.sampleEvidence.find((sample) => typeof sample.detail === "string")?.detail;
@@ -2015,7 +2019,7 @@ const TRUST_GATE_HELP: Record<string, { name: string; purpose: string; scoring: 
   TG01: { name: "Data Completeness", purpose: "Checks whether the required fields and core records for the active module are present.", scoring: "Full credit requires at least 90% governed data completeness; missing POS data caps the result." },
   TG02: { name: "Source Authenticity", purpose: "Checks that required source files exist and carry intact persisted integrity hashes.", scoring: "Full credit requires complete authenticated source evidence; partial provenance or a missing critical source reduces the gate." },
   TG03: { name: "Vendor Profile Currency", purpose: "Checks that governed contract or vendor-profile terms exist and are valid for the certification period.", scoring: "Missing terms score zero; an explicitly expired contract is partial; complete, unexpired terms receive full credit." },
-  TG04: { name: "POS Reconciliation", purpose: "Compares the provider or processor transaction basis with the POS transaction basis for the same period.", scoring: "A gap up to 1% receives full credit, 1–5% receives partial credit, and a gap above 5% scores zero." },
+  TG04: { name: "Transaction-Basis Reconciliation", purpose: "Compares independent processor and POS totals for the same period. A payout or batch schedule is instead shown as settlement-timing context.", scoring: "Comparable processor/POS gaps up to 1% receive full credit, 1–5% receive partial credit, and gaps above 5% score zero. Differences caused by fee-charge timing versus settlement timing do not reduce this gate." },
   TG05: { name: "Duplicate Absence", purpose: "Checks the governed transaction set for duplicate or duplicate-like records.", scoring: "No duplicates receive full credit; detected duplicates reduce the gate according to the observed duplicate rate." },
   TG06: { name: "Period Coverage", purpose: "Checks whether all required artifacts cover the selected certification period, including monthly bank evidence.", scoring: "A fully governed monthly package receives full credit; present but incompletely governed or missing artifacts receive partial credit." },
   TG07: { name: "Fee Legitimacy", purpose: "Measures whether calculated fees agree with governed contract terms and the reviewed fee volume.", scoring: "The gate is weighted by the certified fee-variance percentage; larger supported variances reduce the score." },

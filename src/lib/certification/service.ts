@@ -48,6 +48,8 @@ type PersistedContractPayload = {
 };
 
 type PersistedUploadValidation = {
+  detectedFormatKey?: string;
+  detectedFormatName?: string;
   expectedColumns?: number;
   fields?: boolean;
   fileName?: string;
@@ -832,6 +834,8 @@ export async function executePersistedCertification({
         upload.vendor,
       )
     ] = {
+      detectedFormatKey: validation.detectedFormatKey,
+      detectedFormatName: validation.detectedFormatName,
       expectedColumns: validation.expectedColumns,
       fields: Boolean(validation.fields),
       fileName: validation.fileName,

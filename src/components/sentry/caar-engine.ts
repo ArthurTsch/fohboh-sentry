@@ -998,6 +998,8 @@ function assessModule({
 
     return {
       contractValues,
+      detectedFormatKey: intake?.detectedFormatKey,
+      detectedFormatName: intake?.detectedFormatName,
       fields: Boolean(intake?.fields || manualReady),
       hash: Boolean(intake?.hash || manualReady),
       key: artifact.key,
