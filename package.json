@@ -10,9 +10,18 @@
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "vitest run --config vitest.integration.config.mts",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install chromium",
     "set-manager-password": "tsx scripts/set-manager-password.ts",
+    "seed:test": "tsx scripts/seed-test-user.ts",
     "verify:caar-scenarios": "tsx scripts/verify-caar-scenarios.ts",
-    "verify": "pnpm lint && pnpm verify:caar-scenarios && pnpm verify:uber-eats-intake && pnpm verify:recovery-packs && pnpm build",
+    "verify": "pnpm lint && pnpm test && pnpm build",
+    "verify:fixture-scenarios": "pnpm verify:caar-scenarios && pnpm verify:uber-eats-intake && pnpm verify:recovery-packs",
+    "verify:release": "pnpm verify && pnpm test:integration && pnpm test:e2e",
     "verify:uber-eats-intake": "tsx scripts/verify-uber-eats-intake.ts",
     "verify:recovery-packs": "tsx scripts/verify-recovery-packs.ts"
   },
@@ -31,17 +40,20 @@
     "react-dom": "19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^4.1.11",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.7",
     "prisma": "^7.8.0",
     "tailwindcss": "^4",
     "tsx": "^4.22.4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }
