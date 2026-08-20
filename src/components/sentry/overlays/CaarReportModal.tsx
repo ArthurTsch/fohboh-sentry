@@ -166,8 +166,13 @@ export function CaarReportModal({
   const headlineScore = preliminaryTrustScore ?? record.trustScore;
   const headlineBadge = getScoreBandLabel(headlineScore);
   const providerName = evidenceRows.find((row) => row.vendor)?.vendor ?? null;
-  const m01Calculation = moduleId === "M01" ? deriveM01Calculation(ruleCitations) : null;
-  const m02Calculation = moduleId === "M02" ? deriveM02Calculation(ruleCitations) : null;
+  const calculationCitations = uniqueRuleCitations([
+    ...blockingRuleCitations,
+    ...scoreReducingRuleCitations,
+    ...scoreNeutralRuleCitations,
+  ]);
+  const m01Calculation = moduleId === "M01" ? deriveM01Calculation(calculationCitations) : null;
+  const m02Calculation = moduleId === "M02" ? deriveM02Calculation(calculationCitations) : null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f7f7f9]" role="dialog" aria-modal="true" aria-label={`CAAR ${record.id}`}>
@@ -396,15 +401,25 @@ export function CaarReportModal({
 
         {m02Calculation ? (
           <ReportCard
-            eyebrow="M02 Calculation"
-            title="Delivery, pickup, and POS basis comparison"
-            sub="The fee calculation uses every classified settlement order. TG04 separately compares only like-for-like settlement and POS scopes."
+            eyebrow="Calculation & Source Data"
+            title="M02 delivery commission calculation"
+            sub="This section separates values extracted from uploaded documents, governed contract terms, and amounts calculated by Sentry."
           >
+            <div className="mb-4 rounded-2xl border border-[var(--border)] bg-white p-4 text-sm leading-7 text-[var(--muted)]">
+              <span className="font-semibold text-[var(--text)]">Uploaded evidence used:</span>{" "}
+              {evidenceRows.filter((row) => row.status === "provided").map((row) => row.label).join(" · ") || "No persisted uploaded evidence is linked."}
+            </div>
+            <div className="mb-3 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+              Values extracted from uploaded documents
+            </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <ValueChip label="Delivery basis" value={formatMoneyLike(m02Calculation.deliveryBasis)} />
               <ValueChip label="Pickup basis" value={formatMoneyLike(m02Calculation.pickupBasis)} />
-              <ValueChip label="Total settlement basis" value={formatMoneyLike(m02Calculation.totalBasis)} />
               <ValueChip label="Comparable POS basis" value={formatMoneyLike(m02Calculation.posBasis)} />
+              <ValueChip label="Actual DSP commission" value={formatMoneyLike(m02Calculation.actualCommission)} />
+            </div>
+            <div className="mt-4 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+              Governed contract inputs and calculated result
             </div>
             <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
@@ -420,6 +435,10 @@ export function CaarReportModal({
                 <div className="mt-2 font-semibold">
                   Expected commission: {formatMoneyLike(m02Calculation.expectedCommission)} · Actual commission: {formatMoneyLike(m02Calculation.actualCommission)}
                 </div>
+                <div className="mt-1 font-semibold text-[var(--accent)]">
+                  Actual minus expected using displayed totals: {formatMoneyLike(m02Calculation.commissionVariance)}
+                </div>
+                <div className="mt-1 text-xs text-[var(--muted)]">The certified recovery can differ slightly because the engine preserves row-level amounts and rounding.</div>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
                 <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -1540,6 +1559,7 @@ function deriveM02Calculation(ruleCitations: CaarRuleCitationSummary[]) {
 
   return {
     actualCommission: number("actual_commission") || number("observed_commission"),
+    commissionVariance: Math.max(0, (number("actual_commission") || number("observed_commission")) - number("expected_commission")),
     deliveryBasis: number("delivery_basis_amount"),
     deliveryRate: number("delivery_rate_pct"),
     expectedCommission: number("expected_commission"),
@@ -1553,6 +1573,14 @@ function deriveM02Calculation(ruleCitations: CaarRuleCitationSummary[]) {
     reconciliationPct: reconciliationBasis > 0 ? (reconciliationDifference / reconciliationBasis) * 100 : 0,
     totalBasis: number("commission_base_amount"),
   };
+}
+
+function uniqueRuleCitations(citations: CaarRuleCitationSummary[]) {
+  const unique = new Map<string, CaarRuleCitationSummary>();
+  for (const citation of citations) {
+    unique.set(`${citation.ruleId}:${citation.ruleVersion}`, citation);
+  }
+  return [...unique.values()];
 }
 
 function deriveM01Calculation(ruleCitations: CaarRuleCitationSummary[]) {
