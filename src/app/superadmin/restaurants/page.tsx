@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import prisma from "@/lib/prisma";
 import {
   createRestaurantAction,
+  deleteAllRestaurantsAction,
   deleteRestaurantAction,
   updateRestaurantAction,
 } from "@/app/admin/actions";
@@ -88,6 +89,15 @@ export default async function SuperAdminRestaurantsPage({
           ) : null}
           {restaurantState === "deleted" ? (
             <AdminNotice tone="success">Restaurant deleted successfully.</AdminNotice>
+          ) : null}
+          {restaurantState === "all-deleted" ? (
+            <AdminNotice tone="success">All restaurant rows were deleted successfully.</AdminNotice>
+          ) : null}
+          {restaurantState === "invalid-password" ? (
+            <AdminNotice tone="error">The bulk-delete password is incorrect.</AdminNotice>
+          ) : null}
+          {restaurantState === "bulk-server-error" ? (
+            <AdminNotice tone="error">Unable to delete all restaurant rows. Nothing was partially committed.</AdminNotice>
           ) : null}
           {restaurantState === "missing-name" ? (
             <AdminNotice tone="error">Restaurant name is required.</AdminNotice>
@@ -233,6 +243,24 @@ export default async function SuperAdminRestaurantsPage({
               {restaurants.length} total
             </div>
           </div>
+
+          <form action={deleteAllRestaurantsAction} className="mt-5 flex flex-wrap items-center justify-end gap-2 rounded-2xl border border-[rgba(214,48,49,0.2)] bg-[rgba(214,48,49,0.04)] p-3">
+            <input
+              type="password"
+              name="confirmation_password"
+              required
+              autoComplete="off"
+              aria-label="Bulk-delete password"
+              placeholder="Bulk-delete password"
+              className="w-48 rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+            />
+            <button
+              type="submit"
+              className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90"
+            >
+              Delete all restaurants
+            </button>
+          </form>
 
           <div className="mt-6 overflow-hidden rounded-2xl border border-[var(--border)]">
             <div className="grid grid-cols-[72px_1.2fr_1fr_120px_100px_110px_140px] gap-3 bg-[var(--surface)] px-4 py-3 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">

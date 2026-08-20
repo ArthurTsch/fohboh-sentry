@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import prisma from "@/lib/prisma";
-import { deleteCaarReportAction } from "@/app/admin/actions";
+import { deleteAllCaarsAction, deleteCaarReportAction } from "@/app/admin/actions";
 import {
   adminMetadata,
   AdminLoginScreen,
@@ -59,8 +59,8 @@ export default async function SuperAdminManagementPage({
   return (
     <AdminShell
       currentPath="/superadmin/management"
-      title="Management"
-      description="Operational management view for CAAR records saved to the AWS PostgreSQL database."
+      title="CAAR Database"
+      description="Review and administer CAAR records saved to the AWS PostgreSQL database."
     >
       <div className="grid gap-6 md:grid-cols-3">
         <StatCard label="Saved CAARs" value={String(reports.length)} />
@@ -73,6 +73,15 @@ export default async function SuperAdminManagementPage({
 
       {caarState === "deleted" ? (
         <AdminNotice tone="success">CAAR report deleted successfully.</AdminNotice>
+      ) : null}
+      {caarState === "all-deleted" ? (
+        <AdminNotice tone="success">All CAAR and linked certification records were deleted successfully.</AdminNotice>
+      ) : null}
+      {caarState === "invalid-password" ? (
+        <AdminNotice tone="error">The bulk-delete password is incorrect.</AdminNotice>
+      ) : null}
+      {caarState === "bulk-server-error" ? (
+        <AdminNotice tone="error">Unable to delete all CAAR records. Nothing was partially committed.</AdminNotice>
       ) : null}
       {caarState === "invalid-id" || caarState === "server-error" ? (
         <AdminNotice tone="error">Unable to delete that CAAR report.</AdminNotice>
@@ -88,6 +97,23 @@ export default async function SuperAdminManagementPage({
               Persisted report records
             </h2>
           </div>
+          <form action={deleteAllCaarsAction} className="flex flex-wrap items-center justify-end gap-2 rounded-2xl border border-[rgba(214,48,49,0.2)] bg-[rgba(214,48,49,0.04)] p-3">
+            <input
+              type="password"
+              name="confirmation_password"
+              required
+              autoComplete="off"
+              aria-label="Bulk-delete password"
+              placeholder="Bulk-delete password"
+              className="w-48 rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+            />
+            <button
+              type="submit"
+              className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90"
+            >
+              Delete all CAAR data
+            </button>
+          </form>
         </div>
 
         <div className="mt-6 overflow-hidden rounded-2xl border border-[var(--border)]">

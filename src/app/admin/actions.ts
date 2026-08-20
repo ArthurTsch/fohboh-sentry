@@ -1331,6 +1331,92 @@ export async function deleteCaarReportAction(formData: FormData) {
   redirect("/superadmin/management?caar=deleted");
 }
 
+const BULK_DELETE_PASSWORD = "SuperadminFohboh";
+
+function hasValidBulkDeletePassword(formData: FormData) {
+  return String(formData.get("confirmation_password") ?? "") === BULK_DELETE_PASSWORD;
+}
+
+export async function deleteAllCaarsAction(formData: FormData) {
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
+  if (!hasValidBulkDeletePassword(formData)) {
+    redirect("/superadmin/management?caar=invalid-password");
+  }
+
+  try {
+    const deletedCount = await prisma.$transaction(async (tx) => {
+      const caars = await tx.caars_v2.findMany({ select: { cert_run_id: true, id: true } });
+      const caarIds = caars.map((row) => row.id);
+      const certRunIds = caars.map((row) => row.cert_run_id);
+
+      if (caarIds.length > 0) {
+        await tx.caar_artifacts_v2.deleteMany({ where: { caar_id: { in: caarIds } } });
+        await tx.loop_b_findings_v2.deleteMany({ where: { caar_id: { in: caarIds } } });
+        await tx.system_health_events_v2.deleteMany({ where: { caar_id: { in: caarIds } } });
+      }
+      await tx.caars_v2.deleteMany();
+      if (certRunIds.length > 0) {
+        await tx.rule_citations_v2.deleteMany({ where: { cert_run_id: { in: certRunIds } } });
+        await tx.mq6_scores_v2.deleteMany({ where: { cert_run_id: { in: certRunIds } } });
+        await tx.cert_runs_v2.deleteMany({ where: { id: { in: certRunIds } } });
+      }
+      await tx.caar_reports.deleteMany();
+      await writeAuditLog({
+        action: "all_caars_deleted_superadmin",
+        actorUserId: session.managerId ?? null,
+        entityId: "all",
+        entityType: "caars_v2",
+        ipAddress: requestContext.ipAddress,
+        metadata: { deletedCount: caars.length, requestId: requestContext.requestId },
+        summary: `Deleted all ${caars.length} canonical CAAR records and linked certification data from superadmin.`,
+        userAgent: requestContext.userAgent,
+      }, tx);
+      return caars.length;
+    });
+
+    void deletedCount;
+  } catch {
+    redirect("/superadmin/management?caar=bulk-server-error");
+  }
+
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/management");
+  revalidatePath("/superadmin/tables");
+  redirect("/superadmin/management?caar=all-deleted");
+}
+
+export async function deleteAllRestaurantsAction(formData: FormData) {
+  const session = await requireAdminSession();
+  const requestContext = await getRequestContextFromHeaders();
+  if (!hasValidBulkDeletePassword(formData)) {
+    redirect("/superadmin/restaurants?restaurant=invalid-password");
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const result = await tx.restaurants.deleteMany();
+      await writeAuditLog({
+        action: "all_restaurants_deleted_superadmin",
+        actorUserId: session.managerId ?? null,
+        entityId: "all",
+        entityType: "restaurants",
+        ipAddress: requestContext.ipAddress,
+        metadata: { deletedCount: result.count, requestId: requestContext.requestId },
+        summary: `Deleted all ${result.count} rows from the restaurants table from superadmin.`,
+        userAgent: requestContext.userAgent,
+      }, tx);
+    });
+  } catch {
+    redirect("/superadmin/restaurants?restaurant=bulk-server-error");
+  }
+
+  revalidatePath("/superadmin");
+  revalidatePath("/superadmin/restaurants");
+  revalidatePath("/superadmin/tables");
+  redirect("/superadmin/restaurants?restaurant=all-deleted");
+}
+
 export async function updateSupportTicketStatusAction(formData: FormData) {
   const session = await requireAdminSession();
   const requestContext = await getRequestContextFromHeaders();
