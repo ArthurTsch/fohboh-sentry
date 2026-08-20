@@ -279,8 +279,23 @@ export function LocationWorkspaceView({
 
           <div className="rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5">
             <div className="flex items-center justify-between gap-3">
-              <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
-                Workflow Status
+              <div className="flex items-center gap-2">
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+                  Workflow Status
+                </div>
+                <HelpTip
+                  title="Location / Workflow Status"
+                  sections={[
+                    {
+                      label: "Meaning",
+                      text: "Shows whether this location has completed the setup and evidence steps required to start its next certification cycle.",
+                    },
+                    {
+                      label: "Status source",
+                      text: "The status is calculated from the active module, governed vault configuration, required uploads, and workflow blockers shown below.",
+                    },
+                  ]}
+                />
               </div>
               <span
                 className={`rounded-full px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.12em] ${
@@ -359,8 +374,29 @@ export function LocationWorkspaceView({
           <SectionCard>
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
-                  Provider readiness
+                <div className="flex items-center gap-2">
+                  <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+                    Provider readiness
+                  </div>
+                  <HelpTip
+                    title="Location / Provider Readiness"
+                    sections={[
+                      {
+                        label: "What It Is",
+                        text: "A provider-by-provider preflight for the processors and delivery platforms configured at this location.",
+                      },
+                      {
+                        label: "What It Checks",
+                        text: "Confirms that each provider has sealed governance, all required evidence, and no remaining certification blocker.",
+                      },
+                      {
+                        label: "Why It Matters",
+                        text: "Each provider is certified independently. One ready provider does not make another provider ready.",
+                      },
+                    ]}
+                    footerLabel="Ready when"
+                    footerValue="Governance sealed + evidence complete"
+                  />
                 </div>
                 <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
                   Each provider keeps its own evidence, governance, certification, and CAAR scope.
@@ -559,8 +595,29 @@ export function LocationWorkspaceView({
           </SectionCard>
 
           <SectionCard>
-            <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
-              Workflow Requirements
+            <div className="flex items-center gap-2">
+              <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
+                Workflow Requirements
+              </div>
+              <HelpTip
+                title="Location / Workflow Requirements"
+                sections={[
+                  {
+                    label: "What It Is",
+                    text: "The location-level prerequisites that must be satisfied before certification can run.",
+                  },
+                  {
+                    label: "What It Shows",
+                    text: "Each requirement is marked Complete, Action Required, or Not Applicable using the persisted workflow state.",
+                  },
+                  {
+                    label: "How To Resolve It",
+                    text: "Use the requirement detail and blocker list below to identify the next governance, evidence, or configuration action.",
+                  },
+                ]}
+                footerLabel="Scope"
+                footerValue="Current location only"
+              />
             </div>
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               {workflow.requirements.map((requirement) => (

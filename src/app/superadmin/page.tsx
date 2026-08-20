@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Prisma } from "@/app/generated/prisma/client";
 import {
   adminMetadata,
   AdminLoginScreen,
@@ -8,22 +7,15 @@ import {
   isAdminAuthorized,
 } from "@/app/admin/admin-ui";
 import prisma from "@/lib/prisma";
+import {
+  formatCurrencyFromCents,
+  formatOverviewDecimal,
+  truncateDecimal,
+} from "@/lib/admin/overview-format";
 
 export const metadata: Metadata = adminMetadata;
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-
-type CountRow = {
-  count: bigint | number;
-};
-
-type SumRow = {
-  total: bigint | number | null;
-};
-
-type AvgRow = {
-  avg: number | null;
-};
 
 type GroupRow = {
   count: bigint | number;
@@ -59,35 +51,25 @@ export default async function SuperAdminPage({
     prisma.managers.count(),
     prisma.restaurants.count(),
     prisma.customers.count({ where: { deleted_at: null } }),
-    prisma.locations_v2.count({ where: { deleted_at: null } }),
-    prisma.caars_v2.count(),
+    prisma.restaurant_sentry_state.count(),
+    prisma.caar_reports.count(),
     prisma.cert_runs_v2.count(),
     prisma.uploads_v2.count(),
     prisma.support_tickets_v2.count({ where: { status: "open" } }),
-    prisma.$queryRaw<SumRow[]>(Prisma.sql`
-      SELECT COALESCE(SUM(recoverable_variance_cents), 0) AS total
-      FROM public.caars_v2
-    `),
-    prisma.$queryRaw<AvgRow[]>(Prisma.sql`
-      SELECT AVG(trust_score)::float AS avg
-      FROM public.caars_v2
-    `),
-    prisma.$queryRaw<CountRow[]>(Prisma.sql`
-      SELECT COUNT(*)::bigint AS count
-      FROM public.caars_v2
-      WHERE court_admissible = true
-    `),
-    prisma.$queryRaw<GroupRow[]>(Prisma.sql`
+    prisma.caar_reports.aggregate({ _sum: { amount_cents: true } }),
+    prisma.caar_reports.aggregate({ _avg: { trust_score: true } }),
+    prisma.caar_reports.count({ where: { status: "Certified" } }),
+    prisma.$queryRaw<GroupRow[]>`
       SELECT status AS label, COUNT(*)::bigint AS count
       FROM public.restaurant_sentry_state
       GROUP BY status
       ORDER BY status ASC
-    `),
+    `,
   ]);
 
-  const totalRecoveredAmount = Number(totalRecovered[0]?.total ?? 0) / 100;
-  const avgTrust = avgTrustScore[0]?.avg ? Math.round(avgTrustScore[0].avg) : 0;
-  const certifiedCaars = Number(admissibleCaars[0]?.count ?? 0);
+  const totalRecoveredCents = totalRecovered._sum.amount_cents ?? 0;
+  const avgTrust = truncateDecimal(avgTrustScore._avg.trust_score ?? 0);
+  const certifiedCaars = admissibleCaars;
 
   const statusMap = new Map(
     locationStatusRows.map((row) => [row.label ?? "Unknown", Number(row.count ?? 0)]),
@@ -96,9 +78,9 @@ export default async function SuperAdminPage({
   const atRiskLocations = statusMap.get("At Risk") ?? 0;
   const onboardingLocations = statusMap.get("Onboarding") ?? 0;
   const activePortfolio = certifiedLocations + atRiskLocations + onboardingLocations;
-  const certifiedPct = activePortfolio ? Math.round((certifiedLocations / activePortfolio) * 100) : 0;
-  const atRiskPct = activePortfolio ? Math.round((atRiskLocations / activePortfolio) * 100) : 0;
-  const onboardingPct = activePortfolio ? Math.round((onboardingLocations / activePortfolio) * 100) : 0;
+  const certifiedPctRaw = activePortfolio ? (certifiedLocations / activePortfolio) * 100 : 0;
+  const atRiskPctRaw = activePortfolio ? (atRiskLocations / activePortfolio) * 100 : 0;
+  const onboardingPctRaw = activePortfolio ? (onboardingLocations / activePortfolio) * 100 : 0;
 
   return (
     <AdminShell
@@ -118,7 +100,7 @@ export default async function SuperAdminPage({
           <KpiCard
             eyebrow="Recovery"
             label="Certified Amount Found"
-            value={formatCurrencyCompact(totalRecoveredAmount)}
+            value={formatCurrencyFromCents(totalRecoveredCents)}
             detail="Total recoverable variance saved across CAARs"
             tone="green"
           />
@@ -154,7 +136,7 @@ export default async function SuperAdminPage({
               </div>
 
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-4">
-                <div className="text-3xl font-bold text-[var(--text)]">{avgTrust}</div>
+                <div className="text-3xl font-bold text-[var(--text)]">{formatOverviewDecimal(avgTrust)}</div>
                 <div className="mt-1 text-xs text-[var(--muted)]">Average CAAR trust score</div>
               </div>
             </div>
@@ -163,23 +145,23 @@ export default async function SuperAdminPage({
               <div className="flex h-full w-full">
                 <div
                   className="h-full bg-[var(--success)]"
-                  style={{ width: `${certifiedPct}%` }}
+                  style={{ width: `${certifiedPctRaw}%` }}
                 />
                 <div
                   className="h-full bg-[#F59E0B]"
-                  style={{ width: `${atRiskPct}%` }}
+                  style={{ width: `${atRiskPctRaw}%` }}
                 />
                 <div
                   className="h-full bg-[rgba(214,48,49,0.85)]"
-                  style={{ width: `${onboardingPct}%` }}
+                  style={{ width: `${onboardingPctRaw}%` }}
                 />
               </div>
             </div>
 
             <div className="mt-6 grid gap-4 md:grid-cols-3">
-              <StatusCard label="Certified" value={certifiedLocations} percent={certifiedPct} tone="green" />
-              <StatusCard label="At Risk" value={atRiskLocations} percent={atRiskPct} tone="amber" />
-              <StatusCard label="Onboarding" value={onboardingLocations} percent={onboardingPct} tone="red" />
+              <StatusCard label="Certified" value={certifiedLocations} percent={certifiedPctRaw} tone="green" />
+              <StatusCard label="At Risk" value={atRiskLocations} percent={atRiskPctRaw} tone="amber" />
+              <StatusCard label="Onboarding" value={onboardingLocations} percent={onboardingPctRaw} tone="red" />
             </div>
           </section>
 
@@ -218,7 +200,7 @@ export default async function SuperAdminPage({
           />
           <MiniInsightCard
             label="Average Trust Score"
-            value={`${avgTrust}/100`}
+            value={`${formatOverviewDecimal(avgTrust)}/100`}
             detail="Average across persisted CAAR outputs."
           />
         </section>
@@ -289,7 +271,7 @@ function StatusCard({
         {label}
       </div>
       <div className="mt-4 text-3xl font-bold tracking-[-0.04em] text-[var(--text)]">{formatInteger(value)}</div>
-      <div className="mt-2 text-sm text-[var(--muted)]">{percent}% of active persisted locations</div>
+      <div className="mt-2 text-sm text-[var(--muted)]">{formatOverviewDecimal(percent)}% of active persisted locations</div>
     </div>
   );
 }
@@ -319,15 +301,6 @@ function MiniInsightCard({
       <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{detail}</p>
     </section>
   );
-}
-
-function formatCurrencyCompact(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    maximumFractionDigits: 1,
-    notation: value >= 1000 ? "compact" : "standard",
-    style: "currency",
-  }).format(value);
 }
 
 function formatInteger(value: number) {

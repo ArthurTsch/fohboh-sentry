@@ -126,7 +126,9 @@ export function HelpTip({
   const [open, setOpen] = useState(false);
   const [style, setStyle] = useState<CSSProperties>({ left: -9999, top: -9999 });
   const tooltipId = useId();
+  const anchorRef = useRef<HTMLElement | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
 
   function clearCloseTimer() {
     if (closeTimerRef.current) {
@@ -137,6 +139,7 @@ export function HelpTip({
 
   function openTooltip(target: HTMLElement) {
     clearCloseTimer();
+    anchorRef.current = target;
     positionTooltip(target);
     setOpen(true);
   }
@@ -152,11 +155,16 @@ export function HelpTip({
     const rect = target.getBoundingClientRect();
     const tooltipWidth = 320;
     const tooltipMaxHeight = Math.min(460, Math.round(window.innerHeight * 0.72));
+    const tooltipHeight = Math.min(
+      tooltipRef.current?.getBoundingClientRect().height ?? 240,
+      tooltipMaxHeight,
+    );
     const margin = 10;
     let left = rect.left;
     let top = rect.bottom + margin;
+    const placeBeside = rect.left < 280;
 
-    if (rect.left < 280) {
+    if (placeBeside) {
       left = rect.right + margin;
       top = Math.max(margin, rect.top - 8);
     }
@@ -166,14 +174,16 @@ export function HelpTip({
     }
     if (left < margin) left = margin;
 
-    const spaceBelow = window.innerHeight - rect.bottom - margin;
-    const spaceAbove = rect.top - margin;
-    if (spaceBelow < tooltipMaxHeight && spaceAbove > spaceBelow) {
-      top = Math.max(margin, rect.top - tooltipMaxHeight - margin);
+    if (!placeBeside) {
+      const spaceBelow = window.innerHeight - rect.bottom - margin;
+      const spaceAbove = rect.top - margin;
+      if (spaceBelow < tooltipHeight && spaceAbove > spaceBelow) {
+        top = Math.max(margin, rect.top - tooltipHeight - margin);
+      }
     }
 
-    if (top + tooltipMaxHeight > window.innerHeight - margin) {
-      top = Math.max(margin, window.innerHeight - tooltipMaxHeight - margin);
+    if (top + tooltipHeight > window.innerHeight - margin) {
+      top = Math.max(margin, window.innerHeight - tooltipHeight - margin);
     }
 
     setStyle({
@@ -189,6 +199,22 @@ export function HelpTip({
       clearCloseTimer();
     };
   }, []);
+
+  useEffect(() => {
+    if (!open || !anchorRef.current) return;
+
+    const reposition = () => {
+      if (anchorRef.current) positionTooltip(anchorRef.current);
+    };
+    const frame = window.requestAnimationFrame(reposition);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [open]);
 
   return (
     <>
@@ -216,6 +242,7 @@ export function HelpTip({
         ? createPortal(
             <div
               id={tooltipId}
+              ref={tooltipRef}
               style={style}
               onMouseEnter={clearCloseTimer}
               onMouseLeave={scheduleClose}
