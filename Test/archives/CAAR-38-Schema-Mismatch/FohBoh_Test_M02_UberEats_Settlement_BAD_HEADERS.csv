@@ -1,6 +1,0 @@
-settle_date,order_ref,subtotal,commission_fee,commission_pct,gross_sales,status,delivery,tip_amount,sales_tax,payout_date,item_count,source_channel,internal_notes
-2026-06-01,UEBAD-70001,54.22,16.27,0.3000,71.83,COMPLETED,4.99,7.80,4.82,2026-06-02,3,Uber Eats,Lunch order
-2026-06-01,UEBAD-70002,41.15,12.35,0.3000,55.10,COMPLETED,3.99,6.42,3.54,2026-06-02,2,Uber Eats,Dinner order
-2026-06-02,UEBAD-70003,63.48,19.04,0.3000,82.66,COMPLETED,4.99,8.10,6.09,2026-06-03,4,Uber Eats,Family meal
-2026-06-02,UEBAD-70004,37.92,11.38,0.3000,50.71,COMPLETED,3.49,5.87,3.43,2026-06-03,2,Uber Eats,Single combo
-2026-06-03,UEBAD-70005,72.30,21.69,0.3000,93.90,COMPLETED,5.49,9.20,6.91,2026-06-04,5,Uber Eats,Catering small

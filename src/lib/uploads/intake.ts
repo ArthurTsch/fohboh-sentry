@@ -388,7 +388,11 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     const rowType = typeIndex >= 0 ? String(row[typeIndex] ?? "").trim().toUpperCase() : "";
     const settledDate = settledDateIndex >= 0 ? String(row[settledDateIndex] ?? "").trim() : "";
 
-    if ((artifactKey === "m01-pos" || artifactKey === "m02-settlement") && externalRefId && payoutAmount > 0) {
+    if (
+      (artifactKey === "m01-pos" || artifactKey === "m02-settlement") &&
+      externalRefId &&
+      payoutAmount !== 0
+    ) {
       metrics.payoutReferenceRows.push({
         amount: roundTo2(payoutAmount),
         externalRefId,
@@ -484,6 +488,10 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     }
   }
 
+  if (artifactKey === "m02-settlement") {
+    metrics.payoutReferenceRows = aggregatePayoutReferenceRows(metrics.payoutReferenceRows);
+  }
+
   metrics.duplicateOrderCount = [...seenOrderIds.values()].reduce(
     (sum, count) => sum + Math.max(0, count - 1),
     0,
@@ -547,6 +555,27 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
   }
 
   return metrics;
+}
+
+function aggregatePayoutReferenceRows(rows: UploadMetrics["payoutReferenceRows"]) {
+  const grouped = new Map<string, NonNullable<UploadMetrics["payoutReferenceRows"]>[number]>();
+
+  for (const row of rows ?? []) {
+    const existing = grouped.get(row.externalRefId);
+    if (!existing) {
+      grouped.set(row.externalRefId, { ...row });
+      continue;
+    }
+
+    existing.amount = roundTo2(existing.amount + row.amount);
+    if (!existing.settledDate && row.settledDate) {
+      existing.settledDate = row.settledDate;
+    }
+  }
+
+  return [...grouped.values()]
+    .filter((row) => row.amount > 0)
+    .map((row, index) => ({ ...row, rowNumber: index + 1 }));
 }
 
 function parseCsv(text: string) {
