@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/app/generated/prisma/client";
 import { requireManagerSession } from "@/lib/auth/session";
-import { writeAuditLog, logServerError } from "@/lib/ops/audit";
+import { logServerError } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
 import prisma from "@/lib/prisma";
 
@@ -237,104 +237,9 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
-  const requestContext = getRequestContextFromRequest(request);
-
-  try {
-    const session = await requireManagerSession();
-    if (session.role === "Viewer") {
-      return withRequestHeaders(
-        NextResponse.json({ error: "This account cannot write audit events." }, { status: 403 }),
-        requestContext,
-      );
-    }
-
-    const body = (await request.json()) as {
-      accountId?: string | null;
-      action?: string | null;
-      entityId?: string | null;
-      entityType?: string | null;
-      immutable?: boolean | null;
-      locationId?: string | null;
-      locationName?: string | null;
-      metadata?: Record<string, unknown> | null;
-      summary?: string | null;
-    };
-
-    const action = body.action?.trim() ?? "";
-    const summary = body.summary?.trim() ?? "";
-    const entityType = body.entityType?.trim() ?? "ui_event";
-    const entityId = body.entityId?.trim() ?? `ui-${Date.now()}`;
-
-    if (!action || !summary) {
-      return withRequestHeaders(
-        NextResponse.json({ error: "action and summary are required." }, { status: 400 }),
-        requestContext,
-      );
-    }
-
-    const location = body.locationId?.trim()
-      ? await prisma.locations_v2.findFirst({
-          where: {
-            deleted_at: null,
-            external_id: body.locationId.trim(),
-          },
-          select: {
-            customer_id: true,
-            id: true,
-            name: true,
-          },
-        })
-      : null;
-
-    const customer =
-      location?.customer_id
-        ? { id: location.customer_id }
-        : body.accountId?.trim()
-          ? await prisma.customers.findFirst({
-              where: {
-                deleted_at: null,
-                name: body.accountId.trim(),
-              },
-              select: {
-                id: true,
-              },
-            })
-          : null;
-
-    await writeAuditLog(
-      {
-        action,
-        actorUserId: session.managerId ?? null,
-        customerId: customer?.id ?? null,
-        entityId,
-        entityType,
-        ipAddress: requestContext.ipAddress,
-        locationId: location?.id ?? null,
-        metadata: {
-          ...(body.metadata ?? {}),
-          immutable: Boolean(body.immutable),
-          locationName: body.locationName ?? location?.name ?? null,
-          user: session.name?.trim() || session.email,
-        },
-        summary,
-        userAgent: requestContext.userAgent,
-      },
-    );
-
-    return withRequestHeaders(NextResponse.json({ ok: true }), requestContext);
-  } catch (error) {
-    const authResponse = getAuthErrorResponse(error);
-    if (authResponse) {
-      return withRequestHeaders(authResponse, requestContext);
-    }
-
-    logServerError("activity_log_write_failed", error, {
-      requestId: requestContext.requestId,
-    });
-    return withRequestHeaders(
-      NextResponse.json({ error: "Unable to write the activity log event right now." }, { status: 500 }),
-      requestContext,
-    );
-  }
+export async function POST() {
+  return NextResponse.json(
+    { error: "Audit records are created only by the server operation they describe." },
+    { headers: { Allow: "GET" }, status: 405 },
+  );
 }

@@ -3,6 +3,8 @@ import { requireManagerSession } from "@/lib/auth/session";
 import prisma from "@/lib/prisma";
 import { generateClaimPackForCaar } from "@/lib/caar/persistence";
 import { getScopedPersistedCaar } from "@/lib/caar/access";
+import { writeAuditLog } from "@/lib/ops/audit";
+import { getRequestContextFromRequest } from "@/lib/ops/request";
 
 function getAuthErrorResponse(error: unknown) {
   if (!(error instanceof Error)) return null;
@@ -25,6 +27,7 @@ function isMissingCaarSchema(error: unknown) {
 }
 
 export async function POST(request: Request) {
+  const requestContext = getRequestContextFromRequest(request);
   try {
     const session = await requireManagerSession();
     if (session.role === "Viewer") {
@@ -45,14 +48,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "CAAR not found." }, { status: 404 });
     }
 
-    const result = await prisma.$transaction((tx) =>
-      generateClaimPackForCaar(tx, {
+    const result = await prisma.$transaction(async (tx) => {
+      const generated = await generateClaimPackForCaar(tx, {
         caarExternalId: caarId,
         customerId: scoped.location.customer_id,
         locationId: scoped.location.id,
         uploadLocationId: scoped.restaurantId ?? null,
-      }),
-    );
+      });
+      await writeAuditLog({
+        action: "caar_exportpack_generated",
+        actorUserId: session.managerId ?? null,
+        customerId: scoped.location.customer_id,
+        entityId: caarId,
+        entityType: "caars_v2",
+        ipAddress: requestContext.ipAddress,
+        locationId: scoped.location.id,
+        metadata: { objectKey: generated.objectKey },
+        summary: `ExportPack generated for ${caarId}.`,
+        userAgent: requestContext.userAgent,
+      }, tx);
+      return generated;
+    });
 
     return NextResponse.json({
       ok: true,

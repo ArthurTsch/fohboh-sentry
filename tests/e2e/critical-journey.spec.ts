@@ -40,7 +40,7 @@ test("authenticated critical workflow smoke", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("body")).toContainText(/upload|location|dashboard/i);
 
-  for (const endpoint of ["/api/restaurants", "/api/v1/uploads", "/api/v1/governance/workspaces", "/api/caars"]) {
+  for (const endpoint of ["/api/restaurants", "/api/v1/activity-log", "/api/v1/uploads", "/api/v1/governance/workspaces", "/api/caars"]) {
     const response = await page.request.get(endpoint);
     expect(response.status(), endpoint).toBeLessThan(500);
   }

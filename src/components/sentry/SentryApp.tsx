@@ -947,62 +947,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     return `${accountId}:${locationId}:${moduleId}:${artifactKey}:${vendorKey ?? "global"}`;
   }
 
-  function appendLog(entry: Omit<LogRecord, "hash" | "ts" | "user"> & { hash?: string; user?: string }) {
-    setLogState((current) => [
-      {
-        accountId: entry.accountId,
-        action: entry.action,
-        hash:
-          entry.hash ??
-          `${entry.immutable ? "sha256" : "draft"}:${Math.random().toString(16).slice(2, 10)}`,
-        immutable: entry.immutable,
-        location: entry.location,
-        ts: new Date().toISOString().replace("T", " ").slice(0, 16),
-        user: entry.user ?? session?.email ?? "system",
-      },
-      ...current,
-    ]);
-  }
-
-  async function recordClientActivity(args: {
-    accountId?: string;
-    action: string;
-    entityId?: string;
-    entityType?: string;
-    immutable?: boolean;
-    locationId?: string;
-    locationName?: string;
-    summary: string;
-  }) {
-    const accountId = args.accountId ?? getScopedAccountId() ?? "unscoped";
-    appendLog({
-      accountId,
-      action: args.summary,
-      immutable: Boolean(args.immutable),
-      location: args.locationName ?? "Portfolio",
-      user: effectiveSession?.name?.trim() || effectiveSession?.email || "system",
-    });
-
-    await fetch("/api/v1/activity-log", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        accountId,
-        action: args.action,
-        entityId: args.entityId,
-        entityType: args.entityType ?? "ui_event",
-        immutable: Boolean(args.immutable),
-        locationId: args.locationId,
-        locationName: args.locationName,
-        summary: args.summary,
-      }),
-    }).catch(() => null);
-
-    void syncAuditLogs();
-  }
-
   function handleLogin(nextSession: SessionState) {
     startTransition(() => {
       setSession(nextSession);
@@ -1133,15 +1077,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       onboardingProgress: currentProgress,
     });
 
-    void recordClientActivity({
-      action: "module_upload_set_completed",
-      entityId: location.id,
-      entityType: "module_upload_set",
-      immutable: false,
-      locationId: location.id,
-      locationName: location.name,
-      summary: `Completed ${moduleId} upload intake for ${location.name}.`,
-    });
+    void syncAuditLogs();
     setActiveUploadLocation(null);
     setUploadFeedback(null);
     setActiveWorkspaceLocationId(locationId);
@@ -1788,16 +1724,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     if (!savedWorkspace) {
       return;
     }
-    void recordClientActivity({
-      accountId: savedWorkspace.accountId,
-      action: "governance_workspace_saved",
-      entityId: `${savedWorkspace.module}:${savedWorkspace.vendor}:${savedWorkspace.locationId ?? "global"}`,
-      entityType: "schema_registry_v2",
-      immutable: false,
-      locationId: savedWorkspace.locationId,
-      locationName: savedWorkspace.locationName ?? savedWorkspace.account,
-      summary: `${savedWorkspace.module} ${savedWorkspace.vendor} draft saved for ${savedWorkspace.locationName ?? savedWorkspace.account}.`,
-    });
     await Promise.all([syncAssignedRestaurants(), syncGovernanceWorkspaces(), syncAuditLogs()]);
     showToast("Schema draft saved.");
   }
@@ -1807,16 +1733,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     if (!sealedWorkspace) {
       return;
     }
-    void recordClientActivity({
-      accountId: sealedWorkspace.accountId,
-      action: "governance_workspace_sealed_client",
-      entityId: `${sealedWorkspace.module}:${sealedWorkspace.vendor}:${sealedWorkspace.locationId ?? "global"}:${sealedWorkspace.vault.version}`,
-      entityType: "contract_configs_v2",
-      immutable: true,
-      locationId: sealedWorkspace.locationId,
-      locationName: sealedWorkspace.locationName ?? sealedWorkspace.account,
-      summary: `${sealedWorkspace.module} ${sealedWorkspace.vendor} sealed for ${sealedWorkspace.locationName ?? sealedWorkspace.account}.`,
-    });
     await Promise.all([syncAssignedRestaurants(), syncGovernanceWorkspaces(), syncAuditLogs()]);
     showToast("Workspace sealed to vault.");
   }
@@ -1947,16 +1863,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     );
     setEditingWgsUser(null);
     setCreatingWgsUser(false);
-    void recordClientActivity({
-      action: isNew ? "wgs_user_created" : "wgs_user_updated",
-      entityId: resolvedUser.id,
-      entityType: "wgs_user",
-      immutable: false,
-      locationName: "WGS Admin",
-      summary: isNew
-        ? `WGS user created: ${resolvedUser.firstName} ${resolvedUser.lastName}`
-        : `WGS user updated: ${resolvedUser.firstName} ${resolvedUser.lastName}`,
-    });
     showToast(isNew ? `Setup email sent to ${resolvedUser.email}.` : "WGS user updated.");
   }
 
@@ -2055,16 +1961,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
           : module,
       ),
     );
-    void recordClientActivity({
-      accountId: activeArtifact.accountId,
-      action: "artifact_intake_advanced",
-      entityId: `${activeArtifact.moduleId}:${activeArtifact.artifact.key}:${activeArtifact.locationId}`,
-      entityType: "artifact_intake",
-      immutable: isReady,
-      locationId: activeArtifact.locationId,
-      locationName: activeArtifact.locationName,
-      summary: `${activeArtifact.artifact.label} intake advanced in ${activeArtifact.moduleId}.`,
-    });
 
     if (isReady) {
       setActiveArtifact(null);
@@ -2098,15 +1994,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       accountName: account?.name ?? accountId,
     });
     setActiveViewOverride("dashboard");
-    void recordClientActivity({
-      accountId,
-      action: "support_mode_enabled",
-      entityId: accountId,
-      entityType: "support_mode",
-      immutable: false,
-      locationName: "Portfolio",
-      summary: `Support Mode enabled for ${account?.name ?? accountId}.`,
-    });
     showToast(`Support Mode enabled for ${account?.name ?? accountId}.`);
   }
 
@@ -2271,28 +2158,10 @@ function handleCompleteOnboarding(locationId: string) {
       onboardingChecklist: onboardingState,
       onboardingProgress: completedProgress,
     });
-    void recordClientActivity({
-      accountId: location.accountId,
-      action: "location_onboarding_completed",
-      entityId: location.id,
-      entityType: "location_onboarding",
-      immutable: false,
-      locationId: location.id,
-      locationName: location.name,
-      summary: `${location.name} onboarding completed and marked live.`,
-    });
     showToast(`${location.name} onboarding complete.`);
   }
 
   function handleSendPasswordReset(userId: string, email: string) {
-    void recordClientActivity({
-      action: "wgs_user_password_reset_requested",
-      entityId: userId,
-      entityType: "wgs_user",
-      immutable: false,
-      locationName: "WGS Admin",
-      summary: `Password reset link sent to ${email}.`,
-    });
     showToast(`Reset link sent to ${email}.`);
   }
 
@@ -2303,14 +2172,6 @@ function handleCompleteOnboarding(locationId: string) {
       current.map((item) => (item.id === userId ? { ...item, status: "Inactive" } : item)),
     );
     setEditingWgsUser(null);
-    void recordClientActivity({
-      action: "wgs_user_deactivated",
-      entityId: userId,
-      entityType: "wgs_user",
-      immutable: false,
-      locationName: "WGS Admin",
-      summary: `WGS account deactivated: ${user.firstName} ${user.lastName}.`,
-    });
     showToast(`${user.firstName} ${user.lastName} deactivated.`);
   }
 
@@ -2350,16 +2211,6 @@ function handleCompleteOnboarding(locationId: string) {
       return;
     }
 
-    void recordClientActivity({
-      accountId: record.accountId,
-      action: "caar_exportpack_generated",
-      entityId: record.id,
-      entityType: "caars_v2",
-      immutable: true,
-      locationId: record.locationId,
-      locationName: record.locationName,
-      summary: `ExportPack generated for ${record.id}.`,
-    });
     showToast(`ExportPack generated for ${record.id}.`);
     if (payload?.downloadUrl) {
       window.open(payload.downloadUrl, "_blank", "noopener,noreferrer");
