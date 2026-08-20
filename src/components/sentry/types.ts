@@ -270,6 +270,8 @@ export type IntakeState = {
     commissionRateAppliedAvg?: number;
     depositAmount?: number;
     deliveryFeeAmount?: number;
+    deliveryBasisAmount?: number;
+    deliveryCommissionAmount?: number;
     deliveryOrderCount?: number;
     duplicateOrderCount?: number;
     duplicateTransactionCount?: number;
@@ -277,12 +279,26 @@ export type IntakeState = {
     feeAmount?: number;
     interchangeFeeAmount?: number;
     marketingFeeAmount?: number;
+    monthlyMetrics?: Record<string, {
+      basisAmount?: number;
+      deliveryBasisAmount?: number;
+      deliveryCommissionAmount?: number;
+      deliveryOrderCount?: number;
+      feeAmount?: number;
+      orderCount?: number;
+      pickupBasisAmount?: number;
+      pickupCommissionAmount?: number;
+      pickupOrderCount?: number;
+      transactionCount?: number;
+    }>;
     memberOrderCount?: number;
     otherFeeAmount?: number;
     orderCount?: number;
     pickupOrderCount?: number;
     promoOrderCount?: number;
     payoutAmount?: number;
+    pickupBasisAmount?: number;
+    pickupCommissionAmount?: number;
     refundCount?: number;
     serviceFeeAmount?: number;
     settlementLagDaysAvg?: number;

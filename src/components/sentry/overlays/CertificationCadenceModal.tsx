@@ -137,35 +137,6 @@ export function CertificationCadenceModal({
           </p>
         </div>
 
-        {requiresVendor ? (
-          <div className="border-b border-[var(--border)] px-6 py-5">
-            <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
-              Delivery platform
-            </div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {selectableVendors.map((vendor) => (
-                <button
-                  key={vendor.key}
-                  type="button"
-                  onClick={() => onChangeVendor?.(vendor.key)}
-                  className={`rounded-2xl border px-4 py-3 text-left text-sm font-semibold ${
-                    selectedVendorKey === vendor.key
-                      ? "border-[var(--text)] bg-[var(--text)] text-white"
-                      : "border-[var(--border)] bg-white"
-                  }`}
-                >
-                  {vendor.name}
-                </button>
-              ))}
-            </div>
-            {selectableVendors.length === 0 ? (
-              <p className="mt-3 text-sm text-[var(--accent)]">
-                Configure at least one M02 delivery platform before running certification.
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
         {locations && locations.length > 1 ? (
           <div className="border-b border-[var(--border)] px-6 py-5">
             <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
@@ -240,6 +211,34 @@ export function CertificationCadenceModal({
           <div className="mt-3 text-sm leading-6 text-[var(--muted)]">
             Select one module. M01 and M02 are certified independently and produce separate CAARs.
           </div>
+          {requiresVendor ? (
+            <div className="mt-5 border-t border-[var(--border)] pt-5">
+              <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
+                Delivery platform
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {selectableVendors.map((vendor) => (
+                  <button
+                    key={vendor.key}
+                    type="button"
+                    onClick={() => onChangeVendor?.(vendor.key)}
+                    className={`rounded-2xl border px-4 py-3 text-left text-sm font-semibold ${
+                      selectedVendorKey === vendor.key
+                        ? "border-[var(--text)] bg-[var(--text)] text-white"
+                        : "border-[var(--border)] bg-white"
+                    }`}
+                  >
+                    {vendor.name}
+                  </button>
+                ))}
+              </div>
+              {selectableVendors.length === 0 ? (
+                <p className="mt-3 text-sm text-[var(--accent)]">
+                  Configure at least one M02 delivery platform before running certification.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="grid gap-4 px-6 py-6 md:grid-cols-2">

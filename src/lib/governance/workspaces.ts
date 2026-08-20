@@ -46,7 +46,21 @@ export function toContractManualValues(workspace: SchemaWorkspace) {
   }
 
   const commissionBase = findContractValue(workspace.contract, "Commission Base");
-  const commissionRate = extractNumber(findContractValue(workspace.contract, "Commission Rate"));
+  const deliveryRate = extractNumber(
+    findContractValue(workspace.contract, ["Delivery Commission Rate (%)", "Commission Rate"]),
+  );
+  const pickupRate = extractNumber(
+    findContractValue(workspace.contract, ["Pickup / Carryout Rate (%)", "Commission Rate"]),
+  );
+  const memberRate = extractNumber(
+    findContractValue(workspace.contract, ["Member / DashPass Rate (%)", "Commission Rate"]),
+  );
+  const cateringRate = extractNumber(
+    findContractValue(workspace.contract, ["Catering / Group Orders Rate (%)", "Commission Rate"]),
+  );
+  const sponsoredRate = extractNumber(
+    findContractValue(workspace.contract, ["In-App Sponsored Listing Rate (%)", "Commission Rate"]),
+  );
   const effectiveDate = findContractValue(workspace.contract, "Effective Date");
   const storeId = findContractValue(workspace.contract, "Restaurant UUID");
 
@@ -55,11 +69,11 @@ export function toContractManualValues(workspace: SchemaWorkspace) {
     commission_base: commissionBase,
     delivery_active: "true",
     effective_date: effectiveDate,
-    rate_catering: commissionRate,
-    rate_delivery: commissionRate,
-    rate_member: commissionRate,
-    rate_pickup: commissionRate,
-    rate_sponsored: commissionRate,
+    rate_catering: cateringRate,
+    rate_delivery: deliveryRate,
+    rate_member: memberRate,
+    rate_pickup: pickupRate,
+    rate_sponsored: sponsoredRate,
     store_id: storeId,
   };
 }

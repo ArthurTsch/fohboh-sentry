@@ -97,7 +97,7 @@ const architectureSteps = [
     step: "1",
     title: "Source Intake",
     text:
-      "The app receives raw evidence per location and governed provider scope. CSV uploads are hashed, parsed, schema-checked, and reduced into numeric metrics. PDF uploads use coordinate-aware, all-page text extraction. A bank statement is uploaded once per location and linked to each configured module/provider evidence set while remaining one stored object.",
+      "The app receives raw evidence per location and governed provider scope. CSV uploads are hashed, parsed, schema-checked, and reduced into numeric metrics. M02 CSVs also preserve certification-month buckets; undated POS summary rows are excluded from metrics. PDF uploads use coordinate-aware, all-page text extraction. A bank statement is uploaded once per location and linked to each configured module/provider evidence set while remaining one stored object.",
   },
   {
     step: "2",
@@ -175,14 +175,14 @@ const m02Artifacts = [
     format: "CSV",
     source: "DoorDash / Uber Eats / Grubhub / other DSP portal",
     purpose:
-      "Primary M02 source-of-truth settlement evidence. Parsed into basisAmount, feeAmount, payoutAmount, commission values, tax remittance, promo and marketing pools, and order-channel metrics.",
+      "Primary M02 source-of-truth settlement evidence. Parsed by certification month into total, delivery, and pickup basis; actual commission; order counts; payout, tax, promotion, and marketing metrics. Native DoorDash Final order status and Uber Eats Dining Mode fields govern the delivery/pickup classification.",
   },
   {
     doc: "POS Summary by Channel",
     format: "CSV",
     source: "Restaurant POS / operating system",
     purpose:
-      "Restaurant-side channel summary used to reconcile marketplace sales and commission base against the DSP settlement source. The governed workspace now supports a sealed POS source-schema step where a representative sample export is uploaded, headers are extracted or entered manually, and the validated header set is sealed for recurring upload validation.",
+      "Restaurant-side channel summary used for certification-month, like-for-like reconciliation against DSP settlement sales. Rows without a valid business-day date are excluded, and mixed-month files are bucketed so a June certification cannot include July. If POS represents delivery-channel sales only, TG04 compares it with settlement delivery basis while pickup remains in the fee calculation.",
   },
   {
     doc: "Signed DSP Agreement",
@@ -238,7 +238,7 @@ const nonDocumentInputs = [
   "POS source schema governance: a representative POS CSV can be uploaded to extract headers, corrected manually, validated, and sealed as the recurring Upload Data expectation.",
   "Contract Config values: governed legal terms used by the deterministic engine across M01, M02, and M03.",
   "Location ownership, team access, and certification scope resolution.",
-  "Required certification month in YYYY-MM format. The UI defaults to the previous completed month, permits past/current months, and rejects future months.",
+  "Required certification month in YYYY-MM format. The UI defaults to the previous completed month, permits past/current months, rejects future months, and selects the matching stored month bucket from both M02 settlement and POS evidence.",
 ];
 
 const workflowCards = [
@@ -268,7 +268,7 @@ const workflowCards = [
     items: [
       "Contract Config is the governed legal fee model used by the engine.",
       "For M01 it includes values like `markup_bps`, `txn_fee`, `monthly_fee`, card-brand rate fields, pricing model, and chargeback fee.",
-      "For M02 it includes commission rates, commission base, and marketplace remittance logic.",
+      "For M02 it includes separate delivery and pickup commission rates, commission base, and marketplace remittance logic. Expected commission is reconstructed from the classified delivery and pickup bases rather than an averaged rate.",
       "Sealing the contract config creates the governed fee baseline used in certification math and in TG08 formula integrity checks.",
     ],
   },
@@ -288,6 +288,7 @@ const workflowCards = [
       "The progress UI exposes real client milestones and uses an indeterminate moving state while the atomic server certification transaction runs.",
       "Monthly reruns for the same location/module/provider/cadence reuse a stable CAAR identity instead of creating accidental duplicates.",
       "The CAAR separates blocking reconciliation exceptions from amber timing warnings and informational prior-period carryover notes.",
+      "M01 and M02 CAARs persist a dedicated calculation-methodology record. M01 shows expected processor fee components and POS comparison; M02 shows delivery/pickup bases, rates, expected versus actual commission, and the like-for-like TG04 comparison.",
       "Certification persistence uses a bounded 30-second transaction timeout because CAAR sealing includes database writes and artifact storage.",
     ],
   },
@@ -336,49 +337,49 @@ const trustGates = [
   {
     gate: "TG01",
     detail:
-      "Module coverage and certification package completeness. Penalizes locations where configured active modules do not all produce a governed certification package.",
+      "Data completeness gate. Required source fields must meet the active module threshold; missing POS evidence caps the gate in the low-confidence band.",
   },
   {
     gate: "TG02",
-    detail: "Freshness and timing confidence across the active certification package.",
+    detail: "Source authenticity gate. Requires the active source package and intact upload integrity evidence; partial provenance receives only partial credit.",
   },
   {
     gate: "TG03",
-    detail: "Authenticity and documentary trust of the evidence package.",
+    detail: "Vendor profile currency gate. Requires governed contract terms and reduces the score when the active contract is expired.",
   },
   {
     gate: "TG04",
-    detail: "Governed structural integrity of the certification package.",
+    detail: "Transaction-basis reconciliation. Compares source and POS on a like-for-like period and channel scope: up to 1% passes, 1-5% is partial, and above 5% fails. M02 delivery-only POS evidence is compared with delivery settlement basis while pickup remains fee-tested.",
   },
   {
     gate: "TG05",
-    detail: "Contract and source coherence within the current certification context.",
+    detail: "Duplicate-event gate. Scores duplicate or duplicate-like transaction incidence for the active certification period.",
   },
   {
     gate: "TG06",
-    detail: "Governed schema and field-binding readiness.",
+    detail: "Period coverage gate. Monthly final requires all governed artifacts, including bank evidence; weekly preliminary may proceed without the final bank gate.",
   },
   {
     gate: "TG07",
     detail:
-      "Fee legitimacy and reconciliation gate. Production CAAR requests are single-module, so TG07 carries the selected module's governed reconciliation result directly. Reviewed-fee weighting remains available in the aggregate engine layer, not the current run endpoint.",
+      "Fee legitimacy gate. Scores attributed variance as a percentage of reviewed fee volume. M02 uses fulfillment-aware delivery and pickup contract rates; undercharges and immaterial overcharges do not create recoverable variance.",
   },
   {
     gate: "TG08",
-    detail: "Formula and contract integrity gate for the active certified period.",
+    detail: "KPI formula currency gate. Requires governed formula inputs for the full certification period and detects incomplete or split-period governance.",
   },
   {
     gate: "TG09",
-    detail: "Audit-lineage completeness across uploads, governance, certification, and persistence.",
+    detail: "Audit-lineage completeness across upload provenance, governed configuration, engine execution, and certification persistence.",
   },
   {
     gate: "TG10",
-    detail: "Narrative and certifiable output readiness based on governed evidence quality.",
+    detail: "Narrative hash readiness. Requires both formula currency and audit lineage before deterministic narrative sealing.",
   },
   {
     gate: "TG11",
     detail:
-      "Composite CAAR eligibility gate. Current implementation converts the pre-TG11 weighted gate score into a final PASS / FAIL release gate.",
+      "Composite CAAR eligibility gate computed after TG01-TG10 and system health. The weighted pre-eligibility score must clear the documented release threshold.",
   },
 ];
 
@@ -420,7 +421,7 @@ const m02RuleGroups: RuleGroup[] = [
     title: "Commission Overcharge",
     ids: ["DSP-COM-04", "DSP-COM-05", "DSP-COM-06", "DSP-COM-07"],
     detail:
-      "Compares actual marketplace commission against expected commission on the resolved governed contract base and rate model.",
+      "Compares actual marketplace commission with fulfillment-aware expected commission: delivery basis × delivery rate plus pickup basis × pickup rate. Like-for-like POS reconciliation does not remove pickup from fee testing.",
   },
   {
     title: "Promotion / Marketing / Refund Logic",

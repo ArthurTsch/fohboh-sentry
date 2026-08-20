@@ -15,6 +15,8 @@ type UploadMetrics = {
   depositAmount?: number;
   depositReferenceRows?: UploadReferenceRow[];
   deliveryFeeAmount?: number;
+  deliveryBasisAmount?: number;
+  deliveryCommissionAmount?: number;
   deliveryOrderCount?: number;
   duplicateOrderCount?: number;
   duplicateTransactionCount?: number;
@@ -22,6 +24,7 @@ type UploadMetrics = {
   feeAmount?: number;
   interchangeFeeAmount?: number;
   marketingFeeAmount?: number;
+  monthlyMetrics?: Record<string, UploadMonthlyMetrics>;
   mcCreditAmount?: number;
   mcCreditFeeAmount?: number;
   mcDebitAmount?: number;
@@ -31,6 +34,8 @@ type UploadMetrics = {
   orderCount?: number;
   payoutAmount?: number;
   payoutReferenceRows?: UploadReferenceRow[];
+  pickupBasisAmount?: number;
+  pickupCommissionAmount?: number;
   pickupOrderCount?: number;
   promoOrderCount?: number;
   refundCount?: number;
@@ -44,6 +49,19 @@ type UploadMetrics = {
   visaCreditFeeAmount?: number;
   visaDebitAmount?: number;
   visaDebitFeeAmount?: number;
+};
+
+type UploadMonthlyMetrics = {
+  basisAmount: number;
+  deliveryBasisAmount: number;
+  deliveryCommissionAmount: number;
+  deliveryOrderCount: number;
+  feeAmount: number;
+  orderCount: number;
+  pickupBasisAmount: number;
+  pickupCommissionAmount: number;
+  pickupOrderCount: number;
+  transactionCount: number;
 };
 
 type UploadReferenceRow = {
@@ -187,14 +205,33 @@ function selectMetricRows(
   headers: string[],
   rows: string[][],
 ) {
-  if (artifactKey !== "m02-pos" || configuredVendorKey !== "ubereats") return rows;
+  if (artifactKey !== "m02-pos") return rows;
+
+  const dateIndex = [
+    "business_day",
+    "business day",
+    "date",
+    "business_date",
+    "order_date",
+    "report_date",
+    "sales_period_end",
+    "sales period end",
+    "batch_date",
+  ]
+    .map((name) => headers.indexOf(normalizeHeader(name)))
+    .find((index) => index >= 0) ?? -1;
+  const datedRows = dateIndex >= 0
+    ? rows.filter((row) => Boolean(readMonthKey(row, dateIndex)))
+    : rows;
+
+  if (configuredVendorKey !== "ubereats") return datedRows;
 
   const sourceIndex = headers.indexOf(normalizeHeader("ORDER_SOURCE_NAME"));
-  if (sourceIndex < 0) return rows;
+  if (sourceIndex < 0) return datedRows;
 
   // Toast groups third-party marketplace orders under Orders API. This binding is
   // deterministic only while Uber Eats is the configured DSP for this upload slot.
-  return rows.filter(
+  return datedRows.filter(
     (row) => String(row[sourceIndex] ?? "").trim().toLowerCase() === "orders api",
   );
 }
@@ -245,6 +282,8 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     depositAmount: 0,
     depositReferenceRows: [],
     deliveryFeeAmount: 0,
+    deliveryBasisAmount: 0,
+    deliveryCommissionAmount: 0,
     deliveryOrderCount: 0,
     duplicateOrderCount: 0,
     duplicateTransactionCount: 0,
@@ -252,6 +291,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     feeAmount: 0,
     interchangeFeeAmount: 0,
     marketingFeeAmount: 0,
+    monthlyMetrics: {},
     mcCreditAmount: 0,
     mcCreditFeeAmount: 0,
     mcDebitAmount: 0,
@@ -261,6 +301,8 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     orderCount: 0,
     payoutAmount: 0,
     payoutReferenceRows: [],
+    pickupBasisAmount: 0,
+    pickupCommissionAmount: 0,
     pickupOrderCount: 0,
     promoOrderCount: 0,
     refundCount: 0,
@@ -280,6 +322,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
   let settlementLagDaysTotal = 0;
   const seenOrderIds = new Map<string, number>();
   const seenTransactionIds = new Map<string, number>();
+  const monthlyMetrics: Record<string, UploadMonthlyMetrics> = {};
 
   for (const row of rows) {
     const valueFor = (...names: string[]) =>
@@ -292,8 +335,26 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       return index >= 0 ? parseNumber(row[index]) : 0;
     };
     const readAbs = (...names: string[]) => Math.abs(read(...names));
+    const rowMonthKey = artifactKey === "m02-pos" || artifactKey === "m02-settlement"
+      ? readMonthKey(
+          row,
+          valueFor(
+            "business_day",
+            "business day",
+            "date",
+            "business_date",
+            "order_date",
+            "timestamp local date",
+            "timestamp utc date",
+            "report_date",
+            "sales_period_end",
+            "sales period end",
+            "batch_date",
+          ),
+        )
+      : null;
 
-    metrics.basisAmount += read(
+    const rowBasisAmount = read(
       "trans_amount",
       "gross_amount",
       "amount",
@@ -310,6 +371,25 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "sales (excl. tax)",
       "subtotal",
     );
+    metrics.basisAmount += rowBasisAmount;
+    if (artifactKey === "m02-pos" && rowMonthKey) {
+        const bucket = monthlyMetrics[rowMonthKey] ?? {
+          basisAmount: 0,
+          deliveryBasisAmount: 0,
+          deliveryCommissionAmount: 0,
+          deliveryOrderCount: 0,
+          feeAmount: 0,
+          orderCount: 0,
+          pickupBasisAmount: 0,
+          pickupCommissionAmount: 0,
+          pickupOrderCount: 0,
+          transactionCount: 0,
+        };
+        bucket.basisAmount += rowBasisAmount;
+        bucket.orderCount += read("order_count", "menu_item_count", "order count") || 1;
+        bucket.transactionCount += read("transaction_count", "#_txns", "# txns") || 1;
+        monthlyMetrics[rowMonthKey] = bucket;
+    }
     const standardFeeAmountRaw = read(
       "fee_amount",
       "processing_fees",
@@ -328,7 +408,47 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     const standardFeeAmount =
       artifactKey === "m02-settlement" ? Math.abs(standardFeeAmountRaw) : standardFeeAmountRaw;
     const marketplaceFeeAmount = readAbs("marketplace fee");
-    metrics.feeAmount += marketplaceFeeAmount || standardFeeAmount;
+    const rowCommissionAmount = marketplaceFeeAmount || standardFeeAmount;
+    metrics.feeAmount += rowCommissionAmount;
+    const fulfillmentType =
+      artifactKey === "m02-settlement" ? resolveM02FulfillmentType(headers, row) : null;
+    if (fulfillmentType === "delivery") {
+      metrics.deliveryBasisAmount += rowBasisAmount;
+      metrics.deliveryCommissionAmount += rowCommissionAmount;
+      metrics.deliveryOrderCount += 1;
+    } else if (fulfillmentType === "pickup") {
+      metrics.pickupBasisAmount += rowBasisAmount;
+      metrics.pickupCommissionAmount += rowCommissionAmount;
+      metrics.pickupOrderCount += 1;
+    }
+    if (artifactKey === "m02-settlement" && rowMonthKey) {
+      const bucket = monthlyMetrics[rowMonthKey] ?? {
+        basisAmount: 0,
+        deliveryBasisAmount: 0,
+        deliveryCommissionAmount: 0,
+        deliveryOrderCount: 0,
+        feeAmount: 0,
+        orderCount: 0,
+        pickupBasisAmount: 0,
+        pickupCommissionAmount: 0,
+        pickupOrderCount: 0,
+        transactionCount: 0,
+      };
+      bucket.basisAmount += rowBasisAmount;
+      bucket.feeAmount += rowCommissionAmount;
+      bucket.orderCount += 1;
+      bucket.transactionCount += 1;
+      if (fulfillmentType === "delivery") {
+        bucket.deliveryBasisAmount += rowBasisAmount;
+        bucket.deliveryCommissionAmount += rowCommissionAmount;
+        bucket.deliveryOrderCount += 1;
+      } else if (fulfillmentType === "pickup") {
+        bucket.pickupBasisAmount += rowBasisAmount;
+        bucket.pickupCommissionAmount += rowCommissionAmount;
+        bucket.pickupOrderCount += 1;
+      }
+      monthlyMetrics[rowMonthKey] = bucket;
+    }
     metrics.interchangeFeeAmount += read("interchange_fee", "interchange_amount");
     const serviceFeeAmount = read(
       "service_fee",
@@ -410,8 +530,10 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
 
     const orderTypeIndex = valueFor("order_type", "channel");
     const orderType = orderTypeIndex >= 0 ? String(row[orderTypeIndex] ?? "").toLowerCase() : "";
-    if (orderType.includes("pickup")) metrics.pickupOrderCount += 1;
-    if (orderType.includes("delivery")) metrics.deliveryOrderCount += 1;
+    if (!fulfillmentType) {
+      if (orderType.includes("pickup")) metrics.pickupOrderCount += 1;
+      if (orderType.includes("delivery")) metrics.deliveryOrderCount += 1;
+    }
     if (orderType.includes("dashpass") || orderType.includes("member") || orderType.includes("uber one")) {
       metrics.memberOrderCount += 1;
     }
@@ -513,6 +635,23 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
   metrics.orderCount =
     round(sumColumn(headers, rows, ["order_count", "menu_item_count", "order count"])) || rows.length;
 
+  if ((artifactKey === "m02-pos" || artifactKey === "m02-settlement") && Object.keys(monthlyMetrics).length > 0) {
+    metrics.monthlyMetrics = Object.fromEntries(
+      Object.entries(monthlyMetrics).map(([month, bucket]) => [month, {
+        basisAmount: roundTo2(bucket.basisAmount),
+        deliveryBasisAmount: roundTo2(bucket.deliveryBasisAmount),
+        deliveryCommissionAmount: roundTo2(bucket.deliveryCommissionAmount),
+        deliveryOrderCount: round(bucket.deliveryOrderCount),
+        feeAmount: roundTo2(bucket.feeAmount),
+        orderCount: round(bucket.orderCount),
+        pickupBasisAmount: roundTo2(bucket.pickupBasisAmount),
+        pickupCommissionAmount: roundTo2(bucket.pickupCommissionAmount),
+        pickupOrderCount: round(bucket.pickupOrderCount),
+        transactionCount: round(bucket.transactionCount),
+      }]),
+    );
+  }
+
   if (artifactKey.includes("bank")) {
     metrics.basisAmount = 0;
     metrics.feeAmount = 0;
@@ -528,6 +667,8 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     "adjustmentAmount",
     "basisAmount",
     "deliveryFeeAmount",
+    "deliveryBasisAmount",
+    "deliveryCommissionAmount",
     "depositAmount",
     "errorChargeAmount",
     "feeAmount",
@@ -539,6 +680,8 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     "mcDebitFeeAmount",
     "otherFeeAmount",
     "payoutAmount",
+    "pickupBasisAmount",
+    "pickupCommissionAmount",
     "serviceFeeAmount",
     "taxRemittedAmount",
     "tipAmount",
@@ -576,6 +719,20 @@ function aggregatePayoutReferenceRows(rows: UploadMetrics["payoutReferenceRows"]
   return [...grouped.values()]
     .filter((row) => row.amount > 0)
     .map((row, index) => ({ ...row, rowNumber: index + 1 }));
+}
+
+function resolveM02FulfillmentType(headers: string[], row: string[]) {
+  const valueFor = (...names: string[]) =>
+    names
+      .map((name) => headers.indexOf(normalizeHeader(name)))
+      .find((index) => index >= 0) ?? -1;
+  const fulfillmentIndex = valueFor("dining mode", "final order status", "fulfillment type");
+  if (fulfillmentIndex < 0) return null;
+
+  const value = String(row[fulfillmentIndex] ?? "").trim().toLowerCase();
+  if (value.includes("pickup") || value.includes("picked up")) return "pickup" as const;
+  if (value.includes("delivery") || value.includes("delivered")) return "delivery" as const;
+  return null;
 }
 
 function parseCsv(text: string) {
@@ -627,6 +784,29 @@ function readDateValue(row: string[], index: number) {
   if (!raw) return null;
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function readMonthKey(row: string[], index: number) {
+  if (index < 0) return null;
+  const raw = String(row[index] ?? "").trim();
+  if (!raw) return null;
+
+  const yearFirst = raw.match(/^(\d{4})[-/.](\d{1,2})(?:[-/.]\d{1,2})?/);
+  if (yearFirst) {
+    const month = Number(yearFirst[2]);
+    return month >= 1 && month <= 12 ? `${yearFirst[1]}-${String(month).padStart(2, "0")}` : null;
+  }
+
+  const monthFirst = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})/);
+  if (monthFirst) {
+    const month = Number(monthFirst[1]);
+    const year = monthFirst[3].length === 2 ? 2000 + Number(monthFirst[3]) : Number(monthFirst[3]);
+    return month >= 1 && month <= 12 ? `${year}-${String(month).padStart(2, "0")}` : null;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function sumColumn(headers: string[], rows: string[][], names: string[]) {

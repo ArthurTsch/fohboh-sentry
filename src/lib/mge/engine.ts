@@ -10,6 +10,8 @@ type Metrics = {
   depositAmount?: number;
   depositReferenceRows?: ReferenceRow[];
   deliveryFeeAmount?: number;
+  deliveryBasisAmount?: number;
+  deliveryCommissionAmount?: number;
   deliveryOrderCount?: number;
   duplicateOrderCount?: number;
   duplicateTransactionCount?: number;
@@ -20,6 +22,7 @@ type Metrics = {
   interchangeFeeAmount?: number;
   interchangeMismatchAmount?: number;
   marketingFeeAmount?: number;
+  monthlyMetrics?: Record<string, MonthlyMetrics>;
   mcCreditAmount?: number;
   mcCreditFeeAmount?: number;
   mcDebitAmount?: number;
@@ -28,6 +31,8 @@ type Metrics = {
   otherFeeAmount?: number;
   orderCount?: number;
   pickupOrderCount?: number;
+  pickupBasisAmount?: number;
+  pickupCommissionAmount?: number;
   promoOrderCount?: number;
   payoutAmount?: number;
   payoutReferenceRows?: ReferenceRow[];
@@ -63,6 +68,19 @@ type Metrics = {
   visaCreditFeeAmount?: number;
   visaDebitAmount?: number;
   visaDebitFeeAmount?: number;
+};
+
+type MonthlyMetrics = {
+  basisAmount?: number;
+  deliveryBasisAmount?: number;
+  deliveryCommissionAmount?: number;
+  deliveryOrderCount?: number;
+  feeAmount?: number;
+  orderCount?: number;
+  pickupBasisAmount?: number;
+  pickupCommissionAmount?: number;
+  pickupOrderCount?: number;
+  transactionCount?: number;
 };
 
 type ReferenceRow = {
@@ -159,6 +177,7 @@ export type ModuleArtifactState = {
 export type ModuleEngineInput = {
   artifacts: ModuleArtifactState[];
   cadence: Cadence;
+  certificationMonth?: string;
   evaluationDate: Date;
   moduleId: ModuleId;
   systemHealthFlags?: SystemHealthFlag[];
@@ -840,7 +859,7 @@ const M02_RULES: DeterministicRule[] = [
       const contract = context.contract;
       if (!statement || !contract) return null;
       const actualCommission = computeActualM02Commission(statement);
-      const expectedRate = computeExpectedM02Rate(contract);
+      const expectedRate = computeExpectedM02Rate(contract, statement);
       const basisAmount = resolveM02ContractBase(statement, context.pos?.metrics, contract);
       if (actualCommission <= 0 || expectedRate <= 0 || basisAmount <= 0 || residualVariance <= 1) return null;
       const observedRate = (actualCommission / Math.max(basisAmount, 1)) * 100;
@@ -873,8 +892,8 @@ const M02_RULES: DeterministicRule[] = [
       const pos = context.pos?.metrics;
       const contract = context.contract;
       if (!statement || !pos || !contract) return null;
-      const expectedRate = computeExpectedM02Rate(contract);
-      const statementBasis = numberValue(statement.basisAmount);
+      const expectedRate = computeExpectedM02Rate(contract, statement);
+      const statementBasis = resolveComparableM02StatementBasis(statement, pos);
       const posBasis = numberValue(pos.basisAmount);
       const actualCommission = computeActualM02Commission(statement);
       if (
@@ -918,7 +937,7 @@ const M02_RULES: DeterministicRule[] = [
       if (!statement || !contract || residualVariance <= 1) return null;
       const taxRemitted = numberValue(statement.taxRemittedAmount);
       const actualCommission = computeActualM02Commission(statement);
-      const expectedRate = computeExpectedM02Rate(contract);
+      const expectedRate = computeExpectedM02Rate(contract, statement);
       const taxRemit = String(contract.tax_remit ?? "").toLowerCase();
       if (taxRemitted <= 0 || actualCommission <= 0 || expectedRate <= 0 || taxRemit === "no") return null;
       const taxableVariance = roundCurrency(taxRemitted * (expectedRate / 100));
@@ -941,7 +960,7 @@ const M02_RULES: DeterministicRule[] = [
       if (!statement || !contract || residualVariance <= 1) return null;
       const tipAmount = numberValue(statement.tipAmount);
       const actualCommission = computeActualM02Commission(statement);
-      const expectedRate = computeExpectedM02Rate(contract);
+      const expectedRate = computeExpectedM02Rate(contract, statement);
       if (tipAmount <= 0 || actualCommission <= 0 || expectedRate <= 0) return null;
       const tipVariance = roundCurrency(tipAmount * (expectedRate / 100));
       const variance = Math.min(tipVariance, residualVariance);
@@ -1024,7 +1043,7 @@ const M02_RULES: DeterministicRule[] = [
       const refundCount = numberValue(statement.refundCount);
       const basisAmount = resolveM02ContractBase(statement, context.pos?.metrics, contract);
       const statementBasis = numberValue(statement.basisAmount);
-      const expectedRate = computeExpectedM02Rate(contract);
+      const expectedRate = computeExpectedM02Rate(contract, statement);
       if (refundCount <= 0 || basisAmount <= 0 || statementBasis <= basisAmount || expectedRate <= 0) return null;
       const wrongBase = statementBasis - basisAmount;
       const variance = Math.min(roundCurrency(wrongBase * (expectedRate / 100) * 0.5), residualVariance);
@@ -1082,7 +1101,7 @@ const M02_RULES: DeterministicRule[] = [
       if (!statement || !contract) return null;
       const actualCommission = computeActualM02Commission(statement);
       const basisAmount = numberValue(statement.basisAmount);
-      const expectedRate = computeExpectedM02Rate(contract);
+      const expectedRate = computeExpectedM02Rate(contract, statement);
       if (actualCommission <= 0 || basisAmount <= 0 || expectedRate <= 0 || residualVariance <= 1) return null;
       const observedRate = (actualCommission / Math.max(basisAmount, 1)) * 100;
       const varianceBand = Math.abs(observedRate - expectedRate);
@@ -1277,7 +1296,7 @@ const M02_RULES: DeterministicRule[] = [
       if (!statement || !contract || residualVariance <= 1) return null;
       const actualCommission = computeActualM02Commission(statement);
       const basisAmount = resolveM02ContractBase(statement, context.pos?.metrics, contract);
-      const expectedRate = computeExpectedM02Rate(contract);
+      const expectedRate = computeExpectedM02Rate(contract, statement);
       if (actualCommission <= 0 || basisAmount <= 0 || expectedRate <= 0) return null;
       const observedRate = (actualCommission / basisAmount) * 100;
       const maxAllowedRate = expectedRate + 1.5;
@@ -1299,7 +1318,10 @@ const M02_RULES: DeterministicRule[] = [
     module: "M02",
     version: RULE_VERSION,
     evaluate: (context, residualVariance) => {
-      const statementBasis = numberValue(context.statement?.metrics?.basisAmount);
+      const statementBasis = resolveComparableM02StatementBasis(
+        context.statement?.metrics,
+        context.pos?.metrics,
+      );
       const posBasis = numberValue(context.pos?.metrics?.basisAmount);
       const actualCommission = computeActualM02Commission(context.statement?.metrics ?? {});
       if (statementBasis <= 0 || posBasis <= 0 || actualCommission <= 0 || residualVariance <= 1) return null;
@@ -1410,8 +1432,14 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
       : input.moduleId === "M02"
         ? "settlement"
         : "royalty";
-  const statement = resolveArtifact(input.artifacts, statementToken);
-  const pos = resolveArtifact(input.artifacts, "pos");
+  const certificationMonth = input.certificationMonth ?? monthKeyFromDate(input.evaluationDate);
+  const statement = input.moduleId === "M02"
+    ? scopeM02ArtifactToCertificationMonth(resolveArtifact(input.artifacts, statementToken), certificationMonth)
+    : resolveArtifact(input.artifacts, statementToken);
+  const pos = scopeM02ArtifactToCertificationMonth(
+    resolveArtifact(input.artifacts, "pos"),
+    certificationMonth,
+  );
   const agreement = resolveArtifact(input.artifacts, "agreement");
   const bank = resolveArtifact(input.artifacts, "bank");
   const contractArtifact = resolveArtifact(input.artifacts, "contract");
@@ -1522,6 +1550,37 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
     systemHealth,
     trustGates,
   };
+}
+
+function scopeM02ArtifactToCertificationMonth(
+  artifact: ModuleArtifactState | null,
+  certificationMonth: string,
+): ModuleArtifactState | null {
+  const monthlyMetrics = artifact?.metrics?.monthlyMetrics;
+  if (!artifact || !monthlyMetrics || Object.keys(monthlyMetrics).length === 0) return artifact;
+
+  const matchingMetrics = monthlyMetrics[certificationMonth];
+
+  return {
+    ...artifact,
+    metrics: {
+      ...artifact.metrics,
+      basisAmount: numberValue(matchingMetrics?.basisAmount),
+      deliveryBasisAmount: numberValue(matchingMetrics?.deliveryBasisAmount),
+      deliveryCommissionAmount: numberValue(matchingMetrics?.deliveryCommissionAmount),
+      deliveryOrderCount: numberValue(matchingMetrics?.deliveryOrderCount),
+      feeAmount: numberValue(matchingMetrics?.feeAmount),
+      orderCount: numberValue(matchingMetrics?.orderCount),
+      pickupBasisAmount: numberValue(matchingMetrics?.pickupBasisAmount),
+      pickupCommissionAmount: numberValue(matchingMetrics?.pickupCommissionAmount),
+      pickupOrderCount: numberValue(matchingMetrics?.pickupOrderCount),
+      transactionCount: numberValue(matchingMetrics?.transactionCount),
+    },
+  };
+}
+
+function monthKeyFromDate(value: Date) {
+  return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function runLoopA(context: RuleContext, recoveryValue: number) {
@@ -2011,7 +2070,7 @@ function buildCanonicalTrustGateCitations({
     "R091",
   ]);
   const narrativeReady = trustGates.TG08.scorePct >= 100 && trustGates.TG09.scorePct >= 100;
-  const processorBasis = numberValue(context.statement?.metrics?.basisAmount);
+  const processorBasis = resolveReconciliationStatementBasis(context);
   const posBasis = numberValue(context.pos?.metrics?.basisAmount);
   const reconciliationDifference = Math.abs(processorBasis - posBasis);
   const reconciliationDifferencePct = processorBasis > 0
@@ -2232,7 +2291,7 @@ function computeTrustGateScores({
     ? (Math.abs(ruleCitations.reduce((sum, citation) => sum + citation.varianceCents, 0)) / 100 / reviewedFeeVolume) * 100
     : 0;
   const posBasis = numberValue(context.pos?.metrics?.basisAmount);
-  const statementBasis = numberValue(context.statement?.metrics?.basisAmount);
+  const statementBasis = resolveReconciliationStatementBasis(context);
   const reconciliationGapPct =
     statementBasis > 0 && posBasis > 0
       ? relativeDelta(statementBasis, posBasis) * 100
@@ -2663,7 +2722,7 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
   );
   const bankRequired = moduleRequiresBank(context);
   const bankGoverned = Boolean(context.bank?.uploaded && context.bank.hash);
-  const statementBasis = numberValue(context.statement?.metrics?.basisAmount);
+  const statementBasis = resolveReconciliationStatementBasis(context);
   const posBasis = numberValue(context.pos?.metrics?.basisAmount);
   const statementFees = numberValue(context.statement?.metrics?.feeAmount);
   const matchedToastDeposits = context.moduleId === "M01" ? reconcileToastBankDeposits(context) : null;
@@ -3075,6 +3134,8 @@ function buildSupplementalM01CanonicalCitations(
   const vendor = resolveVendorName(context);
   const actualFees = numberValue(statement.feeAmount);
   const basisAmount = numberValue(statement.basisAmount);
+  const expectedFees = computeExpectedM01Fees(statement, contract);
+  const posBasis = numberValue(context.pos?.metrics?.basisAmount);
   const debitVolume = numberValue(statement.visaDebitAmount) + numberValue(statement.mcDebitAmount);
   const duplicateTxnCount = numberValue(statement.duplicateTransactionCount);
   const chargebackCount = numberValue(statement.chargebackCount);
@@ -3088,6 +3149,21 @@ function buildSupplementalM01CanonicalCitations(
   const monthlyVolume = numberValue(contract.monthly_card_volume || contract.monthly_volume || contract.volume_amount);
   const volumeDiscountThreshold = numberValue(contract.volume_discount_threshold || contract.discount_threshold_volume);
   const expectedVolumeDiscountPct = numberValue(contract.volume_discount_pct || contract.discount_rate_pct);
+
+  if (basisAmount > 0 && actualFees > 0) {
+    citations.push(buildNarrativeCitation("R002", {
+      ...buildM01FeeGapSample(
+        statement,
+        contract,
+        actualFees,
+        expectedFees,
+        roundCurrency(Math.max(0, actualFees - expectedFees)),
+      ),
+      detail: "M01 governed fee calculation and POS basis comparison were reconstructed for the certification period.",
+      pos_basis_amount: posBasis,
+      reconciliation_difference: roundCurrency(Math.abs(basisAmount - posBasis)),
+    }));
+  }
 
   if (textValue(contract.sic_code) && textValue(contract.certified_sic_code) && textValue(contract.sic_code) !== textValue(contract.certified_sic_code)) {
     citations.push(buildNarrativeCitation("R057", {
@@ -3265,9 +3341,9 @@ function buildSupplementalM02CanonicalCitations(
 
   const vendor = resolveVendorName(context);
   const actualCommission = computeActualM02Commission(statement);
-  const expectedRate = computeExpectedM02Rate(contract);
+  const expectedRate = computeExpectedM02Rate(contract, statement);
   const basisAmount = resolveM02ContractBase(statement, pos, contract);
-  const statementBasis = numberValue(statement.basisAmount);
+  const statementBasis = resolveComparableM02StatementBasis(statement, pos);
   const posBasis = numberValue(pos?.basisAmount);
   const pickupOrders = numberValue(statement.pickupOrderCount);
   const orderCount = Math.max(1, numberValue(statement.orderCount) || numberValue(statement.transactionCount));
@@ -3281,11 +3357,29 @@ function buildSupplementalM02CanonicalCitations(
   const basisDeltaPct = posBasis > 0 && statementBasis > 0 ? relativeDelta(statementBasis, posBasis) : 0;
 
   if (actualCommission > 0 && basisAmount > 0) {
+    const deliveryBasis = numberValue(statement.deliveryBasisAmount);
+    const pickupBasis = numberValue(statement.pickupBasisAmount);
+    const deliveryRate = numberValue(contract.rate_delivery);
+    const pickupRate = numberValue(contract.rate_pickup) || deliveryRate;
+    const expectedDeliveryCommission = roundCurrency(deliveryBasis * (deliveryRate / 100));
+    const expectedPickupCommission = roundCurrency(pickupBasis * (pickupRate / 100));
+    const expectedCommission = roundCurrency(expectedDeliveryCommission + expectedPickupCommission);
     citations.push(buildNarrativeCitation("R016", {
+      actual_commission: actualCommission,
       commission_base_amount: basisAmount,
       detail: "Commission basis was reconstructed from governed settlement and POS source evidence.",
+      delivery_basis_amount: deliveryBasis,
+      delivery_rate_pct: deliveryRate,
+      expected_commission: expectedCommission,
+      expected_delivery_commission: expectedDeliveryCommission,
+      expected_pickup_commission: expectedPickupCommission,
       expected_rate_pct: expectedRate,
       observed_commission: actualCommission,
+      pickup_basis_amount: pickupBasis,
+      pickup_rate_pct: pickupRate,
+      pos_basis_amount: posBasis,
+      reconciliation_difference: roundCurrency(Math.abs(statementBasis - posBasis)),
+      reconciliation_statement_basis: statementBasis,
     }));
   }
   if (observedRate > expectedRate + 0.5 && expectedRate > 0) {
@@ -3564,15 +3658,24 @@ function computeM01Recovery(metrics?: Metrics, contract?: Record<string, string>
   return Math.max(0, roundCurrency(numberValue(metrics.feeAmount) - computeExpectedM01Fees(metrics, contract)));
 }
 
-function computeExpectedM02Rate(contract: Record<string, string>) {
-  const rates = [
-    numberValue(contract.rate_delivery),
-    numberValue(contract.rate_member),
-    numberValue(contract.rate_pickup),
-    numberValue(contract.rate_catering),
-    numberValue(contract.rate_sponsored),
-  ].filter((value) => value > 0);
-  return rates.length > 0 ? roundCurrency(rates.reduce((sum, value) => sum + value, 0) / rates.length) : 0;
+function computeExpectedM02Rate(contract: Record<string, string>, statement?: Metrics) {
+  const deliveryRate = numberValue(contract.rate_delivery);
+  const pickupRate = numberValue(contract.rate_pickup) || deliveryRate;
+  const totalBasis = numberValue(statement?.basisAmount);
+  const deliveryBasis = numberValue(statement?.deliveryBasisAmount);
+  const pickupBasis = numberValue(statement?.pickupBasisAmount);
+  const classifiedBasis = deliveryBasis + pickupBasis;
+
+  if (totalBasis > 0 && classifiedBasis > 0) {
+    const unclassifiedBasis = Math.max(0, totalBasis - classifiedBasis);
+    const expectedCommission =
+      deliveryBasis * (deliveryRate / 100) +
+      pickupBasis * (pickupRate / 100) +
+      unclassifiedBasis * (deliveryRate / 100);
+    return roundCurrency((expectedCommission / totalBasis) * 100);
+  }
+
+  return deliveryRate || pickupRate;
 }
 
 function computeActualM02Commission(metrics: Metrics) {
@@ -3586,11 +3689,32 @@ function resolveM02ContractBase(
   pos?: Metrics,
   contract?: Record<string, string> | null,
 ) {
+  const fulfillmentBasis =
+    numberValue(statement?.deliveryBasisAmount) + numberValue(statement?.pickupBasisAmount);
+  if (fulfillmentBasis > 0) return fulfillmentBasis;
+
   const commissionBase = (contract?.commission_base ?? "").toLowerCase();
   if (commissionBase === "order_subtotal" || commissionBase === "restaurant_food_sales") {
     return numberValue(pos?.basisAmount) || numberValue(statement?.basisAmount);
   }
   return numberValue(statement?.basisAmount) || numberValue(pos?.basisAmount);
+}
+
+function resolveReconciliationStatementBasis(context: RuleContext) {
+  if (context.moduleId !== "M02") return numberValue(context.statement?.metrics?.basisAmount);
+  return resolveComparableM02StatementBasis(context.statement?.metrics, context.pos?.metrics);
+}
+
+function resolveComparableM02StatementBasis(statement?: Metrics, pos?: Metrics) {
+  const totalBasis = numberValue(statement?.basisAmount);
+  const deliveryBasis = numberValue(statement?.deliveryBasisAmount);
+  const pickupBasis = numberValue(statement?.pickupBasisAmount);
+  const posBasis = numberValue(pos?.basisAmount);
+
+  if (deliveryBasis <= 0 || pickupBasis <= 0 || posBasis <= 0) return totalBasis;
+  return Math.abs(deliveryBasis - posBasis) < Math.abs(totalBasis - posBasis)
+    ? deliveryBasis
+    : totalBasis;
 }
 
 function computeM02Recovery(
@@ -3601,7 +3725,7 @@ function computeM02Recovery(
   if (!statement || !contract) return 0;
   const basisAmount = resolveM02ContractBase(statement, pos, contract);
   const actualCommission = computeActualM02Commission(statement);
-  const expectedRate = computeExpectedM02Rate(contract);
+  const expectedRate = computeExpectedM02Rate(contract, statement);
   return Math.max(0, roundCurrency(actualCommission - basisAmount * (expectedRate / 100)));
 }
 

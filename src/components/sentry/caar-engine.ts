@@ -232,6 +232,7 @@ export function buildCertificationResult({
   uploadModules: UploadModule[];
 }): CertificationResult {
   const evaluationDate = runAt ?? new Date();
+  const certificationMonth = resolveCertificationMonth(period, evaluationDate);
   const ruleSetVersion = getRuleSetVersion(cadence);
   const modules = (["M01", "M02", "M03"] as const)
     .map((moduleId) =>
@@ -240,6 +241,7 @@ export function buildCertificationResult({
         artifactContractState,
         artifactIntakeState,
         cadence,
+        certificationMonth,
         evaluationDate,
         locationId: location.id,
         moduleId,
@@ -739,6 +741,8 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
     commissionRateAppliedAvg: 0,
     depositAmount: 0,
     deliveryFeeAmount: 0,
+    deliveryBasisAmount: 0,
+    deliveryCommissionAmount: 0,
     deliveryOrderCount: 0,
     errorChargeAmount: 0,
     feeAmount: 0,
@@ -754,6 +758,8 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
     pickupOrderCount: 0,
     promoOrderCount: 0,
     payoutAmount: 0,
+    pickupBasisAmount: 0,
+    pickupCommissionAmount: 0,
     refundCount: 0,
     serviceFeeAmount: 0,
     taxRemittedAmount: 0,
@@ -778,7 +784,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
       return index >= 0 ? parseNumber(row[index]) : 0;
     };
 
-    metrics.basisAmount += read(
+    const rowBasisAmount = read(
       "trans_amount",
       "gross_amount",
       "amount",
@@ -790,8 +796,13 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
       "gross_sales",
       "channel_sales",
       "pos_merchant_sales",
+      "pos_net_sales",
+      "net_sales",
+      "sales (excl. tax)",
+      "subtotal",
     );
-    metrics.feeAmount += read(
+    metrics.basisAmount += rowBasisAmount;
+    const rowCommissionAmount = Math.abs(read(
       "fee_amount",
       "processing_fees",
       "fee",
@@ -802,7 +813,23 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
       "grubhub_commission",
       "slice_commission",
       "transaction_fees",
-    );
+      "marketplace fee",
+      "commission",
+    ));
+    metrics.feeAmount += rowCommissionAmount;
+    const fulfillmentType =
+      artifactKey === "m02-settlement"
+        ? resolveM02FulfillmentType(normalizedHeaders, row)
+        : null;
+    if (fulfillmentType === "delivery") {
+      metrics.deliveryBasisAmount += rowBasisAmount;
+      metrics.deliveryCommissionAmount += rowCommissionAmount;
+      metrics.deliveryOrderCount += 1;
+    } else if (fulfillmentType === "pickup") {
+      metrics.pickupBasisAmount += rowBasisAmount;
+      metrics.pickupCommissionAmount += rowCommissionAmount;
+      metrics.pickupOrderCount += 1;
+    }
     metrics.interchangeFeeAmount += read("interchange_fee", "interchange_amount");
     metrics.serviceFeeAmount += read("service_fee", "processing_fees", "transaction_fees");
     metrics.otherFeeAmount += read("other_merchant_fees", "assessment");
@@ -834,8 +861,10 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
 
     const orderTypeIndex = valueFor("order_type", "channel");
     const orderType = orderTypeIndex >= 0 ? String(row[orderTypeIndex] ?? "").toLowerCase() : "";
-    if (orderType.includes("pickup")) metrics.pickupOrderCount += 1;
-    if (orderType.includes("delivery")) metrics.deliveryOrderCount += 1;
+    if (!fulfillmentType) {
+      if (orderType.includes("pickup")) metrics.pickupOrderCount += 1;
+      if (orderType.includes("delivery")) metrics.deliveryOrderCount += 1;
+    }
     if (orderType.includes("dashpass") || orderType.includes("member") || orderType.includes("uber one")) {
       metrics.memberOrderCount += 1;
     }
@@ -902,6 +931,18 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
   return metrics;
 }
 
+function resolveM02FulfillmentType(headers: string[], row: string[]) {
+  const fulfillmentIndex = ["dining mode", "final order status", "fulfillment type"]
+    .map((name) => headers.indexOf(normalizeHeader(name)))
+    .find((index) => index >= 0) ?? -1;
+  if (fulfillmentIndex < 0) return null;
+
+  const value = String(row[fulfillmentIndex] ?? "").trim().toLowerCase();
+  if (value.includes("pickup") || value.includes("picked up")) return "pickup" as const;
+  if (value.includes("delivery") || value.includes("delivered")) return "delivery" as const;
+  return null;
+}
+
 export function extractManualMetrics(artifactKey: string, values: Record<string, string>) {
   void artifactKey;
   return {
@@ -950,6 +991,7 @@ function assessModule({
   artifactContractState,
   artifactIntakeState,
   cadence,
+  certificationMonth,
   evaluationDate,
   locationId,
   moduleId,
@@ -961,6 +1003,7 @@ function assessModule({
   artifactContractState: ContractState;
   artifactIntakeState: Record<string, IntakeState>;
   cadence: "monthly_final" | "weekly_preliminary";
+  certificationMonth: string;
   evaluationDate: Date;
   locationId: string;
   moduleId: "M01" | "M02" | "M03";
@@ -1015,6 +1058,7 @@ function assessModule({
   const result = runDeterministicModuleEngine({
     artifacts,
     cadence,
+    certificationMonth,
     evaluationDate,
     moduleId,
     systemHealthFlags,
@@ -1037,6 +1081,19 @@ function assessModule({
     systemHealth: result.systemHealth,
     trustGates: result.trustGates,
   };
+}
+
+function resolveCertificationMonth(period: string | undefined, fallbackDate: Date) {
+  if (period) {
+    const match = period.match(/^([A-Za-z]+)\s+(\d{4})/);
+    if (match) {
+      const parsed = new Date(`${match[1]} 1, ${match[2]} UTC`);
+      if (!Number.isNaN(parsed.getTime())) {
+        return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, "0")}`;
+      }
+    }
+  }
+  return `${fallbackDate.getUTCFullYear()}-${String(fallbackDate.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function resolveArtifactIntake(

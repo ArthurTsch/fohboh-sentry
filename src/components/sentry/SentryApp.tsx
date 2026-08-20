@@ -3197,18 +3197,18 @@ function mapM01WorkspaceContractToArtifactValues(workspace: SchemaWorkspace) {
 }
 
 function mapM02WorkspaceContractToArtifactValues(workspace: SchemaWorkspace) {
-  const rate = extractNumericValue(getContractValue(workspace.contract, "Commission Rate"));
+  const rateFor = (labels: string[]) => extractNumericValue(getContractValue(workspace.contract, labels));
 
   return {
     __entry_mode: "manual",
     commission_base: getContractValue(workspace.contract, "Commission Base"),
     delivery_active: "true",
     effective_date: getContractValue(workspace.contract, "Effective Date"),
-    rate_catering: rate,
-    rate_delivery: rate,
-    rate_member: rate,
-    rate_pickup: rate,
-    rate_sponsored: rate,
+    rate_catering: rateFor(["Catering / Group Orders Rate (%)", "Commission Rate"]),
+    rate_delivery: rateFor(["Delivery Commission Rate (%)", "Commission Rate"]),
+    rate_member: rateFor(["Member / DashPass Rate (%)", "Commission Rate"]),
+    rate_pickup: rateFor(["Pickup / Carryout Rate (%)", "Commission Rate"]),
+    rate_sponsored: rateFor(["In-App Sponsored Listing Rate (%)", "Commission Rate"]),
     store_id: getContractValue(workspace.contract, "Restaurant UUID"),
   };
 }

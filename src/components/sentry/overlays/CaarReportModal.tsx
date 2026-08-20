@@ -3,6 +3,7 @@ import type {
   CaarEvidenceTrace,
   CaarProvenanceKind,
   CaarRecord,
+  CaarRuleCitationSummary,
   CaarScoreDeduction,
   IntakeState,
   UploadArtifact,
@@ -165,6 +166,8 @@ export function CaarReportModal({
   const headlineScore = preliminaryTrustScore ?? record.trustScore;
   const headlineBadge = getScoreBandLabel(headlineScore);
   const providerName = evidenceRows.find((row) => row.vendor)?.vendor ?? null;
+  const m01Calculation = moduleId === "M01" ? deriveM01Calculation(ruleCitations) : null;
+  const m02Calculation = moduleId === "M02" ? deriveM02Calculation(ruleCitations) : null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f7f7f9]" role="dialog" aria-modal="true" aria-label={`CAAR ${record.id}`}>
@@ -343,6 +346,135 @@ export function CaarReportModal({
             </div>
           )}
         </ReportCard>
+
+        {m01Calculation ? (
+          <ReportCard
+            eyebrow="M01 Calculation"
+            title="Processor fee calculation and POS basis comparison"
+            sub="The governed processor pricing terms are applied to the certified period metrics and compared with the actual statement fees."
+          >
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <ValueChip label="Processor basis" value={formatMoneyLike(m01Calculation.basis)} />
+              <ValueChip label="POS basis" value={formatMoneyLike(m01Calculation.posBasis)} />
+              <ValueChip label="Expected fees" value={formatMoneyLike(m01Calculation.expectedFees)} />
+              <ValueChip label="Actual fees" value={formatMoneyLike(m01Calculation.actualFees)} />
+            </div>
+            <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
+              Interchange {formatMoneyLike(m01Calculation.interchange)} + markup {formatMoneyLike(m01Calculation.markup)} + transaction charges {formatMoneyLike(m01Calculation.transactionFees)} + monthly fee {formatMoneyLike(m01Calculation.monthlyFee)} = <strong>{formatMoneyLike(m01Calculation.expectedFees)}</strong>
+              <br />
+              Actual {formatMoneyLike(m01Calculation.actualFees)} − expected {formatMoneyLike(m01Calculation.expectedFees)} = <strong>{formatMoneyLike(m01Calculation.variance)}</strong> recoverable overcharge.
+            </div>
+            <details className="mt-4 rounded-2xl border border-[var(--border)] bg-white p-4">
+              <summary className="cursor-pointer font-[family-name:var(--font-display)] text-base font-bold text-[var(--text)]">
+                View detailed calculation methodology
+              </summary>
+              <div className="mt-4 grid gap-4 text-sm leading-7 text-[var(--muted)] lg:grid-cols-2">
+                <div>
+                  <div className="font-semibold text-[var(--text)]">Processor fee formula</div>
+                  <div className="mt-1 font-[family-name:var(--font-mono)] text-xs leading-6">
+                    markup = processor basis × markup basis points ÷ 10,000
+                    <br />transaction charges = transaction count × contracted per-transaction fee
+                    <br />expected fees = interchange + markup + transaction charges + monthly fee
+                    <br />recoverable overcharge = max(0, actual fees − expected fees)
+                  </div>
+                </div>
+                <div>
+                  <div className="font-semibold text-[var(--text)]">POS reconciliation</div>
+                  <div className="mt-1 font-[family-name:var(--font-mono)] text-xs leading-6">
+                    difference = |processor basis − POS basis|
+                    <br />difference % = difference ÷ processor basis × 100
+                    <br />this run: {formatMoneyLike(m01Calculation.reconciliationDifference)} ({m01Calculation.reconciliationPct.toFixed(2)}%)
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+                Audit lineage: R002 governed fee reconstruction · R122/R123 TG04 reconciliation · sealed M01 pricing terms
+              </div>
+            </details>
+          </ReportCard>
+        ) : null}
+
+        {m02Calculation ? (
+          <ReportCard
+            eyebrow="M02 Calculation"
+            title="Delivery, pickup, and POS basis comparison"
+            sub="The fee calculation uses every classified settlement order. TG04 separately compares only like-for-like settlement and POS scopes."
+          >
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <ValueChip label="Delivery basis" value={formatMoneyLike(m02Calculation.deliveryBasis)} />
+              <ValueChip label="Pickup basis" value={formatMoneyLike(m02Calculation.pickupBasis)} />
+              <ValueChip label="Total settlement basis" value={formatMoneyLike(m02Calculation.totalBasis)} />
+              <ValueChip label="Comparable POS basis" value={formatMoneyLike(m02Calculation.posBasis)} />
+            </div>
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                  Contract fee calculation
+                </div>
+                <div className="mt-2">
+                  Delivery: {formatMoneyLike(m02Calculation.deliveryBasis)} × {m02Calculation.deliveryRate.toFixed(2)}% = {formatMoneyLike(m02Calculation.expectedDeliveryCommission)}
+                </div>
+                <div>
+                  Pickup: {formatMoneyLike(m02Calculation.pickupBasis)} × {m02Calculation.pickupRate.toFixed(2)}% = {formatMoneyLike(m02Calculation.expectedPickupCommission)}
+                </div>
+                <div className="mt-2 font-semibold">
+                  Expected commission: {formatMoneyLike(m02Calculation.expectedCommission)} · Actual commission: {formatMoneyLike(m02Calculation.actualCommission)}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                  TG04 like-for-like comparison
+                </div>
+                <div className="mt-2">
+                  Settlement comparison basis: {formatMoneyLike(m02Calculation.reconciliationBasis)}
+                </div>
+                <div>POS comparison basis: {formatMoneyLike(m02Calculation.posBasis)}</div>
+                <div className="mt-2 font-semibold">
+                  Difference: {formatMoneyLike(m02Calculation.reconciliationDifference)} ({m02Calculation.reconciliationPct.toFixed(2)}%)
+                </div>
+                <div className="mt-1 text-[var(--muted)]">
+                  Pickup remains in the fee calculation even when the POS report represents delivery-channel sales only.
+                </div>
+              </div>
+            </div>
+            <details className="mt-4 rounded-2xl border border-[var(--border)] bg-white p-4">
+              <summary className="cursor-pointer font-[family-name:var(--font-display)] text-base font-bold text-[var(--text)]">
+                View detailed calculation methodology
+              </summary>
+              <div className="mt-4 grid gap-4 text-sm leading-7 text-[var(--muted)] lg:grid-cols-2">
+                <div>
+                  <div className="font-semibold text-[var(--text)]">Fee formula</div>
+                  <div className="mt-1 font-[family-name:var(--font-mono)] text-xs leading-6">
+                    expected delivery fee = delivery basis × delivery rate
+                    <br />
+                    expected pickup fee = pickup basis × pickup rate
+                    <br />
+                    expected commission = expected delivery fee + expected pickup fee
+                    <br />
+                    recoverable overcharge = max(0, actual commission − expected commission)
+                  </div>
+                </div>
+                <div>
+                  <div className="font-semibold text-[var(--text)]">Reconciliation formula</div>
+                  <div className="mt-1 font-[family-name:var(--font-mono)] text-xs leading-6">
+                    comparable settlement basis = the settlement scope closest to the governed POS channel scope
+                    <br />
+                    difference = |comparable settlement basis − POS basis|
+                    <br />
+                    difference % = difference ÷ comparable settlement basis × 100
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
+                <span className="font-semibold text-[var(--text)]">Why the scopes differ:</span>{" "}
+                the settlement is the authoritative source for delivery and pickup commissions. The POS report is used as an independent sales comparison. When that POS report contains delivery-channel sales only, TG04 compares it with settlement delivery sales only; pickup sales remain fully included in the fee test.
+              </div>
+              <div className="mt-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
+                Audit lineage: R016 commission reconstruction · R122/R123 TG04 reconciliation · persisted certification-month metrics
+              </div>
+            </details>
+          </ReportCard>
+        ) : null}
 
         <div className="grid gap-4 lg:grid-cols-2">
           <ReportCard eyebrow="Certification Output" title="Persisted result summary" sub="Only persisted engine outputs are shown here. Synthetic fee calculations were removed.">
@@ -1393,6 +1525,59 @@ function formatMetricValue(value: string | number | boolean | null | undefined) 
     return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
   }
   return value;
+}
+
+function deriveM02Calculation(ruleCitations: CaarRuleCitationSummary[]) {
+  const sample = ruleCitations
+    ?.find((citation) => citation.ruleId === "R016")
+    ?.sampleEvidence.find((row) => typeof row.commission_base_amount === "number");
+  if (!sample) return null;
+
+  const number = (key: string) => typeof sample[key] === "number" ? sample[key] as number : 0;
+  const reconciliationBasis = number("reconciliation_statement_basis");
+  const posBasis = number("pos_basis_amount");
+  const reconciliationDifference = number("reconciliation_difference");
+
+  return {
+    actualCommission: number("actual_commission") || number("observed_commission"),
+    deliveryBasis: number("delivery_basis_amount"),
+    deliveryRate: number("delivery_rate_pct"),
+    expectedCommission: number("expected_commission"),
+    expectedDeliveryCommission: number("expected_delivery_commission"),
+    expectedPickupCommission: number("expected_pickup_commission"),
+    pickupBasis: number("pickup_basis_amount"),
+    pickupRate: number("pickup_rate_pct"),
+    posBasis,
+    reconciliationBasis,
+    reconciliationDifference,
+    reconciliationPct: reconciliationBasis > 0 ? (reconciliationDifference / reconciliationBasis) * 100 : 0,
+    totalBasis: number("commission_base_amount"),
+  };
+}
+
+function deriveM01Calculation(ruleCitations: CaarRuleCitationSummary[]) {
+  const sample = ruleCitations
+    .find((citation) => citation.ruleId === "R002" && citation.sampleEvidence.some((row) => typeof row.expected_fee_amount === "number"))
+    ?.sampleEvidence.find((row) => typeof row.expected_fee_amount === "number");
+  if (!sample) return null;
+
+  const number = (key: string) => typeof sample[key] === "number" ? sample[key] as number : 0;
+  const basis = number("basis_amount");
+  const reconciliationDifference = number("reconciliation_difference");
+
+  return {
+    actualFees: number("actual_fee_amount"),
+    basis,
+    expectedFees: number("expected_fee_amount"),
+    interchange: number("expected_interchange_component"),
+    markup: number("expected_markup_component"),
+    monthlyFee: number("expected_monthly_component"),
+    posBasis: number("pos_basis_amount"),
+    reconciliationDifference,
+    reconciliationPct: basis > 0 ? (reconciliationDifference / basis) * 100 : 0,
+    transactionFees: number("expected_txn_component"),
+    variance: number("unexplained_fee_delta"),
+  };
 }
 
 function formatMoneyLike(value: string | number | boolean | null | undefined) {
