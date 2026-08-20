@@ -182,7 +182,11 @@ export function CaarReportModal({
     const details = Array.from(report.querySelectorAll("details"));
     const previouslyOpen = details.map((section) => section.open);
     const previousTitle = document.title;
+    let printableReport: HTMLDivElement | null = null;
     const cleanup = () => {
+      window.removeEventListener("afterprint", cleanup);
+      printableReport?.remove();
+      printableReport = null;
       details.forEach((section, index) => {
         section.open = previouslyOpen[index];
       });
@@ -193,6 +197,11 @@ export function CaarReportModal({
     details.forEach((section) => {
       section.open = true;
     });
+    printableReport = report.cloneNode(true) as HTMLDivElement;
+    printableReport.classList.add("caar-print-clone");
+    printableReport.removeAttribute("aria-modal");
+    printableReport.removeAttribute("role");
+    document.body.appendChild(printableReport);
     document.body.classList.add("caar-printing");
     document.title = `${record.id} - CAAR`;
     window.addEventListener("afterprint", cleanup, { once: true });
@@ -201,7 +210,6 @@ export function CaarReportModal({
       try {
         window.print();
       } catch (error) {
-        window.removeEventListener("afterprint", cleanup);
         cleanup();
         throw error;
       }
@@ -244,7 +252,7 @@ export function CaarReportModal({
       </div>
 
       <div className="caar-print-content mx-auto max-w-7xl space-y-5 px-5 py-8 lg:px-8">
-        <CollapsibleSection defaultOpen eyebrow="Workflow" title="Current workflow">
+        <CollapsibleSection className="caar-print-exclude" defaultOpen eyebrow="Workflow" title="Current workflow">
           <WorkflowContextBar
             locationId={record.locationId}
             locationName={record.locationName}
@@ -253,7 +261,7 @@ export function CaarReportModal({
             period={record.period}
           />
         </CollapsibleSection>
-        <CollapsibleSection defaultOpen eyebrow="Release Status" title={claimReady ? "CAAR is ready for release" : "CAAR requires remediation"}>
+        <CollapsibleSection className="caar-print-exclude" defaultOpen eyebrow="Release Status" title={claimReady ? "CAAR is ready for release" : "CAAR requires remediation"}>
           <ActionNotice title={claimReady ? "CAAR is ready for release" : "CAAR requires remediation"} tone={claimReady ? "success" : "danger"}>
             {claimReady
               ? `${record.amount} is backed by persisted evidence and sealed governance. ${custodyRows.filter((row) => row.status === "Hashed").length}/${custodyRows.length} custody records expose a hash.`
@@ -354,6 +362,7 @@ export function CaarReportModal({
         </details>
 
         <ReportCard
+          className={record.trustScore === 100 ? "caar-print-exclude" : undefined}
           defaultOpen={record.trustScore < 100}
           eyebrow="Score Deduction Ledger"
           title={`${record.trustScore}/100 — complete score calculation`}
@@ -555,7 +564,7 @@ export function CaarReportModal({
           </ReportCard>
         ) : null}
 
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className={`grid gap-4 lg:grid-cols-2 ${record.trustScore === 100 ? "caar-print-single-column" : ""}`}>
           <ReportCard eyebrow="Certification Output" title="Persisted result summary" sub="Only persisted engine outputs are shown here. Synthetic fee calculations were removed.">
             {traceabilityGap ? (
               <div className="mb-4 rounded-2xl border border-[rgba(214,48,49,0.18)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]">
@@ -577,6 +586,7 @@ export function CaarReportModal({
           </ReportCard>
 
           <ReportCard
+            className={record.trustScore === 100 ? "caar-print-exclude" : undefined}
             eyebrow="Hardening Review"
             title="What still needs backing"
             sub="Anything not directly backed by uploads, sealed governance, or stored engine state is flagged here."
@@ -855,7 +865,7 @@ export function CaarReportModal({
           </div>
         </details>
 
-        <details className="rounded-[28px] border border-[var(--border)] bg-white">
+        <details className={`${blockingRuleCitations.length === 0 ? "caar-print-exclude " : ""}rounded-[28px] border border-[var(--border)] bg-white`}>
           <summary className="cursor-pointer list-none px-6 py-5">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -904,7 +914,7 @@ export function CaarReportModal({
           </div>
         </details>
 
-        <details className="rounded-[28px] border border-[rgba(27,106,201,0.2)] bg-[rgba(27,106,201,0.03)]">
+        <details className={`${scoreReducingRuleCitations.length === 0 ? "caar-print-exclude " : ""}rounded-[28px] border border-[rgba(27,106,201,0.2)] bg-[rgba(27,106,201,0.03)]`}>
           <summary className="cursor-pointer list-none px-6 py-5">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -955,7 +965,7 @@ export function CaarReportModal({
           </div>
         </details>
 
-        <details className="rounded-[28px] border border-[var(--border)] bg-white">
+        <details className="caar-print-exclude rounded-[28px] border border-[var(--border)] bg-white">
           <summary className="cursor-pointer list-none px-6 py-5">
             <div className="flex items-center justify-between gap-4">
               <div>
@@ -2270,19 +2280,21 @@ const mq6WhyMatters: Record<string, string> = {
 
 function ReportCard({
   children,
+  className,
   defaultOpen = false,
   eyebrow,
   sub,
   title,
 }: {
   children: ReactNode;
+  className?: string;
   defaultOpen?: boolean;
   eyebrow: string;
   sub: string;
   title: string;
 }) {
   return (
-    <details open={defaultOpen} className="self-start rounded-[28px] border border-[var(--border)] bg-white">
+    <details open={defaultOpen} className={`${className ?? ""} self-start rounded-[28px] border border-[var(--border)] bg-white`}>
       <summary className="cursor-pointer list-none px-6 py-5">
         <SectionSummary eyebrow={eyebrow} title={title} sub={sub} />
       </summary>
@@ -2293,17 +2305,19 @@ function ReportCard({
 
 function CollapsibleSection({
   children,
+  className,
   defaultOpen = false,
   eyebrow,
   title,
 }: {
   children: ReactNode;
+  className?: string;
   defaultOpen?: boolean;
   eyebrow: string;
   title: string;
 }) {
   return (
-    <details open={defaultOpen} className="rounded-[28px] border border-[var(--border)] bg-white">
+    <details open={defaultOpen} className={`${className ?? ""} rounded-[28px] border border-[var(--border)] bg-white`}>
       <summary className="cursor-pointer list-none px-6 py-5">
         <SectionSummary eyebrow={eyebrow} title={title} />
       </summary>
