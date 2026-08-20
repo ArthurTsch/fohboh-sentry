@@ -173,8 +173,8 @@ export function CaarReportModal({
     ...scoreReducingRuleCitations,
     ...scoreNeutralRuleCitations,
   ]);
-  const m01Calculation = moduleId === "M01" ? deriveM01Calculation(calculationCitations) : null;
-  const m02Calculation = moduleId === "M02" ? deriveM02Calculation(calculationCitations) : null;
+  const m01Calculation = moduleId === "M01" ? deriveM01Calculation(calculationCitations, record.amount) : null;
+  const m02Calculation = moduleId === "M02" ? deriveM02Calculation(calculationCitations, record.amount) : null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f7f7f9]" role="dialog" aria-modal="true" aria-label={`CAAR ${record.id}`}>
@@ -394,7 +394,8 @@ export function CaarReportModal({
             <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
               Interchange {formatMoneyLike(m01Calculation.interchange)} + markup {formatMoneyLike(m01Calculation.markup)} + transaction charges {formatMoneyLike(m01Calculation.transactionFees)} + monthly fee {formatMoneyLike(m01Calculation.monthlyFee)} = <strong>{formatMoneyLike(m01Calculation.expectedFees)}</strong>
               <br />
-              Actual {formatMoneyLike(m01Calculation.actualFees)} − expected {formatMoneyLike(m01Calculation.expectedFees)} = <strong>{formatMoneyLike(m01Calculation.variance)}</strong> recoverable overcharge.
+              Actual fees: {formatMoneyLike(m01Calculation.actualFees)} · Expected fees: {formatMoneyLike(m01Calculation.expectedFees)}
+              <br /><strong>Persisted certified recovery: {m01Calculation.certifiedRecoveryDisplay}</strong>
             </div>
             <details className="mt-4 rounded-2xl border border-[var(--border)] bg-white p-4">
               <summary className="cursor-pointer font-[family-name:var(--font-display)] text-base font-bold text-[var(--text)]">
@@ -463,9 +464,9 @@ export function CaarReportModal({
                   Expected commission: {formatMoneyLike(m02Calculation.expectedCommission)} · Actual commission: {formatMoneyLike(m02Calculation.actualCommission)}
                 </div>
                 <div className="mt-1 font-semibold text-[var(--accent)]">
-                  Actual minus expected using displayed totals: {formatMoneyLike(m02Calculation.commissionVariance)}
+                  Persisted certified recovery: {m02Calculation.certifiedRecoveryDisplay}
                 </div>
-                <div className="mt-1 text-xs text-[var(--muted)]">The certified recovery can differ slightly because the engine preserves row-level amounts and rounding.</div>
+                <div className="mt-1 text-xs text-[var(--muted)]">This is the exact cent-level amount stored by the certification engine. It is not recalculated from rounded display totals.</div>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
                 <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -1606,7 +1607,10 @@ function formatMetricValue(value: string | number | boolean | null | undefined) 
   return value;
 }
 
-function deriveM02Calculation(ruleCitations: CaarRuleCitationSummary[]) {
+export function deriveM02Calculation(
+  ruleCitations: CaarRuleCitationSummary[],
+  certifiedRecoveryDisplay: string,
+) {
   const sample = ruleCitations
     ?.find((citation) => citation.ruleId === "R016")
     ?.sampleEvidence.find((row) => typeof row.commission_base_amount === "number");
@@ -1619,7 +1623,7 @@ function deriveM02Calculation(ruleCitations: CaarRuleCitationSummary[]) {
 
   return {
     actualCommission: number("actual_commission") || number("observed_commission"),
-    commissionVariance: Math.max(0, (number("actual_commission") || number("observed_commission")) - number("expected_commission")),
+    certifiedRecoveryDisplay,
     deliveryBasis: number("delivery_basis_amount"),
     deliveryRate: number("delivery_rate_pct"),
     expectedCommission: number("expected_commission"),
@@ -1643,7 +1647,10 @@ function uniqueRuleCitations(citations: CaarRuleCitationSummary[]) {
   return [...unique.values()];
 }
 
-function deriveM01Calculation(ruleCitations: CaarRuleCitationSummary[]) {
+function deriveM01Calculation(
+  ruleCitations: CaarRuleCitationSummary[],
+  certifiedRecoveryDisplay: string,
+) {
   const sample = ruleCitations
     .find((citation) => citation.ruleId === "R002" && citation.sampleEvidence.some((row) => typeof row.expected_fee_amount === "number"))
     ?.sampleEvidence.find((row) => typeof row.expected_fee_amount === "number");
@@ -1656,6 +1663,7 @@ function deriveM01Calculation(ruleCitations: CaarRuleCitationSummary[]) {
   return {
     actualFees: number("actual_fee_amount"),
     basis,
+    certifiedRecoveryDisplay,
     expectedFees: number("expected_fee_amount"),
     interchange: number("expected_interchange_component"),
     markup: number("expected_markup_component"),
@@ -1667,7 +1675,6 @@ function deriveM01Calculation(ruleCitations: CaarRuleCitationSummary[]) {
     transactionFees: number("expected_txn_component"),
     transactionCount: number("transaction_count"),
     transactionFee: number("contracted_per_txn_fee"),
-    variance: number("unexplained_fee_delta"),
   };
 }
 
