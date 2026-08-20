@@ -711,7 +711,8 @@ const sharedM01Contract: ContractField[] = [
 
 const sharedM02Contract: ContractField[] = [
   { label: "Commission Base", value: "Subtotal before tax", source: "DSP agreement schedule A" },
-  { label: "Commission Rate", value: "22.00%", source: "Executed DSP agreement" },
+  { label: "Delivery Commission Rate (%)", value: "22.00%", source: "Executed DSP agreement" },
+  { label: "Pickup / Carryout Rate (%)", value: "6.00%", source: "Executed DSP agreement" },
   { label: "Restaurant UUID", value: "REST-DFW-118", source: "Merchant portal profile" },
   { label: "Effective Date", value: "2026-01-15", source: "Latest signed addendum" },
 ];

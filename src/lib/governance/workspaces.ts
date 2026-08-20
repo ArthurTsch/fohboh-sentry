@@ -124,7 +124,8 @@ export function normalizeWorkspaceFromRecords({
   const schemaPayload = extractObject(schemaRecord?.fields);
   const contractPayload = extractObject(contractRecord?.terms);
   const fields = Array.isArray(schemaPayload?.fields) ? (schemaPayload.fields as SchemaField[]) : null;
-  const contract = Array.isArray(contractPayload?.contract) ? (contractPayload.contract as ContractField[]) : null;
+  const rawContract = Array.isArray(contractPayload?.contract) ? (contractPayload.contract as ContractField[]) : null;
+  const contract = rawContract && module === "M02" ? normalizeM02ContractFields(rawContract) : rawContract;
   const posSchema = normalizePosSchemaGovernance(schemaPayload?.posSchema);
 
   if (!fields || !contract) {
@@ -160,6 +161,28 @@ export function normalizeWorkspaceFromRecords({
       version: `${module.toLowerCase()}-v${String(latestVersion).padStart(2, "0")}`,
     },
   };
+}
+
+function normalizeM02ContractFields(contract: ContractField[]) {
+  const hasDeliveryRate = contract.some((field) => field.label === "Delivery Commission Rate (%)");
+  const hasPickupRate = contract.some((field) => field.label === "Pickup / Carryout Rate (%)");
+  const legacyRate = contract.find((field) => field.label === "Commission Rate");
+  if ((!legacyRate || (hasDeliveryRate && hasPickupRate))) return contract;
+
+  const normalized: ContractField[] = [];
+  for (const field of contract) {
+    if (field.label !== "Commission Rate") {
+      normalized.push(field);
+      continue;
+    }
+    if (!hasDeliveryRate) {
+      normalized.push({ ...field, label: "Delivery Commission Rate (%)" });
+    }
+    if (!hasPickupRate) {
+      normalized.push({ ...field, label: "Pickup / Carryout Rate (%)" });
+    }
+  }
+  return normalized;
 }
 
 function findContractValue(contract: ContractField[], labels: string | string[]) {
