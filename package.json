@@ -26,7 +26,7 @@
     "verify:recovery-packs": "tsx scripts/verify-recovery-packs.ts"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
