@@ -2243,7 +2243,7 @@ function ReportCard({
   title: string;
 }) {
   return (
-    <details open={defaultOpen} className="rounded-[28px] border border-[var(--border)] bg-white">
+    <details open={defaultOpen} className="self-start rounded-[28px] border border-[var(--border)] bg-white">
       <summary className="cursor-pointer list-none px-6 py-5">
         <SectionSummary eyebrow={eyebrow} title={title} sub={sub} />
       </summary>
