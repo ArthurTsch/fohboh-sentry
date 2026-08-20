@@ -72,3 +72,65 @@ summary::-webkit-details-marker {
     animation-duration: 3s;
   }
 }
+
+@media print {
+  @page {
+    margin: 10mm;
+    size: auto;
+  }
+
+  html,
+  body {
+    background: white !important;
+  }
+
+  body.caar-printing {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  body.caar-printing *:not(.caar-print-root):not(.caar-print-root *) {
+    visibility: hidden !important;
+  }
+
+  body.caar-printing .caar-print-root,
+  body.caar-printing .caar-print-root * {
+    visibility: visible !important;
+  }
+
+  body.caar-printing .caar-print-root {
+    background: #f7f7f9 !important;
+    inset: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    position: absolute !important;
+    width: 100% !important;
+  }
+
+  body.caar-printing .caar-print-controls,
+  body.caar-printing .caar-print-root button,
+  body.caar-printing .caar-print-root summary [aria-hidden] {
+    display: none !important;
+  }
+
+  body.caar-printing .caar-print-content {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  body.caar-printing .caar-print-root details,
+  body.caar-printing .caar-print-root details > div,
+  body.caar-printing .caar-print-root details > section {
+    overflow: visible !important;
+  }
+
+  body.caar-printing .caar-print-root summary {
+    break-after: avoid-page;
+  }
+
+  body.caar-printing .caar-print-root table,
+  body.caar-printing .caar-print-root tr,
+  body.caar-printing .caar-print-root [class*="rounded-2xl"] {
+    break-inside: avoid-page;
+  }
+}

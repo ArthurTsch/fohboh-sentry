@@ -2175,14 +2175,6 @@ function handleCompleteOnboarding(locationId: string) {
     showToast(`${user.firstName} ${user.lastName} deactivated.`);
   }
 
-  function handleDownloadCaarPdf(record: CaarRecord) {
-    window.open(
-      `/api/v1/caars/download?caarId=${encodeURIComponent(record.id)}&artifact=pdf`,
-      "_blank",
-      "noopener,noreferrer",
-    );
-  }
-
   function handleDownloadClaimPack(record: CaarRecord) {
     window.open(
       `/api/v1/caars/download?caarId=${encodeURIComponent(record.id)}&artifact=exportpack`,
@@ -2580,7 +2572,6 @@ function handleCompleteOnboarding(locationId: string) {
           onEnterSupportMode={handleEnterSupportMode}
           onExpandAll={handleExpandAll}
           onFilterChange={setLogFilter}
-          onDownloadPdf={handleDownloadCaarPdf}
           onOpenCaar={setSelectedCaar}
           onOpenDiy={handleOpenDiy}
           onOpenLocation={handleOpenLocationWorkspace}
@@ -2726,7 +2717,6 @@ function handleCompleteOnboarding(locationId: string) {
         <CaarReportModal
           artifactIntakeState={artifactIntakeState}
           onClose={() => setSelectedCaar(null)}
-          onDownloadPdf={handleDownloadCaarPdf}
           onGenerateClaimPack={handleGenerateClaimPack}
           record={selectedCaar}
           uploadModules={scopedUploadModules}

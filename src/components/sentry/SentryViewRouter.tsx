@@ -78,7 +78,6 @@ export function SentryViewRouter({
   onFilterChange,
   onOpenCaar,
   onOpenLocation,
-  onDownloadPdf,
   onOpenDiy,
   onOpenOnboarding,
   onOpenSchemaEditor,
@@ -162,7 +161,6 @@ export function SentryViewRouter({
   onFilterChange: (filter: "all" | "immutable" | "editable") => void;
   onOpenCaar: Dispatch<SetStateAction<CaarRecord | null>>;
   onOpenLocation: (locationId: string) => void;
-  onDownloadPdf: (record: CaarRecord) => void;
   onOpenOnboarding: (locationId: string) => void;
   onOpenSchemaEditor: Dispatch<SetStateAction<SchemaWorkspace | null>>;
   onOpenUploads: (locationId: string) => void;
@@ -260,7 +258,7 @@ export function SentryViewRouter({
   }
 
   if (activeView === "caars") {
-    return <CaarListView onDownloadPdf={onDownloadPdf} onOpenCaar={onOpenCaar} records={caars} />;
+    return <CaarListView onOpenCaar={onOpenCaar} records={caars} />;
   }
 
   if (activeView === "billing") {

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import type {
   CaarEvidenceTrace,
   CaarProvenanceKind,
@@ -39,18 +39,17 @@ type Mq6Row = {
 export function CaarReportModal({
   artifactIntakeState,
   onClose,
-  onDownloadPdf,
   onGenerateClaimPack,
   record,
   uploadModules,
 }: {
   artifactIntakeState: Record<string, IntakeState>;
   onClose: () => void;
-  onDownloadPdf: (record: CaarRecord) => void;
   onGenerateClaimPack: (record: CaarRecord) => void;
   record: CaarRecord;
   uploadModules: UploadModule[];
 }) {
+  const reportRef = useRef<HTMLDivElement | null>(null);
   const traceability = record.traceability;
   const moduleId = traceability?.module ?? inferModule(record);
   const moduleLabel =
@@ -176,9 +175,42 @@ export function CaarReportModal({
   const m01Calculation = moduleId === "M01" ? deriveM01Calculation(calculationCitations, record.amount) : null;
   const m02Calculation = moduleId === "M02" ? deriveM02Calculation(calculationCitations, record.amount) : null;
 
+  function printCaarReport() {
+    const report = reportRef.current;
+    if (!report) return;
+
+    const details = Array.from(report.querySelectorAll("details"));
+    const previouslyOpen = details.map((section) => section.open);
+    const previousTitle = document.title;
+    const cleanup = () => {
+      details.forEach((section, index) => {
+        section.open = previouslyOpen[index];
+      });
+      document.body.classList.remove("caar-printing");
+      document.title = previousTitle;
+    };
+
+    details.forEach((section) => {
+      section.open = true;
+    });
+    document.body.classList.add("caar-printing");
+    document.title = `${record.id} - CAAR`;
+    window.addEventListener("afterprint", cleanup, { once: true });
+
+    window.requestAnimationFrame(() => {
+      try {
+        window.print();
+      } catch (error) {
+        window.removeEventListener("afterprint", cleanup);
+        cleanup();
+        throw error;
+      }
+    });
+  }
+
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#f7f7f9]" role="dialog" aria-modal="true" aria-label={`CAAR ${record.id}`}>
-      <div className="sticky top-0 z-20 flex items-center gap-4 border-b border-[var(--border)] bg-white px-6 py-4 shadow-[0_6px_20px_rgba(0,0,0,0.05)]">
+    <div ref={reportRef} className="caar-print-root fixed inset-0 z-50 overflow-y-auto bg-[#f7f7f9]" role="dialog" aria-modal="true" aria-label={`CAAR ${record.id}`}>
+      <div className="caar-print-controls sticky top-0 z-20 flex items-center gap-4 border-b border-[var(--border)] bg-white px-6 py-4 shadow-[0_6px_20px_rgba(0,0,0,0.05)]">
         <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
           CAAR Viewer
         </div>
@@ -188,10 +220,10 @@ export function CaarReportModal({
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
-            onClick={() => onDownloadPdf(record)}
+            onClick={printCaarReport}
             className="rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--muted)] transition hover:border-[var(--text)] hover:text-[var(--text)]"
           >
-            Download PDF
+            Print / Save PDF
           </button>
           <button
             type="button"
@@ -211,7 +243,7 @@ export function CaarReportModal({
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl space-y-5 px-5 py-8 lg:px-8">
+      <div className="caar-print-content mx-auto max-w-7xl space-y-5 px-5 py-8 lg:px-8">
         <CollapsibleSection defaultOpen eyebrow="Workflow" title="Current workflow">
           <WorkflowContextBar
             locationId={record.locationId}
