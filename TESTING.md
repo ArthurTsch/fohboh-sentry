@@ -21,4 +21,4 @@ Install Chromium once with `pnpm test:e2e:install`, then run `pnpm test:e2e`. Th
 
 ## Release gate
 
-`pnpm verify:release` runs the normal verification gate, PostgreSQL integration tests, and Playwright.
+`pnpm verify:release` runs the normal verification gate, PostgreSQL integration tests, and Playwright. CI runs both database and browser suites twice against disposable test data so intermittent state leakage fails the release gate.

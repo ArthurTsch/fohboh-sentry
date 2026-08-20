@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import prisma from "@/lib/prisma";
 import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
 
-const managerIds = { all: 910001, selected: 910002 };
+const managerIds = { admin: 910001, manager: 910002, viewer: 910003 };
 let tenantARestaurantIds: number[] = [];
 let tenantBRestaurantId = 0;
 
@@ -21,10 +21,13 @@ describe("tenant restaurant scope against PostgreSQL", () => {
       prisma.restaurant_sentry_state.create({ data: { account_id: "test-tenant-a", location_id: `TEST-LOC-${a2.id}`, restaurant_id: a2.id } }),
       prisma.restaurant_sentry_state.create({ data: { account_id: "test-tenant-b", location_id: `TEST-LOC-${b1.id}`, restaurant_id: b1.id } }),
     ]);
-    const allMembership = await prisma.account_memberships_v2.create({ data: { access_scope: "all_locations", account_id: "test-tenant-a", manager_id: managerIds.all, team_role: "Owner" } });
-    const selectedMembership = await prisma.account_memberships_v2.create({ data: { access_scope: "selected_locations", account_id: "test-tenant-a", manager_id: managerIds.selected, team_role: "Location Manager" } });
-    void allMembership;
-    await prisma.account_member_locations_v2.create({ data: { membership_id: selectedMembership.id, restaurant_id: a2.id } });
+    await prisma.account_memberships_v2.create({ data: { access_scope: "all_locations", account_id: "test-tenant-a", manager_id: managerIds.admin, team_role: "Owner" } });
+    const managerMembership = await prisma.account_memberships_v2.create({ data: { access_scope: "selected_locations", account_id: "test-tenant-a", manager_id: managerIds.manager, team_role: "Location Manager" } });
+    const viewerMembership = await prisma.account_memberships_v2.create({ data: { access_scope: "selected_locations", account_id: "test-tenant-a", manager_id: managerIds.viewer, team_role: "Read-only" } });
+    await Promise.all([
+      prisma.account_member_locations_v2.create({ data: { membership_id: managerMembership.id, restaurant_id: a2.id } }),
+      prisma.account_member_locations_v2.create({ data: { membership_id: viewerMembership.id, restaurant_id: a1.id } }),
+    ]);
   });
 
   afterAll(async () => {
@@ -36,15 +39,41 @@ describe("tenant restaurant scope against PostgreSQL", () => {
   });
 
   it("limits an all-location account owner to their tenant", async () => {
-    const where = await getScopedRestaurantWhere({ accountId: "test-tenant-a", email: "owner@test", managerId: managerIds.all, role: "Admin" });
+    const where = await getScopedRestaurantWhere({ accountId: "test-tenant-a", email: "owner@test", managerId: managerIds.admin, role: "Admin" });
     const rows = await prisma.restaurants.findMany({ where, select: { id: true } });
     expect(rows.map((row) => row.id).sort()).toEqual([...tenantARestaurantIds].sort());
     expect(rows.some((row) => row.id === tenantBRestaurantId)).toBe(false);
   });
 
   it("limits a selected-location manager to the assigned restaurant", async () => {
-    const where = await getScopedRestaurantWhere({ accountId: "test-tenant-a", email: "manager@test", managerId: managerIds.selected, role: "Manager" });
+    const where = await getScopedRestaurantWhere({ accountId: "test-tenant-a", email: "manager@test", managerId: managerIds.manager, role: "Manager" });
     const rows = await prisma.restaurants.findMany({ where, select: { id: true } });
     expect(rows.map((row) => row.id)).toEqual([tenantARestaurantIds[1]]);
+  });
+
+  it("limits a Viewer to the assigned same-tenant restaurant", async () => {
+    const where = await getScopedRestaurantWhere({ accountId: "test-tenant-a", email: "viewer@test", managerId: managerIds.viewer, role: "Viewer" });
+    const rows = await prisma.restaurants.findMany({ where, select: { id: true } });
+    expect(rows.map((row) => row.id)).toEqual([tenantARestaurantIds[0]]);
+    expect(rows.some((row) => row.id === tenantBRestaurantId)).toBe(false);
+  });
+
+  it.each(["WGS Manager", "SuperAdmin"] as const)("allows %s global restaurant scope", async (role) => {
+    const where = await getScopedRestaurantWhere({ accountId: "platform", email: `${role}@test`, role });
+    const rows = await prisma.restaurants.findMany({ where, select: { id: true } });
+    expect(rows.some((row) => row.id === tenantARestaurantIds[0])).toBe(true);
+    expect(rows.some((row) => row.id === tenantBRestaurantId)).toBe(true);
+  });
+
+  it("revokes an existing Manager identity immediately when membership is deactivated", async () => {
+    const session = { accountId: "test-tenant-a", email: "manager@test", managerId: managerIds.manager, role: "Manager" as const };
+    const membership = await prisma.account_memberships_v2.findFirstOrThrow({ where: { manager_id: managerIds.manager } });
+    await prisma.account_memberships_v2.update({ where: { id: membership.id }, data: { status: "inactive" } });
+
+    const where = await getScopedRestaurantWhere(session);
+    const rows = await prisma.restaurants.findMany({ where, select: { id: true } });
+    expect(rows).toEqual([]);
+
+    await prisma.account_memberships_v2.update({ where: { id: membership.id }, data: { status: "active" } });
   });
 });

@@ -10,7 +10,7 @@ async function main() {
   const email = process.env.E2E_MANAGER_EMAIL || "e2e-superadmin@fohboh.test";
   const password = process.env.E2E_MANAGER_PASSWORD || "E2eFohBohTestOnly!";
 
-  await prisma.managers.upsert({
+  const manager = await prisma.managers.upsert({
     where: { email },
     create: {
       active: true,
@@ -24,6 +24,66 @@ async function main() {
       active: true,
       password_hash: await hash(password, 10),
       role: "SuperAdmin",
+    },
+  });
+  const restaurant = await prisma.restaurants.upsert({
+    where: { unit_id: "E2E-LOC-001" },
+    create: {
+      active: true,
+      created_by: manager.id,
+      name: "E2E Test Restaurant",
+      unit_id: "E2E-LOC-001",
+    },
+    update: {
+      active: true,
+      created_by: manager.id,
+      name: "E2E Test Restaurant",
+    },
+  });
+  await prisma.account_memberships_v2.upsert({
+    where: { manager_id: manager.id },
+    create: {
+      access_scope: "all_locations",
+      account_holder: true,
+      account_id: "e2e-test-account",
+      manager_id: manager.id,
+      status: "active",
+      team_role: "Owner",
+    },
+    update: {
+      access_scope: "all_locations",
+      account_holder: true,
+      account_id: "e2e-test-account",
+      status: "active",
+      team_role: "Owner",
+    },
+  });
+  await prisma.restaurant_sentry_state.upsert({
+    where: { restaurant_id: restaurant.id },
+    create: {
+      account_id: "e2e-test-account",
+      created_by: manager.id,
+      location_id: "E2E-LOC-001",
+      modules_json: [
+        { label: "M01", status: "Active" },
+        { label: "M02", status: "Active" },
+      ],
+      onboarding_progress: {
+        selectedVendors: { m01: ["toast"], m02: ["uber-eats"] },
+      },
+      restaurant_id: restaurant.id,
+    },
+    update: {
+      account_id: "e2e-test-account",
+      created_by: manager.id,
+      location_id: "E2E-LOC-001",
+      modules_json: [
+        { label: "M01", status: "Active" },
+        { label: "M02", status: "Active" },
+      ],
+      onboarding_progress: {
+        selectedVendors: { m01: ["toast"], m02: ["uber-eats"] },
+      },
     },
   });
   await prisma.$disconnect();

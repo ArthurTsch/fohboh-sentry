@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { emptyRequestAccessDraft } from "../data";
 import type { RequestAccessDraft } from "../types";
 
@@ -39,6 +39,14 @@ export function RequestAccessModal({
     draft.dsps.length > 0 &&
     draft.processors.length > 0;
   const canAdvance = step === 0 ? stepOneValid : step === 1 ? stepTwoValid : true;
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
 
   function updateField<K extends keyof RequestAccessDraft>(key: K, value: RequestAccessDraft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -80,7 +88,7 @@ export function RequestAccessModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+    <div aria-label="Request access" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" role="dialog">
       <div className="w-full max-w-[980px] overflow-hidden rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div className="border-b border-[var(--border)] px-7 pb-0 pt-6">
           <div className="mb-4 flex items-center gap-3">
