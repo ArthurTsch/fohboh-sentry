@@ -1,7 +1,28 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/app/generated/prisma/client";
 import { requireManagerSession } from "@/lib/auth/session";
+import { getScopedRestaurantWhere, getTeamAccountId } from "@/lib/auth/team-access";
 import prisma from "@/lib/prisma";
+
+const ALLOWED_PAYLOAD_KEYS = new Set([
+  "locationId",
+  "modules",
+  "onboardingChecklist",
+  "onboardingProgress",
+  "restaurantId",
+  "storeId",
+  "unitId",
+]);
+
+type LocationStatePayload = {
+  locationId?: string;
+  modules?: unknown;
+  onboardingChecklist?: unknown;
+  onboardingProgress?: unknown;
+  restaurantId?: number;
+  storeId?: string;
+  unitId?: string;
+};
 
 function isMissingSentryStateTable(error: unknown) {
   return (
@@ -40,6 +61,10 @@ function toNullableJsonInput(value: unknown) {
   return value as Prisma.InputJsonValue;
 }
 
+function isJsonObjectOrNull(value: unknown) {
+  return value === null || (typeof value === "object" && !Array.isArray(value));
+}
+
 export async function POST(request: Request) {
   try {
     const session = await requireManagerSession();
@@ -50,97 +75,108 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as {
-      accountId?: string | null;
-      completed?: boolean;
-      createdBy?: number | null;
-      ium?: string;
-      lastCertified?: string;
-      locationId?: string;
-      m01Score?: number;
-      m02Score?: number;
-      governanceInitializedAt?: string | null;
-      governanceSealedAt?: string | null;
-      governanceStatus?: string;
-      modules?: unknown;
-      onboardingChecklist?: unknown;
-      onboardingProgress?: unknown;
-      recoveryDisplay?: string;
-      restaurantId?: number | null;
-      status?: string;
-    };
+    const rawBody = (await request.json()) as unknown;
+    if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
+      return NextResponse.json({ error: "A valid location-state payload is required." }, { status: 400 });
+    }
+    const unknownKeys = Object.keys(rawBody).filter((key) => !ALLOWED_PAYLOAD_KEYS.has(key));
+    if (unknownKeys.length > 0) {
+      return NextResponse.json(
+        { error: `Unsupported location-state fields: ${unknownKeys.join(", ")}.` },
+        { status: 400 },
+      );
+    }
+    const body = rawBody as LocationStatePayload;
+    if (
+      (body.modules !== undefined && !Array.isArray(body.modules)) ||
+      (body.onboardingChecklist !== undefined && !isJsonObjectOrNull(body.onboardingChecklist)) ||
+      (body.onboardingProgress !== undefined && !isJsonObjectOrNull(body.onboardingProgress))
+    ) {
+      return NextResponse.json(
+        { error: "Location-state onboarding fields have an invalid shape." },
+        { status: 400 },
+      );
+    }
+    const locationId = body.locationId?.trim() || null;
+    const unitId = body.unitId?.trim() || null;
+    const storeId = body.storeId?.trim() || null;
+    const restaurantId =
+      typeof body.restaurantId === "number" && Number.isInteger(body.restaurantId) && body.restaurantId > 0
+        ? body.restaurantId
+        : null;
 
-    const locationId = body.locationId?.trim() ?? "";
-    if (!locationId) {
-      return NextResponse.json({ error: "locationId is required." }, { status: 400 });
+    if (!locationId && !unitId && !storeId && !restaurantId) {
+      return NextResponse.json({ error: "A restaurant or location identifier is required." }, { status: 400 });
     }
 
-    const restaurantId =
-      typeof body.restaurantId === "number" && Number.isFinite(body.restaurantId)
-        ? body.restaurantId
-        : (
-            await prisma.restaurants.findFirst({
-              where: {
-                OR: [{ unit_id: locationId }, { store_id: locationId }],
-              },
-              select: { id: true },
-            })
-          )?.id ?? null;
+    const stateByLocation = locationId
+      ? await prisma.restaurant_sentry_state.findUnique({
+          where: { location_id: locationId },
+          select: { account_id: true, created_by: true, location_id: true, restaurant_id: true },
+        })
+      : null;
+    const scopedWhere = await getScopedRestaurantWhere(session);
+    const targetIds = [restaurantId, stateByLocation?.restaurant_id ?? null].filter(
+      (value): value is number => typeof value === "number",
+    );
+    const selectors = [
+      ...targetIds.map((id) => ({ id })),
+      ...(unitId ? [{ unit_id: unitId }] : []),
+      ...(storeId ? [{ store_id: storeId }] : []),
+      ...(locationId ? [{ unit_id: locationId }, { store_id: locationId }] : []),
+    ];
+    const restaurant = await prisma.restaurants.findFirst({
+      where: { active: true, ...scopedWhere, OR: selectors },
+      select: { created_by: true, id: true, store_id: true, unit_id: true },
+    });
 
-    if (!restaurantId) {
+    if (
+      !restaurant ||
+      (restaurantId !== null && restaurant.id !== restaurantId) ||
+      (stateByLocation && stateByLocation.restaurant_id !== restaurant.id) ||
+      (unitId !== null && restaurant.unit_id !== unitId) ||
+      (storeId !== null && restaurant.store_id !== storeId)
+    ) {
       return NextResponse.json(
-        { error: "Unable to resolve a restaurant record for this location." },
+        { error: "Location state was not found within the authorized restaurant scope." },
         { status: 404 },
       );
     }
 
+    const existingState = stateByLocation?.restaurant_id === restaurant.id
+      ? stateByLocation
+      : await prisma.restaurant_sentry_state.findUnique({
+          where: { restaurant_id: restaurant.id },
+          select: { account_id: true, created_by: true, location_id: true, restaurant_id: true },
+        });
+    const accountId = existingState?.account_id ?? await getTeamAccountId(session);
+    if (!accountId) {
+      return NextResponse.json(
+        { error: "The authorized restaurant is missing its server-managed account assignment." },
+        { status: 409 },
+      );
+    }
+    const canonicalLocationId =
+      existingState?.location_id || restaurant.unit_id || restaurant.store_id || `LOC-DB-${restaurant.id}`;
+
     const state = await prisma.restaurant_sentry_state.upsert({
       where: {
-        restaurant_id: restaurantId,
+        restaurant_id: restaurant.id,
       },
       update: {
-        account_id:
-          session.role === "WGS Manager" || session.role === "SuperAdmin"
-            ? body.accountId ?? null
-            : session.accountId ?? body.accountId ?? null,
-        completed: body.completed ?? false,
-        created_by: typeof session.managerId === "number" ? session.managerId : null,
-        governance_initialized_at: body.governanceInitializedAt ? new Date(body.governanceInitializedAt) : undefined,
-        governance_sealed_at: body.governanceSealedAt ? new Date(body.governanceSealedAt) : null,
-        governance_status: body.governanceStatus ?? undefined,
-        ium: body.ium ?? "--",
-        last_certified: body.lastCertified ?? "Pending",
-        location_id: locationId,
-        m01_score: body.m01Score ?? 0,
-        m02_score: body.m02Score ?? 0,
         modules_json: toNullableJsonInput(body.modules),
         onboarding_checklist: toNullableJsonInput(body.onboardingChecklist),
         onboarding_progress: toNullableJsonInput(body.onboardingProgress),
-        recovery_display: body.recoveryDisplay ?? "$0",
-        status: body.status ?? "Onboarding",
         updated_at: new Date(),
       },
       create: {
-        account_id:
-          session.role === "WGS Manager" || session.role === "SuperAdmin"
-            ? body.accountId ?? null
-            : session.accountId ?? body.accountId ?? null,
-        completed: body.completed ?? false,
-        created_by: typeof session.managerId === "number" ? session.managerId : null,
-        governance_initialized_at: body.governanceInitializedAt ? new Date(body.governanceInitializedAt) : null,
-        governance_sealed_at: body.governanceSealedAt ? new Date(body.governanceSealedAt) : null,
-        governance_status: body.governanceStatus ?? "uninitialized",
-        ium: body.ium ?? "--",
-        last_certified: body.lastCertified ?? "Pending",
-        location_id: locationId,
-        m01_score: body.m01Score ?? 0,
-        m02_score: body.m02Score ?? 0,
+        account_id: accountId,
+        created_by: existingState?.created_by ?? restaurant.created_by ?? session.managerId ?? null,
+        location_id: canonicalLocationId,
         modules_json: toNullableJsonInput(body.modules),
         onboarding_checklist: toNullableJsonInput(body.onboardingChecklist),
         onboarding_progress: toNullableJsonInput(body.onboardingProgress),
-        recovery_display: body.recoveryDisplay ?? "$0",
-        restaurant_id: restaurantId,
-        status: body.status ?? "Onboarding",
+        restaurant_id: restaurant.id,
       },
       select: {
         id: true,

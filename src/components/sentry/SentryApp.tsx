@@ -1568,22 +1568,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          accountId: location.accountId,
-          completed: options?.onboardingProgress?.completed ?? location.status !== "Onboarding",
-          createdBy: effectiveSession?.managerId ?? location.ownerManagerId ?? null,
-          governanceInitializedAt: location.governanceInitializedAt ?? null,
-          governanceSealedAt: location.governanceSealedAt ?? null,
-          governanceStatus: location.governanceStatus ?? "uninitialized",
-          ium: location.ium,
-          lastCertified: location.lastCertified,
           locationId: location.id,
-          m01Score: location.m01,
-          m02Score: location.m02,
           modules: location.modules,
           onboardingChecklist: options?.onboardingChecklist ?? onboardingState,
           onboardingProgress: options?.onboardingProgress ?? null,
-          recoveryDisplay: location.recovery,
-          status: location.status,
         }),
       });
 
