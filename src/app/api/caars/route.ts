@@ -405,15 +405,11 @@ function isProblemRuleCitation(row: {
 }) {
   const explicitDisposition = getExplicitCitationDisposition(row.sample_evidence);
   if (explicitDisposition) {
-    return explicitDisposition === "blocking" || explicitDisposition === "monetary";
+    return explicitDisposition === "blocking";
   }
 
   if (row.fired_count <= 0) {
     return false;
-  }
-
-  if (Number(row.variance_cents) !== 0) {
-    return true;
   }
 
   return parseCitationSamples(row.sample_evidence).some(sampleSignalsProblem);
@@ -433,6 +429,16 @@ function getExpectedArtifactKeys(moduleId: "M01" | "M02") {
   return moduleId === "M01"
     ? ["m01-processor", "m01-pos", "m01-agreement", "m01-bank"]
     : ["m02-settlement", "m02-pos", "m02-agreement", "m02-bank"];
+}
+
+function isMonetaryRuleCitation(row: { sample_evidence: unknown; variance_cents: bigint }) {
+  const explicitDisposition = getExplicitCitationDisposition(row.sample_evidence);
+  return explicitDisposition === "monetary" || (!explicitDisposition && Number(row.variance_cents) !== 0);
+}
+
+function parseNumericIds(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.filter((id): id is number => typeof id === "number" && Number.isInteger(id) && id > 0);
 }
 
 function buildFieldAuditRows({
@@ -853,6 +859,7 @@ export async function GET(request: Request) {
               rule_set_version: true,
               status: true,
               trust_score: true,
+              upload_ids: true,
               variance_cents: true,
             },
           })
@@ -965,7 +972,11 @@ export async function GET(request: Request) {
         const scoreDeductions = buildScoreDeductions(citations);
         const scoreReducingRuleIds = new Set(scoreDeductions.flatMap((deduction) => deduction.ruleIds));
         const problemCitations = citations.filter(isProblemRuleCitation);
-        const problemCitationIds = new Set(problemCitations.map((citation) => citation.rule_id));
+        const monetaryCitations = citations.filter(isMonetaryRuleCitation);
+        const problemCitationIds = new Set([
+          ...problemCitations.map((citation) => citation.rule_id),
+          ...monetaryCitations.map((citation) => citation.rule_id),
+        ]);
         const scoreReducingCitations = citations.filter(
           (citation) => !problemCitationIds.has(citation.rule_id) && scoreReducingRuleIds.has(citation.rule_id),
         );
@@ -974,9 +985,15 @@ export async function GET(request: Request) {
           (citation) => !problemCitationIds.has(citation.rule_id) && !scoreReducingCitationIds.has(citation.rule_id),
         );
         const uploadLocationId = report.restaurant_id ?? null;
+        const certRunUploadIds = new Set(parseNumericIds(certRun?.upload_ids));
         const moduleUploads =
           uploadLocationId && moduleId
-            ? uploads.filter((upload) => upload.location_id === uploadLocationId && upload.module === moduleId)
+            ? uploads.filter(
+                (upload) =>
+                  upload.location_id === uploadLocationId &&
+                  upload.module === moduleId &&
+                  certRunUploadIds.has(upload.id),
+              )
             : [];
         const reconciliation = moduleId
           ? deriveReconciliationExceptions({
@@ -1035,6 +1052,7 @@ export async function GET(request: Request) {
               sealedSchema,
             }),
             informationalRuleCitations: buildRuleCitationSummaries(scoreNeutralCitations.filter(isInformationalRuleCitation)),
+            monetaryRuleCitations: buildRuleCitationSummaries(monetaryCitations),
             module: moduleId,
             passedRuleCitations: buildRuleCitationSummaries(scoreNeutralCitations.filter((citation) => !isInformationalRuleCitation(citation))),
             reconciliationExceptions: reconciliation.exceptions,

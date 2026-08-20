@@ -123,6 +123,7 @@ export type CaarTraceability = {
   evidence: CaarEvidenceTrace[];
   fieldAudit: CaarFieldAudit[];
   informationalRuleCitations?: CaarRuleCitationSummary[];
+  monetaryRuleCitations?: CaarRuleCitationSummary[];
   module: "M01" | "M02" | "M03" | null;
   passedRuleCitations: CaarRuleCitationSummary[];
   reconciliationExceptions: string[];

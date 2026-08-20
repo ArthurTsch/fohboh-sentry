@@ -73,6 +73,7 @@ export function CaarReportModal({
   const fieldAudit = traceability?.fieldAudit ?? [];
   const blockingRuleCitations = traceability?.blockingRuleCitations ?? traceability?.ruleCitations ?? [];
   const scoreReducingRuleCitations = traceability?.scoreReducingRuleCitations ?? [];
+  const monetaryRuleCitations = traceability?.monetaryRuleCitations ?? [];
   const scoreNeutralRuleCitations = traceability?.scoreNeutralRuleCitations ?? [
     ...(traceability?.informationalRuleCitations ?? []),
     ...(traceability?.passedRuleCitations ?? []),
@@ -168,6 +169,7 @@ export function CaarReportModal({
   const providerName = evidenceRows.find((row) => row.vendor)?.vendor ?? null;
   const calculationCitations = uniqueRuleCitations([
     ...blockingRuleCitations,
+    ...monetaryRuleCitations,
     ...scoreReducingRuleCitations,
     ...scoreNeutralRuleCitations,
   ]);
@@ -210,19 +212,27 @@ export function CaarReportModal({
       </div>
 
       <div className="mx-auto max-w-7xl space-y-5 px-5 py-8 lg:px-8">
-        <WorkflowContextBar
-          locationId={record.locationId}
-          locationName={record.locationName}
-          moduleId={moduleId === "M01" || moduleId === "M02" ? moduleId : null}
-          providerName={providerName}
-          period={record.period}
-        />
-        <ActionNotice title={claimReady ? "CAAR is ready for release" : "CAAR requires remediation"} tone={claimReady ? "success" : "danger"}>
-          {claimReady
-            ? `${record.amount} is backed by persisted evidence and sealed governance. ${custodyRows.filter((row) => row.status === "Hashed").length}/${custodyRows.length} custody records expose a hash.`
-            : effectiveRemediationSteps[0] ?? "Review the evidence and rule findings below before release."}
-        </ActionNotice>
-        <section className="grid gap-4 rounded-[28px] border border-[var(--border)] bg-white p-6 lg:grid-cols-[1.15fr_0.85fr]">
+        <CollapsibleSection defaultOpen eyebrow="Workflow" title="Current workflow">
+          <WorkflowContextBar
+            locationId={record.locationId}
+            locationName={record.locationName}
+            moduleId={moduleId === "M01" || moduleId === "M02" ? moduleId : null}
+            providerName={providerName}
+            period={record.period}
+          />
+        </CollapsibleSection>
+        <CollapsibleSection defaultOpen eyebrow="Release Status" title={claimReady ? "CAAR is ready for release" : "CAAR requires remediation"}>
+          <ActionNotice title={claimReady ? "CAAR is ready for release" : "CAAR requires remediation"} tone={claimReady ? "success" : "danger"}>
+            {claimReady
+              ? `${record.amount} is backed by persisted evidence and sealed governance. ${custodyRows.filter((row) => row.status === "Hashed").length}/${custodyRows.length} custody records expose a hash.`
+              : effectiveRemediationSteps[0] ?? "Review the evidence and rule findings below before release."}
+          </ActionNotice>
+        </CollapsibleSection>
+        <details open className="rounded-[28px] border border-[var(--border)] bg-white">
+          <summary className="cursor-pointer list-none px-6 py-5">
+            <SectionSummary eyebrow="Certification" title={`${moduleLabel} Certification`} />
+          </summary>
+          <section className="grid gap-4 border-t border-[var(--border)] p-6 lg:grid-cols-[1.15fr_0.85fr]">
           <div>
             <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--accent)]">
               {moduleLabel} Certification
@@ -308,9 +318,11 @@ export function CaarReportModal({
               </div>
             </div>
           </div>
-        </section>
+          </section>
+        </details>
 
         <ReportCard
+          defaultOpen={record.trustScore < 100}
           eyebrow="Score Deduction Ledger"
           title={`${record.trustScore}/100 — complete score calculation`}
           sub="A deduction is defensible only when its calculation, governing rules, and persisted evidence are shown together."
@@ -354,15 +366,30 @@ export function CaarReportModal({
 
         {m01Calculation ? (
           <ReportCard
-            eyebrow="M01 Calculation"
-            title="Processor fee calculation and POS basis comparison"
-            sub="The governed processor pricing terms are applied to the certified period metrics and compared with the actual statement fees."
+            eyebrow="Calculation & Source Data"
+            title="M01 processor fee calculation"
+            sub="This section separates values extracted from uploaded documents, governed pricing terms, and amounts calculated by Sentry."
           >
+            <div className="mb-4 rounded-2xl border border-[var(--border)] bg-white p-4 text-sm leading-7 text-[var(--muted)]">
+              <span className="font-semibold text-[var(--text)]">Uploaded evidence used:</span>{" "}
+              {evidenceRows.filter((row) => row.status === "provided").map((row) => row.label).join(" · ") || "No persisted uploaded evidence is linked."}
+            </div>
+            <div className="mb-3 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+              Values extracted from uploaded documents
+            </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <ValueChip label="Processor basis" value={formatMoneyLike(m01Calculation.basis)} />
               <ValueChip label="POS basis" value={formatMoneyLike(m01Calculation.posBasis)} />
-              <ValueChip label="Expected fees" value={formatMoneyLike(m01Calculation.expectedFees)} />
               <ValueChip label="Actual fees" value={formatMoneyLike(m01Calculation.actualFees)} />
+              <ValueChip label="Interchange fees" value={formatMoneyLike(m01Calculation.interchange)} />
+            </div>
+            <div className="mt-4 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+              Governed pricing inputs and calculated result
+            </div>
+            <div className="mt-3 rounded-2xl border border-[var(--border)] bg-white p-4 text-sm leading-7 text-[var(--text)]">
+              Contract markup: {m01Calculation.markupBps.toFixed(2)} basis points
+              <br />Contract transaction fee: {formatMoneyLike(m01Calculation.transactionFee)} × {m01Calculation.transactionCount} transactions
+              <br />Contract monthly fee: {formatMoneyLike(m01Calculation.monthlyFee)}
             </div>
             <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
               Interchange {formatMoneyLike(m01Calculation.interchange)} + markup {formatMoneyLike(m01Calculation.markup)} + transaction charges {formatMoneyLike(m01Calculation.transactionFees)} + monthly fee {formatMoneyLike(m01Calculation.monthlyFee)} = <strong>{formatMoneyLike(m01Calculation.expectedFees)}</strong>
@@ -574,6 +601,7 @@ export function CaarReportModal({
         </div>
 
         <ReportCard
+          defaultOpen
           eyebrow="Supporting Diagnostics | MQ6 Dimensions"
           title="Evidence-quality diagnostics — not the final-score arithmetic"
           sub="These six dimensions describe evidence quality. The official Trust Score is calculated from the eleven weighted trust gates shown in the Score Deduction Ledger above."
@@ -747,6 +775,7 @@ export function CaarReportModal({
               <AttestRow label="Rule Set Version" value={ruleSetVersion ?? "Not persisted"} />
               <AttestRow label="Certification Timestamp" value={certificationDate} />
               <AttestRow label="Blocking Rules" value={String(blockingRuleCitations.length)} />
+              <AttestRow label="Monetary Findings" value={String(monetaryRuleCitations.length)} />
               <AttestRow label="Score-Reducing Rules" value={String(scoreReducingRuleCitations.length)} />
               <AttestRow label="Non-Blocking Rules" value={String(scoreNeutralRuleCitations.length)} />
               <AttestRow
@@ -761,6 +790,37 @@ export function CaarReportModal({
             </div>
           </ReportCard>
         </div>
+
+        <details className="rounded-[28px] border border-[rgba(27,106,201,0.2)] bg-[rgba(27,106,201,0.03)]">
+          <summary className="cursor-pointer list-none px-6 py-5">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--info)]">Monetary Findings</div>
+                <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">Recoverable findings that do not block release</div>
+                <div className="mt-1 text-sm text-[var(--muted)]">These rules identify supported monetary variance while allowing an otherwise eligible CAAR to be released.</div>
+              </div>
+              <div className="rounded-full border border-[rgba(27,106,201,0.2)] px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--info)]">
+                {hasPersistedTraceability ? `${monetaryRuleCitations.length} stored` : "Trace missing"}
+              </div>
+            </div>
+          </summary>
+          <div className="border-t border-[rgba(27,106,201,0.16)] px-6 py-6">
+            {monetaryRuleCitations.length > 0 ? (
+              <SimpleTable
+                columns={["Rule", "Version", "Finding", "Variance", "Evidence"]}
+                rows={monetaryRuleCitations.map((row) => [
+                  <RuleCitationCell key={`${row.ruleId}:${row.ruleVersion}:monetary`} evidenceRows={evidenceRows} rule={row} moduleId={moduleId} disposition="monetary_problem" />,
+                  row.ruleVersion,
+                  buildBlockingIssueSummary(row, moduleId, evidenceRows),
+                  row.varianceDisplay,
+                  `${row.sampleEvidenceCount} sample entr${row.sampleEvidenceCount === 1 ? "y" : "ies"}`,
+                ])}
+              />
+            ) : (
+              <div className="rounded-2xl border border-[var(--border)] bg-white p-4 text-sm text-[var(--muted)]">No monetary findings were persisted for this CAAR.</div>
+            )}
+          </div>
+        </details>
 
         <details className="rounded-[28px] border border-[var(--border)] bg-white">
           <summary className="cursor-pointer list-none px-6 py-5">
@@ -1599,11 +1659,14 @@ function deriveM01Calculation(ruleCitations: CaarRuleCitationSummary[]) {
     expectedFees: number("expected_fee_amount"),
     interchange: number("expected_interchange_component"),
     markup: number("expected_markup_component"),
+    markupBps: number("contracted_markup_bps"),
     monthlyFee: number("expected_monthly_component"),
     posBasis: number("pos_basis_amount"),
     reconciliationDifference,
     reconciliationPct: basis > 0 ? (reconciliationDifference / basis) * 100 : 0,
     transactionFees: number("expected_txn_component"),
+    transactionCount: number("transaction_count"),
+    transactionFee: number("contracted_per_txn_fee"),
     variance: number("unexplained_fee_delta"),
   };
 }
@@ -2168,26 +2231,58 @@ const mq6WhyMatters: Record<string, string> = {
 
 function ReportCard({
   children,
+  defaultOpen = false,
   eyebrow,
   sub,
   title,
 }: {
   children: ReactNode;
+  defaultOpen?: boolean;
   eyebrow: string;
   sub: string;
   title: string;
 }) {
   return (
-    <section className="rounded-[28px] border border-[var(--border)] bg-white p-6">
-      <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
-        {eyebrow}
+    <details open={defaultOpen} className="rounded-[28px] border border-[var(--border)] bg-white">
+      <summary className="cursor-pointer list-none px-6 py-5">
+        <SectionSummary eyebrow={eyebrow} title={title} sub={sub} />
+      </summary>
+      <div className="border-t border-[var(--border)] px-6 py-6">{children}</div>
+    </details>
+  );
+}
+
+function CollapsibleSection({
+  children,
+  defaultOpen = false,
+  eyebrow,
+  title,
+}: {
+  children: ReactNode;
+  defaultOpen?: boolean;
+  eyebrow: string;
+  title: string;
+}) {
+  return (
+    <details open={defaultOpen} className="rounded-[28px] border border-[var(--border)] bg-white">
+      <summary className="cursor-pointer list-none px-6 py-5">
+        <SectionSummary eyebrow={eyebrow} title={title} />
+      </summary>
+      <div className="border-t border-[var(--border)] p-4">{children}</div>
+    </details>
+  );
+}
+
+function SectionSummary({ eyebrow, sub, title }: { eyebrow: string; sub?: string; title: string }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">{eyebrow}</div>
+        <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">{title}</div>
+        {sub ? <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{sub}</div> : null}
       </div>
-      <div className="mt-2 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
-        {title}
-      </div>
-      <div className="mt-2 text-sm leading-6 text-[var(--muted)]">{sub}</div>
-      <div className="mt-4">{children}</div>
-    </section>
+      <span aria-hidden className="mt-2 text-lg text-[var(--muted)]">⌄</span>
+    </div>
   );
 }
 

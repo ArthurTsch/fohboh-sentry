@@ -1501,7 +1501,6 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
   const ingestionRuleCitations = buildCanonicalIngestionCitations(context);
   const trustGateRuleCitations = buildCanonicalTrustGateCitations({
     context,
-    dimensions,
     trustGates,
   });
   const ruleCitations = capAttributedMonetaryCitations([
@@ -1520,13 +1519,15 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
     trustGates,
     systemHealth,
   );
+  const hasBlockingCitation = ruleCitations.some((citation) => citation.disposition === "blocking");
   const ready =
     input.cadence === "monthly_final" &&
     certificationZone === "CERTIFIED" &&
     ruleIntegrity.scorePct >= 100 &&
     trustGates.TG10.scorePct >= 100 &&
     trustGates.TG11.scorePct >= 100 &&
-    systemHealth.masterSystemHealthy;
+    systemHealth.masterSystemHealthy &&
+    !hasBlockingCitation;
 
   return {
     artifactCoverage: dataCompleteness.scorePct,
@@ -1990,8 +1991,10 @@ function buildCanonicalIngestionCitations(context: RuleContext) {
     }),
     buildNarrativeCitation("R010", {
       detail:
-        duplicateTransactionCount > 0 || duplicateOrderCount > 0
-          ? "Duplicate events were detected during governed normalization."
+        duplicateTransactionCount > 0
+          ? "Confirmed duplicate financial transactions were detected during governed normalization."
+          : duplicateOrderCount > 0
+            ? "Duplicate order identifiers were detected for review, but no duplicate financial transaction was confirmed."
           : "No duplicate events were detected during governed normalization.",
       duplicate_order_count: duplicateOrderCount,
       duplicate_transaction_count: duplicateTransactionCount,
@@ -2038,16 +2041,12 @@ function buildCanonicalIngestionCitations(context: RuleContext) {
 
 function buildCanonicalTrustGateCitations({
   context,
-  dimensions,
   trustGates,
 }: {
   context: RuleContext;
-  dimensions: Record<Mq6DimensionName, number>;
   trustGates: Record<TrustGateName, TrustGateScore>;
 }) {
-  const duplicateDetected =
-    numberValue(context.statement?.metrics?.duplicateOrderCount) > 0 ||
-    numberValue(context.statement?.metrics?.duplicateTransactionCount) > 0;
+  const duplicateDetected = trustGates.TG05.scorePct < 100;
   const contractExpirationDate = parseDateValue(
     context.contract?.expiration_date ||
     context.contract?.contract_expiration_date ||
@@ -2135,10 +2134,11 @@ function buildCanonicalTrustGateCitations({
     }),
     buildNarrativeCitation("R123", {
       detail:
-        dimensions["Cross-System Reconciliation"] >= 85
+        trustGates.TG04.scorePct >= 85
           ? "POS reconciliation cleared the release band."
           : "POS reconciliation remains below the release band.",
-      reconciliation_score: dimensions["Cross-System Reconciliation"],
+      reconciliation_score: trustGates.TG04.scorePct,
+      tg04_score: trustGates.TG04.scorePct,
     }),
     buildNarrativeCitation("R124", {
       detail: duplicateDetected
@@ -2152,6 +2152,7 @@ function buildCanonicalTrustGateCitations({
         : "No duplicate-detected penalty applied to TG05.",
       duplicate_order_count: numberValue(context.statement?.metrics?.duplicateOrderCount),
       duplicate_transaction_count: numberValue(context.statement?.metrics?.duplicateTransactionCount),
+      tg05_score: trustGates.TG05.scorePct,
     }),
     buildNarrativeCitation("R126", {
       detail: `TG06 period coverage resolved at ${trustGates.TG06.scorePct}.`,
@@ -2952,8 +2953,12 @@ function buildOperationalFindings(
   if (!systemHealth.masterSystemHealthy) {
     findings.push(systemHealth.detail);
   }
-  for (const citation of ruleCitations) {
-    findings.push(`${citation.ruleId} fired with ${formatCurrency(centsToDollars(citation.varianceCents))} in attributed variance.`);
+  for (const citation of ruleCitations.filter((row) => row.disposition === "blocking" || row.disposition === "monetary")) {
+    findings.push(
+      citation.disposition === "monetary"
+        ? `${citation.ruleId} identified ${formatCurrency(centsToDollars(citation.varianceCents))} in attributed variance.`
+        : `${citation.ruleId} remains an active release-blocking control.`,
+    );
   }
   if (score >= 85 && ruleCitations.length === 0 && findings.length === 0) {
     findings.push("All deterministic certification gates cleared with no actionable variance detected.");
@@ -3040,7 +3045,7 @@ function buildCitation(
   sampleEvidence: Record<string, unknown>,
 ): RuleCitation {
   return {
-    disposition: varianceDollars !== 0 ? "monetary" : "blocking",
+    disposition: varianceDollars !== 0 ? "monetary" : "informational",
     firedCount,
     ruleId,
     ruleVersion: RULE_VERSION,
@@ -3050,9 +3055,10 @@ function buildCitation(
 }
 
 function buildNarrativeCitation(ruleId: string, sampleEvidence: Record<string, unknown>): RuleCitation {
+  const disposition = resolveNarrativeCitationDisposition(ruleId, sampleEvidence);
   return {
-    disposition: resolveNarrativeCitationDisposition(ruleId, sampleEvidence),
-    firedCount: 1,
+    disposition,
+    firedCount: disposition === "passed" ? 0 : 1,
     ruleId,
     ruleVersion: RULE_VERSION,
     sampleEvidence: [sampleEvidence],
@@ -3079,7 +3085,7 @@ function resolveNarrativeCitationDisposition(
     case "R008":
     case "R009": return bool("schema_ready") ? "passed" : "blocking";
     case "R006": return bool("governed_fields_ready") ? "passed" : "blocking";
-    case "R010": return number("duplicate_order_count") > 0 || number("duplicate_transaction_count") > 0 ? "blocking" : "passed";
+    case "R010": return number("duplicate_transaction_count") > 0 ? "blocking" : number("duplicate_order_count") > 0 ? "informational" : "passed";
     case "R011": return bool("date_range_ready") ? "passed" : "blocking";
     case "R012": return number("normalized_amount_basis") > 0 ? "passed" : "blocking";
     case "R013": return bool("negative_signal_detected") ? "blocking" : "passed";
@@ -3098,9 +3104,9 @@ function resolveNarrativeCitationDisposition(
     case "R119": return bool("source_hash") && bool("pos_hash") ? "passed" : "blocking";
     case "R120": return number("contract_fields") >= 3 ? "informational" : "blocking";
     case "R121": return bool("contract_expired") ? "blocking" : "informational";
-    case "R123": return number("reconciliation_score") >= 85 ? "passed" : "blocking";
+    case "R123": return number("tg04_score") >= 85 ? "passed" : "blocking";
     case "R124": return bool("duplicate_detected") ? "informational" : "passed";
-    case "R125": return number("duplicate_order_count") > 0 || number("duplicate_transaction_count") > 0 ? "blocking" : "passed";
+    case "R125": return number("tg05_score") >= 100 ? "passed" : "blocking";
     case "R127": return number("tg06_score") < 75 ? "blocking" : "passed";
     case "R130": return bool("high_variance_flag") ? "blocking" : "passed";
     case "R131": return number("tg08_score") >= 100 ? "passed" : "blocking";
