@@ -1,13 +1,13 @@
 import { spawnSync } from "node:child_process";
 
-const databaseUrl = "postgresql://postgres:postgres@127.0.0.1:55432/fohboh_sentry_test";
-const composeFile = "docker-compose.test.yml";
+const databaseUrl = "postgresql://postgres:postgres@127.0.0.1:55431/fohboh_sentry_dev";
+const composeFile = "docker-compose.dev.yml";
 const docker = process.platform === "win32" ? "docker.exe" : "docker";
 
 const environment = {
   ...process.env,
   DATABASE_URL: databaseUrl,
-  TEST_DATABASE_URL: databaseUrl,
+  TEST_DATABASE_URL: "",
   DB_HOST: "",
   DB_NAME: "",
   DB_PASSWORD: "",
@@ -49,8 +49,7 @@ function runPnpm(args, label) {
   run("pnpm", args, label);
 }
 
-run(docker, ["compose", "-f", composeFile, "down", "--volumes", "--remove-orphans"], "Clearing the isolated database");
-run(docker, ["compose", "-f", composeFile, "up", "-d", "--wait"], "Starting PostgreSQL");
+run(docker, ["compose", "-f", composeFile, "up", "-d", "--wait"], "Starting persistent PostgreSQL");
 runPnpm(["exec", "prisma", "migrate", "deploy"], "Applying database migrations");
 runPnpm(["seed:test"], "Creating the local test account");
 

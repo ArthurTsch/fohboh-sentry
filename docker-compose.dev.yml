@@ -1,0 +1,19 @@
+services:
+  postgres-dev:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: fohboh_sentry_dev
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fohboh_sentry_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "55431:5432"
+    volumes:
+      - fohboh-sentry-dev-data:/var/lib/postgresql/data
+
+volumes:
+  fohboh-sentry-dev-data:

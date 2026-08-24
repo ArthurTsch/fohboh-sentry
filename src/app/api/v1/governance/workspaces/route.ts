@@ -14,6 +14,10 @@ import prisma from "@/lib/prisma";
 import { ensureLocationV2ForRestaurant } from "@/lib/production/legacy-sync";
 import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
 import { resolveVendorKey } from "@/components/sentry/vendor-catalog";
+import {
+  buildAgreementUploadLookup,
+  matchesAgreementUploadVendor,
+} from "@/lib/governance/agreement-upload";
 
 type ScopedRestaurant = {
   accountId: string | null;
@@ -567,7 +571,28 @@ export async function POST(request: Request) {
         FROM pg_advisory_xact_lock(hashtext(${workspaceLockKey}))
       `;
 
-      const [latestSchema, latestContract, latestAgreementUpload, stateRow] = await Promise.all([
+      const agreementUploads = await tx.uploads_v2.findMany({
+        where: buildAgreementUploadLookup({
+          artifactKey: getAgreementArtifactKey(normalizedWorkspace.module),
+          moduleId: normalizedWorkspace.module,
+          normalizedLocationId: location.id,
+        }),
+        orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
+        select: {
+          id: true,
+          vendor: true,
+        },
+      });
+      const agreementVendorCandidates = buildUploadVendorCandidates(
+        normalizedWorkspace.module,
+        normalizedWorkspace.vendor,
+      );
+      const latestAgreementUpload =
+        agreementUploads.find((upload) =>
+          matchesAgreementUploadVendor(upload.vendor, agreementVendorCandidates),
+        ) ?? null;
+
+      const [latestSchema, latestContract, stateRow] = await Promise.all([
         tx.schema_registry_v2.findFirst({
           where: {
             location_id: location.id,
@@ -604,21 +629,6 @@ export async function POST(request: Request) {
             terms: true,
             vendor: true,
             version: true,
-          },
-        }),
-        tx.uploads_v2.findFirst({
-          where: {
-            artifact_key: getAgreementArtifactKey(normalizedWorkspace.module),
-            location_id: restaurant.id,
-            module: normalizedWorkspace.module,
-            superseded_by: null,
-            vendor: {
-              in: buildUploadVendorCandidates(normalizedWorkspace.module, normalizedWorkspace.vendor),
-            },
-          },
-          orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
-          select: {
-            id: true,
           },
         }),
         tx.restaurant_sentry_state.findUnique({

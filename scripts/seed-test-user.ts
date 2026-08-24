@@ -1,9 +1,9 @@
 import "dotenv/config";
 import { hash } from "bcryptjs";
-import { assertSafeTestDatabaseUrl } from "../tests/helpers/test-database";
+import { assertSafeLocalSeedDatabaseUrl } from "./local-database-safety";
 
 async function main() {
-  const databaseUrl = assertSafeTestDatabaseUrl(process.env.TEST_DATABASE_URL || process.env.DATABASE_URL);
+  const databaseUrl = assertSafeLocalSeedDatabaseUrl(process.env.TEST_DATABASE_URL || process.env.DATABASE_URL);
   process.env.DATABASE_URL = databaseUrl;
   process.env.DB_SSLMODE ||= "disable";
   const { default: prisma } = await import("../src/lib/prisma");

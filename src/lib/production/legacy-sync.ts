@@ -12,19 +12,34 @@ export async function ensureCustomerForAccount(
   prisma: PrismaClient | Prisma.TransactionClient,
   accountId: string,
 ) {
-  const existing = await prisma.customers.findFirst({
+  const accountCustomer = await prisma.customers.findUnique({
     where: {
-      name: accountId,
-      deleted_at: null,
+      account_id: accountId,
     },
   });
 
-  if (existing) {
-    return existing;
+  if (accountCustomer && !accountCustomer.deleted_at) {
+    return accountCustomer;
+  }
+
+  const legacyCustomer = await prisma.customers.findFirst({
+    where: {
+      account_id: null,
+      deleted_at: null,
+      name: accountId,
+    },
+  });
+
+  if (legacyCustomer) {
+    return prisma.customers.update({
+      where: { id: legacyCustomer.id },
+      data: { account_id: accountId, updated_at: new Date() },
+    });
   }
 
   return prisma.customers.create({
     data: {
+      account_id: accountId,
       name: accountId,
       plan: "wgs",
       cortex_enabled: false,
