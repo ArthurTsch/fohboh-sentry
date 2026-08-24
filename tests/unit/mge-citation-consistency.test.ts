@@ -21,19 +21,21 @@ function artifact(
 }
 
 describe("M02 citation consistency", () => {
-  it("fails TG04 under R123 when the POS-to-DSP order-count gap exceeds 5%", () => {
+  it("passes TG04 when a delivery-only POS report matches unique DSP delivery orders", () => {
     const result = runDeterministicModuleEngine({
       artifacts: [
         artifact("m02-settlement", "CSV", {
           metrics: {
             basisAmount: 4_379.96,
             deliveryBasisAmount: 3_934.46,
+            deliveryOrderCount: 141,
             duplicateOrderCount: 1,
             duplicateTransactionCount: 0,
             feeAmount: 1_015.01,
             orderCount: 152,
             payoutAmount: 3_656.82,
             pickupBasisAmount: 445.5,
+            pickupOrderCount: 11,
             refundCount: 1,
             transactionCount: 152,
           },
@@ -61,16 +63,17 @@ describe("M02 citation consistency", () => {
     const citation = (ruleId: string) => result.ruleCitations.find((row) => row.ruleId === ruleId);
 
     expect(result.dimensions["Cross-System Reconciliation"]).toBe(50);
-    expect(result.trustGates.TG04.scorePct).toBe(0);
+    expect(result.trustGates.TG04.scorePct).toBe(100);
     expect(result.trustGates.TG05.scorePct).toBe(100);
     expect(citation("R010")?.disposition).toBe("informational");
     expect(citation("R019")?.disposition).toBe("monetary");
-    expect(citation("R123")?.disposition).toBe("blocking");
+    expect(citation("R123")?.disposition).toBe("passed");
     expect(citation("R125")?.disposition).toBe("passed");
-    expect(citation("R123")?.firedCount).toBe(1);
+    expect(citation("R123")?.firedCount).toBe(0);
     expect(citation("R122")?.sampleEvidence[0]).toMatchObject({
-      dsp_order_count: 152,
-      order_count_difference: 12,
+      dsp_order_count: 140,
+      order_count_difference: 0,
+      order_count_scope: "delivery_unique_orders",
       pos_certified_order_count: 140,
     });
     expect(citation("R122")?.sampleEvidence[0]).toMatchObject({
@@ -82,8 +85,7 @@ describe("M02 citation consistency", () => {
       reconciliation_total_score: 50,
     });
     expect(citation("R125")?.firedCount).toBe(0);
-    expect(result.ruleCitations.filter((row) => row.disposition === "blocking").map((row) => row.ruleId)).toContain("R123");
-    expect(result.ready).toBe(false);
+    expect(result.ruleCitations.filter((row) => row.disposition === "blocking").map((row) => row.ruleId)).not.toContain("R123");
   });
 
   it("does not turn a detected recovery condition with zero attributed variance into a blocker", () => {

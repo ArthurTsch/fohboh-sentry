@@ -523,9 +523,9 @@ export function CaarReportModal({
                   R122/R123 TG04 order-count reconciliation
                 </div>
                 <div className="mt-2">
-                  DSP period order count: {m02Calculation.dspOrderCount ?? "not persisted"}
+                  {m02Calculation.orderCountScope === "delivery_unique_orders" ? "DSP unique Delivery order count" : "DSP unique period order count"}: {m02Calculation.dspOrderCount ?? "not persisted"}
                 </div>
-                <div>POS-certified DSP order count: {m02Calculation.posCertifiedOrderCount ?? "not persisted"}</div>
+                <div>{m02Calculation.orderCountScope === "delivery_unique_orders" ? "POS-certified Delivery order count" : "POS-certified DSP order count"}: {m02Calculation.posCertifiedOrderCount ?? "not persisted"}</div>
                 <div className="mt-2 font-semibold">
                   Difference: {m02Calculation.orderCountDifference ?? "not persisted"} orders
                   {m02Calculation.orderCountDifferencePct !== null ? ` (${m02Calculation.orderCountDifferencePct.toFixed(2)}%)` : ""}
@@ -536,6 +536,11 @@ export function CaarReportModal({
                 <div className="mt-3 border-t border-[var(--border)] pt-3 text-[var(--muted)]">
                   Sales-basis diagnostic: settlement {formatMoneyLike(m02Calculation.reconciliationBasis)} versus POS {formatMoneyLike(m02Calculation.posBasis)}, a difference of {formatMoneyLike(m02Calculation.reconciliationDifference)} ({m02Calculation.reconciliationPct.toFixed(2)}%). This diagnostic does not replace the registry-required order-count gate.
                 </div>
+                {m02Calculation.orderCountScope === "delivery_unique_orders" ? (
+                  <div className="mt-2 text-[var(--muted)]">
+                    This POS report covers Delivery only. TG04 therefore compares unique DSP Delivery orders with POS Delivery orders; Pickup remains included in the separate commission calculation.
+                  </div>
+                ) : null}
               </div>
             </div>
             <ReconciliationBreakdown calculation={m02Calculation} />

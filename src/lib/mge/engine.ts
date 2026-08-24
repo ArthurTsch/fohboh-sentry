@@ -1092,14 +1092,8 @@ const M02_RULES: DeterministicRule[] = [
       const statement = context.statement?.metrics;
       const pos = context.pos?.metrics;
       if (!statement || !pos || residualVariance <= 1) return null;
-      const statementOrders = Math.max(
-        roundCurrency(numberValue(statement.orderCount)),
-        roundCurrency(numberValue(statement.transactionCount)),
-      );
-      const posOrders = Math.max(
-        roundCurrency(numberValue(pos.orderCount)),
-        roundCurrency(numberValue(pos.transactionCount)),
-      );
+      const { statementOrderCount: statementOrders, posOrderCount: posOrders } =
+        resolveComparableM02OrderCounts(statement, pos);
       if (statementOrders <= 0 || posOrders <= 0 || statementOrders <= posOrders) return null;
       const duplicateCount = statementOrders - posOrders;
       if (duplicateCount < 2) return null;
@@ -1230,16 +1224,10 @@ const M02_RULES: DeterministicRule[] = [
       const statement = context.statement?.metrics;
       const pos = context.pos?.metrics;
       if (!statement || !pos || residualVariance <= 1) return null;
-      const statementOrders = Math.max(
-        0,
-        numberValue(statement.orderCount) || numberValue(statement.transactionCount),
-      );
-      const posOrders = Math.max(
-        0,
-        numberValue(pos.orderCount) || numberValue(pos.transactionCount),
-      );
+      const { statementOrderCount: statementOrders, posOrderCount: posOrders } =
+        resolveComparableM02OrderCounts(statement, pos);
       const duplicateOrderCount = numberValue(statement.duplicateOrderCount);
-      const orderDelta = Math.max(0, Math.abs(statementOrders - posOrders) - duplicateOrderCount);
+      const orderDelta = Math.max(0, Math.abs(statementOrders - posOrders));
       const actualCommission = computeActualM02Commission(statement);
       if (statementOrders <= 0 || posOrders <= 0 || orderDelta < 3 || actualCommission <= 0) return null;
       const averageCommission = actualCommission / Math.max(statementOrders, 1);
@@ -1615,8 +1603,18 @@ export function scopeArtifactToCertificationMonth(
       deliveryCommissionAmount: numberValue(matchingMetrics?.deliveryCommissionAmount),
       deliveryFeeAmount: numberValue(matchingMetrics?.deliveryFeeAmount),
       deliveryOrderCount: numberValue(matchingMetrics?.deliveryOrderCount),
-      duplicateOrderCount: numberValue(matchingMetrics?.duplicateOrderCount),
-      duplicateTransactionCount: numberValue(matchingMetrics?.duplicateTransactionCount),
+      duplicateOrderCount:
+        matchingMetrics?.duplicateOrderCount !== undefined
+          ? numberValue(matchingMetrics.duplicateOrderCount)
+          : Object.keys(monthlyMetrics).length === 1 && matchingMetrics
+            ? numberValue(metrics.duplicateOrderCount)
+            : 0,
+      duplicateTransactionCount:
+        matchingMetrics?.duplicateTransactionCount !== undefined
+          ? numberValue(matchingMetrics.duplicateTransactionCount)
+          : Object.keys(monthlyMetrics).length === 1 && matchingMetrics
+            ? numberValue(metrics.duplicateTransactionCount)
+            : 0,
       errorChargeAmount: numberValue(matchingMetrics?.errorChargeAmount),
       feeAmount: numberValue(matchingMetrics?.feeAmount),
       marketingFeeAmount: numberValue(matchingMetrics?.marketingFeeAmount),
@@ -2209,12 +2207,12 @@ function buildCanonicalTrustGateCitations({
   const reconciliationDifferencePct = processorBasis > 0
     ? (reconciliationDifference / processorBasis) * 100
     : null;
-  const dspOrderCount = numberValue(
-    context.statement?.metrics?.orderCount || context.statement?.metrics?.transactionCount,
+  const comparableM02Orders = resolveComparableM02OrderCounts(
+    context.statement?.metrics,
+    context.pos?.metrics,
   );
-  const posCertifiedOrderCount = numberValue(
-    context.pos?.metrics?.orderCount || context.pos?.metrics?.transactionCount,
-  );
+  const dspOrderCount = comparableM02Orders.statementOrderCount;
+  const posCertifiedOrderCount = comparableM02Orders.posOrderCount;
   const orderCountDifference = Math.abs(dspOrderCount - posCertifiedOrderCount);
   const orderCountDifferencePct =
     dspOrderCount > 0 && posCertifiedOrderCount > 0
@@ -2274,6 +2272,7 @@ function buildCanonicalTrustGateCitations({
       pos_certified_order_count: roundInteger(posCertifiedOrderCount),
       order_count_difference: roundInteger(orderCountDifference),
       order_count_difference_percent: orderCountDifferencePct === null ? null : roundCurrency(orderCountDifferencePct),
+      order_count_scope: comparableM02Orders.scope,
       processor_basis: roundCurrency(processorBasis),
       processor_basis_label: "Gross card-processing volume grouped by fee-charge timing",
       settlement_basis_label: settlementTimingBasis
@@ -2456,12 +2455,12 @@ function computeTrustGateScores({
     statementBasis > 0 && posBasis > 0
       ? relativeDelta(statementBasis, posBasis) * 100
       : null;
-  const dspOrderCount = numberValue(
-    context.statement?.metrics?.orderCount || context.statement?.metrics?.transactionCount,
+  const comparableM02Orders = resolveComparableM02OrderCounts(
+    context.statement?.metrics,
+    context.pos?.metrics,
   );
-  const posCertifiedOrderCount = numberValue(
-    context.pos?.metrics?.orderCount || context.pos?.metrics?.transactionCount,
-  );
+  const dspOrderCount = comparableM02Orders.statementOrderCount;
+  const posCertifiedOrderCount = comparableM02Orders.posOrderCount;
   const orderCountGapPct =
     dspOrderCount > 0 && posCertifiedOrderCount > 0
       ? relativeDelta(dspOrderCount, posCertifiedOrderCount) * 100
@@ -3962,6 +3961,45 @@ function resolveComparableM02StatementBasis(statement?: Metrics, pos?: Metrics) 
   return Math.abs(deliveryBasis - posBasis) < Math.abs(totalBasis - posBasis)
     ? deliveryBasis
     : totalBasis;
+}
+
+function resolveComparableM02OrderCounts(statement?: Metrics, pos?: Metrics) {
+  const totalOrderCount = Math.max(
+    0,
+    numberValue(statement?.orderCount) || numberValue(statement?.transactionCount),
+  );
+  const duplicateOrderCount = Math.min(
+    totalOrderCount,
+    Math.max(0, numberValue(statement?.duplicateOrderCount)),
+  );
+  const posOrderCount = Math.max(
+    0,
+    numberValue(pos?.orderCount) || numberValue(pos?.transactionCount),
+  );
+  const totalBasis = numberValue(statement?.basisAmount);
+  const deliveryBasis = numberValue(statement?.deliveryBasisAmount);
+  const pickupBasis = numberValue(statement?.pickupBasisAmount);
+  const posBasis = numberValue(pos?.basisAmount);
+  const deliveryOnlyScope =
+    deliveryBasis > 0 &&
+    pickupBasis > 0 &&
+    posBasis > 0 &&
+    Math.abs(deliveryBasis - posBasis) < Math.abs(totalBasis - posBasis);
+
+  if (deliveryOnlyScope) {
+    const deliveryEventCount = Math.max(0, numberValue(statement?.deliveryOrderCount));
+    return {
+      posOrderCount,
+      scope: "delivery_unique_orders",
+      statementOrderCount: Math.max(0, deliveryEventCount - duplicateOrderCount),
+    };
+  }
+
+  return {
+    posOrderCount,
+    scope: "all_unique_orders",
+    statementOrderCount: Math.max(0, totalOrderCount - duplicateOrderCount),
+  };
 }
 
 function computeM02Recovery(

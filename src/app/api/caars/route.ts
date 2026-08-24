@@ -586,7 +586,7 @@ const TRUST_GATE_RULES: Record<string, string[]> = {
   TG10: ["R134"], TG11: ["R135", "R146"],
 };
 
-function buildScoreDeductions(rows: Array<{
+export function buildScoreDeductions(rows: Array<{
   rule_id: string;
   sample_evidence: unknown;
 }>): CaarScoreDeduction[] {
@@ -610,6 +610,26 @@ function buildScoreDeductions(rows: Array<{
     const supportingRows = rows.filter((row) => ruleIds.includes(row.rule_id));
     const samples = supportingRows.flatMap((row) => parseCitationSamples(row.sample_evidence));
     const evidence = samples.flatMap((sample) => {
+      if (
+        entry.gate === "TG04" &&
+        typeof sample.dsp_order_count === "number" &&
+        typeof sample.pos_certified_order_count === "number"
+      ) {
+        const difference = typeof sample.order_count_difference === "number"
+          ? sample.order_count_difference
+          : Math.abs(sample.dsp_order_count - sample.pos_certified_order_count);
+        const percent = typeof sample.order_count_difference_percent === "number"
+          ? sample.order_count_difference_percent
+          : null;
+        const salesContext =
+          typeof sample.processor_basis === "number" && typeof sample.pos_basis === "number"
+            ? ` Supporting sales bases were $${sample.processor_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })} and $${sample.pos_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}; those monetary values do not control the R122/R123 order-count gate.`
+            : "";
+        const deliveryOnly = sample.order_count_scope === "delivery_unique_orders";
+        const dspLabel = deliveryOnly ? "DSP unique Delivery order count" : "DSP unique period order count";
+        const posLabel = deliveryOnly ? "POS-certified Delivery order count" : "POS-certified DSP order count";
+        return [`${dspLabel} ${sample.dsp_order_count}; ${posLabel} ${sample.pos_certified_order_count}; difference ${difference} orders${percent === null ? "" : ` (${percent.toFixed(2)}%)`}.${salesContext}`];
+      }
       if (entry.gate === "TG04" && typeof sample.processor_basis === "number" && typeof sample.pos_basis === "number") {
         const difference = typeof sample.difference_amount === "number"
           ? sample.difference_amount
@@ -633,10 +653,17 @@ function buildScoreDeductions(rows: Array<{
     const pointsLost = Number((entry.weight_percent * (1 - entry.score / 100)).toFixed(2));
     const hasRequiredEvidence = entry.gate === "TG04"
       ? samples.some((sample) =>
-          typeof sample.processor_basis === "number" && sample.processor_basis > 0 &&
-          typeof sample.pos_basis === "number" && sample.pos_basis > 0 &&
-          typeof sample.difference_amount === "number" &&
-          typeof sample.difference_percent === "number",
+          (
+            typeof sample.dsp_order_count === "number" && sample.dsp_order_count > 0 &&
+            typeof sample.pos_certified_order_count === "number" && sample.pos_certified_order_count > 0 &&
+            typeof sample.order_count_difference === "number" &&
+            typeof sample.order_count_difference_percent === "number"
+          ) || (
+            typeof sample.processor_basis === "number" && sample.processor_basis > 0 &&
+            typeof sample.pos_basis === "number" && sample.pos_basis > 0 &&
+            typeof sample.difference_amount === "number" &&
+            typeof sample.difference_percent === "number"
+          ),
         )
       : evidence.length > 0;
     return [{

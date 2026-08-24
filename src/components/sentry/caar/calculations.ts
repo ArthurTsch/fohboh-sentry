@@ -21,6 +21,8 @@ export function deriveM02Calculation(
   const reconciliationSample = findReconciliationSample(ruleCitations);
   const reconciliationNumber = (key: string) =>
     typeof reconciliationSample?.[key] === "number" ? reconciliationSample[key] as number : null;
+  const reconciliationText = (key: string) =>
+    typeof reconciliationSample?.[key] === "string" ? reconciliationSample[key] as string : null;
   const reconciliationBasis = number("reconciliation_statement_basis");
   const posBasis = number("pos_basis_amount");
   const reconciliationDifference = number("reconciliation_difference");
@@ -35,6 +37,7 @@ export function deriveM02Calculation(
     dspOrderCount: reconciliationNumber("dsp_order_count"),
     orderCountDifference: reconciliationNumber("order_count_difference"),
     orderCountDifferencePct: reconciliationNumber("order_count_difference_percent"),
+    orderCountScope: reconciliationText("order_count_scope"),
     pickupBasis: number("pickup_basis_amount"),
     pickupRate: number("pickup_rate_pct"),
     posBasis,
