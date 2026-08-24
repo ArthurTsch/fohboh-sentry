@@ -8,6 +8,7 @@ import prisma from "@/lib/prisma";
 import { buildGeneratedUnitId } from "@/lib/restaurants/ids";
 import { resolveVendorKey } from "@/components/sentry/vendor-catalog";
 import { getScopedRestaurantWhere, getTeamAccountId } from "@/lib/auth/team-access";
+import { ensureNormalizedLocation } from "@/lib/restaurants/normalized-location";
 
 function isMissingSentryStateTable(error: unknown) {
   return (
@@ -379,6 +380,13 @@ export async function POST(request: Request) {
         throw error;
       }
     }
+
+    await ensureNormalizedLocation({
+      accountId: resolvedAccountId as string,
+      address: restaurant.location,
+      externalId: locationId,
+      name: restaurant.name,
+    });
 
     await writeAuditLog({
       action: "restaurant_created",

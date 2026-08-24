@@ -80,6 +80,25 @@ test("authenticated critical workflow smoke", async ({ page }) => {
   expect(missingFile.status()).toBe(400);
   await expect(missingFile.json()).resolves.toMatchObject({ error: expect.stringMatching(/file upload/i) });
 
+  const upload = await page.request.post("/api/v1/uploads", {
+    multipart: {
+      artifactKey: "m02-pos",
+      file: {
+        buffer: Buffer.from("channel,pos_net_sales,commission_variance\nUber Eats,100.00,0.00\n"),
+        mimeType: "text/csv",
+        name: "e2e-pos-summary.csv",
+      },
+      locationId: "E2E-LOC-001",
+      moduleId: "M02",
+      vendorKey: "uber-eats",
+      vendorName: "Uber Eats",
+    },
+  });
+  expect(upload.status()).toBe(200);
+  await expect(upload.json()).resolves.toMatchObject({
+    upload: { locationId: "E2E-LOC-001", moduleId: "M02" },
+  });
+
   const certification = await page.request.post("/api/v1/certifications/run", {
     data: {
       certificationMonth: "2026-06",

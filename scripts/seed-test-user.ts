@@ -26,7 +26,7 @@ async function main() {
       role: "SuperAdmin",
     },
   });
-  await prisma.customers.upsert({
+  const customer = await prisma.customers.upsert({
     where: { account_id: "e2e-test-account" },
     create: {
       account_id: "e2e-test-account",
@@ -49,6 +49,20 @@ async function main() {
       created_by: manager.id,
       name: "E2E Test Restaurant",
     },
+  });
+  await prisma.locations_v2.upsert({
+    where: {
+      customer_id_external_id: {
+        customer_id: customer.id,
+        external_id: "E2E-LOC-001",
+      },
+    },
+    create: {
+      customer_id: customer.id,
+      external_id: "E2E-LOC-001",
+      name: "E2E Test Restaurant",
+    },
+    update: { deleted_at: null, name: "E2E Test Restaurant" },
   });
   await prisma.account_memberships_v2.upsert({
     where: { manager_id: manager.id },

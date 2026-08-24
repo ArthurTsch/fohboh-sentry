@@ -18,6 +18,7 @@ import {
   isDeclaredRequestTooLarge,
   MAX_EVIDENCE_FILE_BYTES,
 } from "@/lib/uploads/request-limits";
+import { ensureNormalizedLocation } from "@/lib/restaurants/normalized-location";
 
 const DATABASE_READ_RETRY_DELAY_MS = 200;
 
@@ -26,6 +27,7 @@ type ScopedRestaurant = {
   created_by: number | null;
   id: number;
   location_id: string;
+  normalized_location_id: number | null;
   name: string;
   store_id: string | null;
   unit_id: string | null;
@@ -135,20 +137,41 @@ async function getScopedRestaurants(session: SessionState) {
   }
 
   const stateByRestaurantId = new Map(stateRows.map((row) => [row.restaurant_id, row]));
+  const locationRows = stateRows.length > 0
+    ? await retryDatabaseRead(() => prisma.locations_v2.findMany({
+        where: {
+          OR: stateRows.flatMap((state) => state.account_id
+            ? [{ external_id: state.location_id, customers: { account_id: state.account_id } }]
+            : []),
+        },
+        select: { customers: { select: { account_id: true } }, external_id: true, id: true },
+      }))
+    : [];
+  const normalizedByAccountAndExternalId = new Map(locationRows.map((location) => [
+    `${location.customers.account_id ?? ""}:${location.external_id}`,
+    location.id,
+  ]));
 
-  return restaurants.map<ScopedRestaurant>((restaurant) => ({
-    created_by: restaurant.created_by,
-    id: restaurant.id,
-    account_id: stateByRestaurantId.get(restaurant.id)?.account_id ?? null,
-    location_id:
-      stateByRestaurantId.get(restaurant.id)?.location_id?.trim() ||
+  return restaurants.map<ScopedRestaurant>((restaurant) => {
+    const state = stateByRestaurantId.get(restaurant.id);
+    const accountId = state?.account_id ?? null;
+    const locationId = state?.location_id?.trim() ||
       restaurant.unit_id?.trim() ||
       restaurant.store_id?.trim() ||
-      `LOC-DB-${restaurant.id}`,
-    name: restaurant.name,
-    store_id: restaurant.store_id,
-    unit_id: restaurant.unit_id,
-  }));
+      `LOC-DB-${restaurant.id}`;
+    return {
+      account_id: accountId,
+      created_by: restaurant.created_by,
+      id: restaurant.id,
+      location_id: locationId,
+      name: restaurant.name,
+      normalized_location_id: accountId
+        ? normalizedByAccountAndExternalId.get(`${accountId}:${locationId}`) ?? null
+        : null,
+      store_id: restaurant.store_id,
+      unit_id: restaurant.unit_id,
+    };
+  });
 }
 
 function sanitizeFileName(fileName: string) {
@@ -228,7 +251,9 @@ export async function GET() {
   try {
     const session = await requireManagerSession();
     const restaurants = await getScopedRestaurants(session);
-    const restaurantIds = restaurants.map((restaurant) => restaurant.id);
+    const restaurantIds = restaurants.flatMap((restaurant) =>
+      restaurant.normalized_location_id ? [restaurant.normalized_location_id] : [],
+    );
 
     if (restaurantIds.length === 0) {
       return NextResponse.json({ uploads: [] });
@@ -252,7 +277,9 @@ export async function GET() {
       },
     });
 
-    const restaurantById = new Map(restaurants.map((restaurant) => [restaurant.id, restaurant]));
+    const restaurantById = new Map(restaurants.flatMap((restaurant) =>
+      restaurant.normalized_location_id ? [[restaurant.normalized_location_id, restaurant] as const] : [],
+    ));
 
     return NextResponse.json({
       uploads: uploads
@@ -420,6 +447,17 @@ export async function POST(request: Request) {
         { status: 404 },
       ), requestContext);
     }
+    if (!restaurant.account_id) {
+      return withRequestHeaders(NextResponse.json(
+        { error: "Upload target is missing its customer account assignment." },
+        { status: 409 },
+      ), requestContext);
+    }
+    const normalizedLocationId = restaurant.normalized_location_id ?? (await ensureNormalizedLocation({
+      accountId: restaurant.account_id,
+      externalId: restaurant.location_id,
+      name: restaurant.name,
+    })).id;
 
     const primaryTarget = { artifactKey, moduleId, vendorKey, vendorName };
     let uploadTargets = [primaryTarget];
@@ -486,7 +524,7 @@ export async function POST(request: Request) {
         const existing = await tx.uploads_v2.findFirst({
           where: {
             artifact_key: target.artifactKey,
-            location_id: restaurant.id,
+            location_id: normalizedLocationId,
             module: target.moduleId,
             superseded_by: null,
             vendor: target.vendorKey,
@@ -500,7 +538,7 @@ export async function POST(request: Request) {
             byte_count: BigInt(buffer.byteLength),
             file_name: file.name,
             file_purpose: getArtifactPurpose(target.artifactKey),
-            location_id: restaurant.id,
+            location_id: normalizedLocationId,
             module: target.moduleId,
             page_count: target.validation.pageCount ?? null,
             row_count: target.validation.rows ?? null,
@@ -527,7 +565,7 @@ export async function POST(request: Request) {
         entityId: uploads.map((upload) => upload.id).join(","),
         entityType: "uploads_v2",
         ipAddress: requestContext.ipAddress,
-        locationId: restaurant.id,
+        locationId: normalizedLocationId,
         metadata: {
           artifactKey,
           evidenceLinks: validatedTargets.length,
@@ -641,7 +679,9 @@ export async function DELETE(request: Request) {
         );
       }
 
-      const restaurant = scopedRestaurants.find((item) => item.id === upload.location_id);
+      const restaurant = scopedRestaurants.find(
+        (item) => item.normalized_location_id === upload.location_id,
+      );
       if (!restaurant) {
         return withRequestHeaders(
           NextResponse.json({ error: "Forbidden." }, { status: 403 }),
@@ -675,7 +715,7 @@ export async function DELETE(request: Request) {
             entityId: String(upload.id),
             entityType: "uploads_v2",
             ipAddress: requestContext.ipAddress,
-            locationId: restaurant.id,
+            locationId: upload.location_id,
             metadata: {
               artifactKey: upload.artifact_key,
               moduleId: upload.module,
@@ -711,10 +751,21 @@ export async function DELETE(request: Request) {
         requestContext,
       );
     }
+    if (!restaurant.account_id) {
+      return withRequestHeaders(NextResponse.json(
+        { error: "Upload target is missing its customer account assignment." },
+        { status: 409 },
+      ), requestContext);
+    }
+    const normalizedLocationId = restaurant.normalized_location_id ?? (await ensureNormalizedLocation({
+      accountId: restaurant.account_id,
+      externalId: restaurant.location_id,
+      name: restaurant.name,
+    })).id;
 
     const activeUploads = await prisma.uploads_v2.findMany({
       where: {
-        location_id: restaurant.id,
+        location_id: normalizedLocationId,
         superseded_by: null,
       },
       select: {
@@ -740,7 +791,7 @@ export async function DELETE(request: Request) {
           entityId: locationId,
           entityType: "location_upload_set",
           ipAddress: requestContext.ipAddress,
-          locationId: restaurant.id,
+          locationId: normalizedLocationId,
           metadata: {
             removedUploadCount: activeUploads.length,
             requestId: requestContext.requestId,
