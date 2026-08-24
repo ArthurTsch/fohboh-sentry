@@ -51,6 +51,24 @@ describe("tenant restaurant scope against PostgreSQL", () => {
     expect(rows.map((row) => row.id)).toEqual([tenantARestaurantIds[1]]);
   });
 
+  it("applies selected-location changes to an existing session immediately", async () => {
+    const session = { accountId: "test-tenant-a", email: "manager@test", managerId: managerIds.manager, role: "Manager" as const };
+    const membership = await prisma.account_memberships_v2.findFirstOrThrow({ where: { manager_id: managerIds.manager } });
+    await prisma.account_member_locations_v2.deleteMany({ where: { membership_id: membership.id } });
+    await prisma.account_member_locations_v2.create({
+      data: { membership_id: membership.id, restaurant_id: tenantARestaurantIds[0] },
+    });
+
+    const changedWhere = await getScopedRestaurantWhere(session);
+    const changedRows = await prisma.restaurants.findMany({ where: changedWhere, select: { id: true } });
+    expect(changedRows.map((row) => row.id)).toEqual([tenantARestaurantIds[0]]);
+
+    await prisma.account_member_locations_v2.deleteMany({ where: { membership_id: membership.id } });
+    await prisma.account_member_locations_v2.create({
+      data: { membership_id: membership.id, restaurant_id: tenantARestaurantIds[1] },
+    });
+  });
+
   it("limits a Viewer to the assigned same-tenant restaurant", async () => {
     const where = await getScopedRestaurantWhere({ accountId: "test-tenant-a", email: "viewer@test", managerId: managerIds.viewer, role: "Viewer" });
     const rows = await prisma.restaurants.findMany({ where, select: { id: true } });

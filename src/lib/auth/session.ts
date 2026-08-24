@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import type { SessionState } from "@/components/sentry/types";
+import { revalidateManagerSession } from "@/lib/auth/manager-auth";
 
 export const MANAGER_SESSION_COOKIE_NAME = "sentry-manager-session";
 
@@ -52,6 +53,7 @@ function decodePayload(value: string): SessionPayload | null {
       typeof parsed !== "object" ||
       typeof parsed.email !== "string" ||
       typeof parsed.role !== "string" ||
+      typeof parsed.sessionVersion !== "number" ||
       typeof parsed.exp !== "number"
     ) {
       return null;
@@ -97,7 +99,8 @@ export function parseSessionCookieValue(rawValue: string | undefined) {
 export async function getManagerSession() {
   const cookieStore = await cookies();
   try {
-    return parseSessionCookieValue(cookieStore.get(MANAGER_SESSION_COOKIE_NAME)?.value);
+    const parsed = parseSessionCookieValue(cookieStore.get(MANAGER_SESSION_COOKIE_NAME)?.value);
+    return parsed ? await revalidateManagerSession(parsed) : null;
   } catch (error) {
     console.error("Session cookie parse failed:", error);
     return null;

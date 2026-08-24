@@ -1,8 +1,12 @@
 import { compare, hash } from "bcryptjs";
 import { NextResponse } from "next/server";
-import { Prisma } from "@/app/generated/prisma/client";
 import prisma from "@/lib/prisma";
-import { requireManagerSession } from "@/lib/auth/session";
+import {
+  createSessionCookieValue,
+  getSessionCookieOptions,
+  MANAGER_SESSION_COOKIE_NAME,
+  requireManagerSession,
+} from "@/lib/auth/session";
 import { writeAuditLog } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
 
@@ -64,14 +68,16 @@ export async function POST(request: Request) {
     }
 
     const nextHash = await hash(newPassword, 12);
-    await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw(Prisma.sql`
-        UPDATE public.managers
-        SET
-          password_hash = ${nextHash},
-          updated_at = now()
-        WHERE id = ${session.managerId ?? -1}
-      `);
+    const updatedManager = await prisma.$transaction(async (tx) => {
+      const updated = await tx.managers.update({
+        where: { id: session.managerId ?? -1 },
+        data: {
+          password_hash: nextHash,
+          session_version: { increment: 1 },
+          updated_at: new Date(),
+        },
+        select: { session_version: true },
+      });
 
       await writeAuditLog(
         {
@@ -88,9 +94,20 @@ export async function POST(request: Request) {
         },
         tx,
       );
+
+      return updated;
     });
 
-    return withRequestHeaders(NextResponse.json({ ok: true }), context);
+    const response = NextResponse.json({ ok: true });
+    response.cookies.set(
+      MANAGER_SESSION_COOKIE_NAME,
+      createSessionCookieValue({
+        ...session,
+        sessionVersion: updatedManager.session_version,
+      }),
+      getSessionCookieOptions(),
+    );
+    return withRequestHeaders(response, context);
   } catch {
     return withRequestHeaders(
       NextResponse.json({ error: "Unable to update password right now." }, { status: 500 }),

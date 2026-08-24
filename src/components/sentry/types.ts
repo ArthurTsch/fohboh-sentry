@@ -570,6 +570,7 @@ export type SessionState = {
   managerId?: number | null;
   name?: string;
   role: Role;
+  sessionVersion?: number;
   teamRole?: TeamRole | null;
 };
 

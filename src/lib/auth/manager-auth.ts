@@ -2,7 +2,7 @@ import { compare } from "bcryptjs";
 import { Prisma } from "@/app/generated/prisma/client";
 import prisma from "@/lib/prisma";
 import type { Role, SessionState } from "@/components/sentry/types";
-import { normalizeTeamRole } from "@/lib/auth/team-access";
+import { mapTeamRoleToAppRole, normalizeTeamRole } from "@/lib/auth/team-access";
 
 type ManagerRecord = {
   active: boolean | null;
@@ -12,14 +12,16 @@ type ManagerRecord = {
   id: number;
   password_hash: string;
   role: string;
+  session_version: number;
 };
 
 type MembershipRecord = {
+  status: string;
   account_id: string;
   team_role: string;
 };
 
-function mapManagerRole(role: string): Role | null {
+export function mapManagerRole(role: string): Role | null {
   const normalizedRole = role.trim().toLowerCase();
 
   if (normalizedRole === "wgs manager") return "WGS Manager";
@@ -35,6 +37,61 @@ function mapManagerRole(role: string): Role | null {
   }
 
   return null;
+}
+
+async function getCurrentMembership(managerId: number) {
+  const rows = await prisma.$queryRaw<MembershipRecord[]>(Prisma.sql`
+    SELECT account_id, team_role, status
+    FROM public.account_memberships_v2
+    WHERE manager_id = ${managerId}
+    ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, updated_at DESC, id DESC
+    LIMIT 1
+  `);
+
+  return rows[0] ?? null;
+}
+
+export async function revalidateManagerSession(session: SessionState): Promise<SessionState | null> {
+  if (typeof session.managerId !== "number" || typeof session.sessionVersion !== "number") {
+    return null;
+  }
+
+  const manager = await prisma.managers.findUnique({
+    where: { id: session.managerId },
+    select: {
+      active: true,
+      email: true,
+      full_name: true,
+      id: true,
+      role: true,
+      session_version: true,
+    },
+  });
+
+  if (!manager || manager.active === false || manager.session_version !== session.sessionVersion) {
+    return null;
+  }
+
+  const managerRole = mapManagerRole(manager.role);
+  if (!managerRole) return null;
+
+  const membership = await getCurrentMembership(manager.id);
+  const activeMembership = membership?.status === "active" ? membership : null;
+  const teamRole = normalizeTeamRole(activeMembership?.team_role);
+  const globalRole = managerRole === "WGS Manager" || managerRole === "SuperAdmin";
+
+  if (!globalRole && membership && !activeMembership) return null;
+  if (!globalRole && activeMembership && !teamRole) return null;
+
+  return {
+    accountId: activeMembership?.account_id ?? null,
+    email: manager.email,
+    managerId: manager.id,
+    name: manager.full_name?.trim() || undefined,
+    role: !globalRole && teamRole ? mapTeamRoleToAppRole(teamRole) : managerRole,
+    sessionVersion: manager.session_version,
+    teamRole,
+  };
 }
 
 export function resolveManagerAccountId(email: string, role: Role): string | null {
@@ -72,6 +129,7 @@ export async function authenticateManager(
       id: true,
       password_hash: true,
       role: true,
+      session_version: true,
     },
   })) as ManagerRecord | null;
 
@@ -99,25 +157,28 @@ export async function authenticateManager(
     return { ok: false, error: "Invalid email or password.", status: 401 };
   }
 
-  const membershipRows = await prisma.$queryRaw<MembershipRecord[]>(Prisma.sql`
-    SELECT account_id, team_role
-    FROM public.account_memberships_v2
-    WHERE manager_id = ${manager.id}
-      AND status = 'active'
-    LIMIT 1
-  `).catch(() => []);
+  const membership = await getCurrentMembership(manager.id);
+  const activeMembership = membership?.status === "active" ? membership : null;
+  const normalizedTeamRole = normalizeTeamRole(activeMembership?.team_role);
+  const globalRole = appRole === "WGS Manager" || appRole === "SuperAdmin";
 
-  const membership = membershipRows[0] ?? null;
-  const normalizedTeamRole = normalizeTeamRole(membership?.team_role);
+  if (!globalRole && membership && !activeMembership) {
+    return { ok: false, error: "This manager's team access has been revoked.", status: 403 };
+  }
+
+  if (!globalRole && activeMembership && !normalizedTeamRole) {
+    return { ok: false, error: "This manager's team role is invalid.", status: 403 };
+  }
 
   return {
     ok: true,
     session: {
-      accountId: membership?.account_id ?? null,
+      accountId: activeMembership?.account_id ?? null,
       email: manager.email,
       managerId: manager.id,
       name: manager.full_name?.trim() || undefined,
-      role: appRole,
+      role: !globalRole && normalizedTeamRole ? mapTeamRoleToAppRole(normalizedTeamRole) : appRole,
+      sessionVersion: manager.session_version,
       teamRole: normalizedTeamRole,
     },
   };

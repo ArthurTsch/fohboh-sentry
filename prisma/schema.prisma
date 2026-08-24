@@ -12,6 +12,7 @@ model managers {
   email               String    @unique @db.VarChar(255)
   password_hash       String    @db.VarChar(255)
   role                String    @db.VarChar(50)
+  session_version     Int       @default(1)
   active              Boolean?  @default(true)
   email_verified      Boolean?  @default(false)
   full_name           String?   @db.VarChar(100)
