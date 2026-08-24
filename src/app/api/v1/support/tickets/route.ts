@@ -13,6 +13,11 @@ import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/requ
 import prisma from "@/lib/prisma";
 import { prepareSupportTicketEmail } from "@/lib/support/email";
 import {
+  canManageSupportTickets,
+  getSupportTicketAccountId,
+  getSupportTicketScope,
+} from "@/lib/support/authorization";
+import {
   getSupportTicketPriority,
   normalizeEmailDeliveryStatus,
   normalizeTicketStatus,
@@ -133,9 +138,8 @@ export async function GET(request: Request) {
     const session = await requireManagerSession();
     const url = new URL(request.url);
     const queueMode = url.searchParams.get("queue") === "1";
-    const accountId = session.accountId?.trim() || null;
 
-    if (queueMode && session.role !== "WGS Manager" && session.role !== "SuperAdmin" && session.role !== "Admin") {
+    if (queueMode && !canManageSupportTickets(session)) {
       return withRequestHeaders(
         NextResponse.json({ error: "This account cannot view the support queue." }, { status: 403 }),
         requestContext,
@@ -144,19 +148,12 @@ export async function GET(request: Request) {
 
     const tickets = await prisma.support_tickets_v2.findMany({
       where: {
-        ...(queueMode
-          ? {
-              status: {
-                in: ["open", "in_review", "waiting_on_customer"],
-              },
-            }
-          : {
-              OR: [
-                ...(accountId ? [{ account_id: accountId }] : []),
-                ...(typeof session.managerId === "number" ? [{ created_by: session.managerId }] : []),
-                { requester_email: session.email },
-              ],
-            }),
+        AND: [
+          getSupportTicketScope(session),
+          ...(queueMode
+            ? [{ status: { in: ["open", "in_review", "waiting_on_customer"] } }]
+            : []),
+        ],
       },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],
       select: {
@@ -222,6 +219,7 @@ export async function POST(request: Request) {
       contentType.includes("multipart/form-data")
         ? await parseMultipartTicketRequest(request, externalId, session.accountId || null)
         : await parseJsonTicketRequest(request, session.accountId || null);
+    parsed.accountId = getSupportTicketAccountId(session, parsed.accountId);
 
     if (!parsed.subject) {
       return withRequestHeaders(

@@ -3,6 +3,10 @@ import { requireManagerSession } from "@/lib/auth/session";
 import { writeAuditLog } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
 import prisma from "@/lib/prisma";
+import {
+  canManageSupportTickets,
+  getSupportTicketScope,
+} from "@/lib/support/authorization";
 
 function getAuthErrorResponse(error: unknown) {
   if (!(error instanceof Error)) return null;
@@ -22,7 +26,7 @@ export async function PATCH(
   const requestContext = getRequestContextFromRequest(request);
   try {
     const session = await requireManagerSession();
-    if (session.role !== "WGS Manager" && session.role !== "SuperAdmin" && session.role !== "Admin") {
+    if (!canManageSupportTickets(session)) {
       return withRequestHeaders(
         NextResponse.json({ error: "This account cannot resolve support tickets." }, { status: 403 }),
         requestContext,
@@ -30,16 +34,28 @@ export async function PATCH(
     }
 
     const { ticketId } = await context.params;
-    const ticket = await prisma.support_tickets_v2.update({
+    const resolvedAt = new Date();
+    const result = await prisma.support_tickets_v2.updateMany({
       where: {
-        external_id: ticketId,
+        AND: [{ external_id: ticketId }, getSupportTicketScope(session)],
       },
       data: {
-        resolved_at: new Date(),
+        resolved_at: resolvedAt,
         resolved_by: session.managerId ?? null,
         status: "resolved",
-        updated_at: new Date(),
+        updated_at: resolvedAt,
       },
+    });
+
+    if (result.count === 0) {
+      return withRequestHeaders(
+        NextResponse.json({ error: "Support ticket not found." }, { status: 404 }),
+        requestContext,
+      );
+    }
+
+    const ticket = await prisma.support_tickets_v2.findUniqueOrThrow({
+      where: { external_id: ticketId },
       select: {
         external_id: true,
         issue: true,

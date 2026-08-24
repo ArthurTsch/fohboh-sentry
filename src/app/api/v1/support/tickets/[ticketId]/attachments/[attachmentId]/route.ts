@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireManagerSession } from "@/lib/auth/session";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
 import prisma from "@/lib/prisma";
+import { getSupportTicketScope } from "@/lib/support/authorization";
 import { parseSupportTicketIssue } from "@/lib/support/tickets";
 import { readUploadBlob } from "@/lib/uploads/storage";
 
@@ -24,22 +25,10 @@ export async function GET(
   try {
     const session = await requireManagerSession();
     const { attachmentId, ticketId } = await context.params;
-    const accountId = session.accountId?.trim() || null;
-    const privileged =
-      session.role === "WGS Manager" || session.role === "SuperAdmin" || session.role === "Admin";
 
     const ticket = await prisma.support_tickets_v2.findFirst({
       where: {
-        external_id: ticketId,
-        ...(privileged
-          ? {}
-          : {
-              OR: [
-                ...(accountId ? [{ account_id: accountId }] : []),
-                ...(typeof session.managerId === "number" ? [{ created_by: session.managerId }] : []),
-                { requester_email: session.email },
-              ],
-            }),
+        AND: [{ external_id: ticketId }, getSupportTicketScope(session)],
       },
       select: {
         issue: true,
