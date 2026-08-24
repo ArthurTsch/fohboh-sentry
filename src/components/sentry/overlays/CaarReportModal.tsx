@@ -520,17 +520,21 @@ export function CaarReportModal({
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
                 <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
-                  TG04 like-for-like comparison
+                  R122/R123 TG04 order-count reconciliation
                 </div>
                 <div className="mt-2">
-                  Settlement comparison basis: {formatMoneyLike(m02Calculation.reconciliationBasis)}
+                  DSP period order count: {m02Calculation.dspOrderCount ?? "not persisted"}
                 </div>
-                <div>POS comparison basis: {formatMoneyLike(m02Calculation.posBasis)}</div>
+                <div>POS-certified DSP order count: {m02Calculation.posCertifiedOrderCount ?? "not persisted"}</div>
                 <div className="mt-2 font-semibold">
-                  Difference: {formatMoneyLike(m02Calculation.reconciliationDifference)} ({m02Calculation.reconciliationPct.toFixed(2)}%)
+                  Difference: {m02Calculation.orderCountDifference ?? "not persisted"} orders
+                  {m02Calculation.orderCountDifferencePct !== null ? ` (${m02Calculation.orderCountDifferencePct.toFixed(2)}%)` : ""}
                 </div>
                 <div className="mt-1 text-[var(--muted)]">
-                  Pickup remains in the fee calculation even when the POS report represents delivery-channel sales only.
+                  TG04 score: {m02Calculation.tg04Score ?? "not persisted"}/100. R122 passes within ±1%; R123 fails above 5%.
+                </div>
+                <div className="mt-3 border-t border-[var(--border)] pt-3 text-[var(--muted)]">
+                  Sales-basis diagnostic: settlement {formatMoneyLike(m02Calculation.reconciliationBasis)} versus POS {formatMoneyLike(m02Calculation.posBasis)}, a difference of {formatMoneyLike(m02Calculation.reconciliationDifference)} ({m02Calculation.reconciliationPct.toFixed(2)}%). This diagnostic does not replace the registry-required order-count gate.
                 </div>
               </div>
             </div>
@@ -555,17 +559,17 @@ export function CaarReportModal({
                 <div>
                   <div className="font-semibold text-[var(--text)]">Reconciliation formula</div>
                   <div className="mt-1 font-[family-name:var(--font-mono)] text-xs leading-6">
-                    comparable settlement basis = the settlement scope closest to the governed POS channel scope
+                    TG04 order-count difference = |DSP period orders - POS-certified DSP orders|
                     <br />
-                    difference = |comparable settlement basis − POS basis|
+                    TG04 difference % = order-count difference / max(DSP orders, POS orders) × 100
                     <br />
-                    difference % = difference ÷ comparable settlement basis × 100
+                    R122 pass ≤ 1% · partial band &gt; 1% and ≤ 5% · R123 fail &gt; 5%
                   </div>
                 </div>
               </div>
               <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
                 <span className="font-semibold text-[var(--text)]">Why the scopes differ:</span>{" "}
-                the settlement is the authoritative source for delivery and pickup commissions. The POS report is used as an independent sales comparison. When that POS report contains delivery-channel sales only, TG04 compares it with settlement delivery sales only; pickup sales remain fully included in the fee test.
+                the settlement remains the authoritative source for delivery and pickup commissions. TG04 independently compares the DSP order count with the POS-certified DSP order count, as required by R122/R123. Monetary sales and payout comparisons remain supporting diagnostics.
               </div>
               <div className="mt-3 font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.14em] text-[var(--muted)]">
                 Audit lineage: R016 commission reconstruction · R122/R123 TG04 reconciliation · persisted certification-month metrics
@@ -1129,7 +1133,7 @@ const SIMPLE_RULE_REASONS: Record<string, string> = {
   R118: "The required source files passed the authenticity checks, so TG02 received its recorded score. This is a score record, not another failure.",
   R120: "The required vendor and contract terms were found. This is a contract-check record, not a problem.",
   R121: "No contract expiration date shows that the contract had expired during this period. This is a tracking record, not a problem.",
-  R122: "The processor total and POS total differ by more than the allowed limit, so TG04 received its recorded score. The exact amounts appear in the Score Deduction Ledger.",
+  R122: "For M02, TG04 compares the DSP period order count with the POS-certified DSP order count. Counts within ±1% receive full credit; the persisted calculation section shows both counts.",
   R126: "The app checked whether all required files cover the selected month. This record stores the resulting TG06 score.",
   R128: "The app calculated the fee-check score from the reviewed fees and proven variance. This record stores the resulting TG07 score.",
   R129: "The fee difference is within the allowed range. This is a passed calculation record, not a problem.",
@@ -2402,7 +2406,7 @@ const TRUST_GATE_HELP: Record<string, { name: string; purpose: string; scoring: 
   TG01: { name: "Data Completeness", purpose: "Checks whether the required fields and core records for the active module are present.", scoring: "Full credit requires at least 90% governed data completeness; missing POS data caps the result." },
   TG02: { name: "Source Authenticity", purpose: "Checks that required source files exist and carry intact persisted integrity hashes.", scoring: "Full credit requires complete authenticated source evidence; partial provenance or a missing critical source reduces the gate." },
   TG03: { name: "Vendor Profile Currency", purpose: "Checks that governed contract or vendor-profile terms exist and are valid for the certification period.", scoring: "Missing terms score zero; an explicitly expired contract is partial; complete, unexpired terms receive full credit." },
-  TG04: { name: "Transaction-Basis Reconciliation", purpose: "Compares independent processor and POS totals for the same period. A payout or batch schedule is instead shown as settlement-timing context.", scoring: "Comparable processor/POS gaps up to 1% receive full credit, 1–5% receive partial credit, and gaps above 5% score zero. Differences caused by fee-charge timing versus settlement timing do not reduce this gate." },
+  TG04: { name: "POS Reconciliation", purpose: "For M02, compares the DSP period order count with the POS-certified DSP order count as required by R122/R123. Other modules retain their governed transaction-basis comparison.", scoring: "Order-count gaps up to 1% receive full credit, 1–5% receive partial credit, and gaps above 5% fail TG04. Monetary sales and payout-to-bank comparisons remain separate diagnostics." },
   TG05: { name: "Duplicate Absence", purpose: "Checks the governed transaction set for duplicate or duplicate-like records.", scoring: "No duplicates receive full credit; detected duplicates reduce the gate according to the observed duplicate rate." },
   TG06: { name: "Period Coverage", purpose: "Checks whether all required artifacts cover the selected certification period, including monthly bank evidence.", scoring: "A fully governed monthly package receives full credit; present but incompletely governed or missing artifacts receive partial credit." },
   TG07: { name: "Fee Legitimacy", purpose: "Measures whether calculated fees agree with governed contract terms and the reviewed fee volume.", scoring: "The gate is weighted by the certified fee-variance percentage; larger supported variances reduce the score." },

@@ -21,7 +21,7 @@ function artifact(
 }
 
 describe("M02 citation consistency", () => {
-  it("uses TG04 for R123, treats order-only duplicates as review, and keeps monetary findings non-blocking", () => {
+  it("fails TG04 under R123 when the POS-to-DSP order-count gap exceeds 5%", () => {
     const result = runDeterministicModuleEngine({
       artifacts: [
         artifact("m02-settlement", "CSV", {
@@ -61,13 +61,18 @@ describe("M02 citation consistency", () => {
     const citation = (ruleId: string) => result.ruleCitations.find((row) => row.ruleId === ruleId);
 
     expect(result.dimensions["Cross-System Reconciliation"]).toBe(50);
-    expect(result.trustGates.TG04.scorePct).toBe(100);
+    expect(result.trustGates.TG04.scorePct).toBe(0);
     expect(result.trustGates.TG05.scorePct).toBe(100);
     expect(citation("R010")?.disposition).toBe("informational");
     expect(citation("R019")?.disposition).toBe("monetary");
-    expect(citation("R123")?.disposition).toBe("passed");
+    expect(citation("R123")?.disposition).toBe("blocking");
     expect(citation("R125")?.disposition).toBe("passed");
-    expect(citation("R123")?.firedCount).toBe(0);
+    expect(citation("R123")?.firedCount).toBe(1);
+    expect(citation("R122")?.sampleEvidence[0]).toMatchObject({
+      dsp_order_count: 152,
+      order_count_difference: 12,
+      pos_certified_order_count: 140,
+    });
     expect(citation("R122")?.sampleEvidence[0]).toMatchObject({
       bank_basis: 4_783.38,
       bank_score_contribution: 0,
@@ -77,8 +82,8 @@ describe("M02 citation consistency", () => {
       reconciliation_total_score: 50,
     });
     expect(citation("R125")?.firedCount).toBe(0);
-    expect(result.ruleCitations.filter((row) => row.disposition === "blocking")).toEqual([]);
-    expect(result.ready).toBe(true);
+    expect(result.ruleCitations.filter((row) => row.disposition === "blocking").map((row) => row.ruleId)).toContain("R123");
+    expect(result.ready).toBe(false);
   });
 
   it("does not turn a detected recovery condition with zero attributed variance into a blocker", () => {
@@ -116,6 +121,7 @@ describe("M02 citation consistency", () => {
 
     const refund = result.ruleCitations.find((citation) => citation.ruleId === "R019");
     expect(result.recoveryValue).toBe(0);
+    expect(result.trustGates.TG04.scorePct).toBe(100);
     expect(refund?.varianceCents).toBe(0);
     expect(refund?.disposition).toBe("informational");
     expect(result.ruleCitations.some((citation) => citation.disposition === "blocking")).toBe(false);

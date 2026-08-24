@@ -2209,6 +2209,17 @@ function buildCanonicalTrustGateCitations({
   const reconciliationDifferencePct = processorBasis > 0
     ? (reconciliationDifference / processorBasis) * 100
     : null;
+  const dspOrderCount = numberValue(
+    context.statement?.metrics?.orderCount || context.statement?.metrics?.transactionCount,
+  );
+  const posCertifiedOrderCount = numberValue(
+    context.pos?.metrics?.orderCount || context.pos?.metrics?.transactionCount,
+  );
+  const orderCountDifference = Math.abs(dspOrderCount - posCertifiedOrderCount);
+  const orderCountDifferencePct =
+    dspOrderCount > 0 && posCertifiedOrderCount > 0
+      ? relativeDelta(dspOrderCount, posCertifiedOrderCount) * 100
+      : null;
   const settlementTimingBasis = usesSettlementTimingBasis(context);
   const reconciliationBreakdown = resolveCrossSystemReconciliationBreakdown(context);
 
@@ -2256,9 +2267,13 @@ function buildCanonicalTrustGateCitations({
         : `TG04 POS reconciliation resolved at ${trustGates.TG04.scorePct}.`,
       difference_amount: roundCurrency(reconciliationDifference),
       difference_percent: reconciliationDifferencePct === null ? null : roundCurrency(reconciliationDifferencePct),
+      dsp_order_count: roundInteger(dspOrderCount),
       gross_settled_batches: roundCurrency(posBasis),
       net_settled_batches: roundCurrency(numberValue(context.pos?.metrics?.payoutAmount)),
       pos_basis: roundCurrency(posBasis),
+      pos_certified_order_count: roundInteger(posCertifiedOrderCount),
+      order_count_difference: roundInteger(orderCountDifference),
+      order_count_difference_percent: orderCountDifferencePct === null ? null : roundCurrency(orderCountDifferencePct),
       processor_basis: roundCurrency(processorBasis),
       processor_basis_label: "Gross card-processing volume grouped by fee-charge timing",
       settlement_basis_label: settlementTimingBasis
@@ -2441,6 +2456,20 @@ function computeTrustGateScores({
     statementBasis > 0 && posBasis > 0
       ? relativeDelta(statementBasis, posBasis) * 100
       : null;
+  const dspOrderCount = numberValue(
+    context.statement?.metrics?.orderCount || context.statement?.metrics?.transactionCount,
+  );
+  const posCertifiedOrderCount = numberValue(
+    context.pos?.metrics?.orderCount || context.pos?.metrics?.transactionCount,
+  );
+  const orderCountGapPct =
+    dspOrderCount > 0 && posCertifiedOrderCount > 0
+      ? relativeDelta(dspOrderCount, posCertifiedOrderCount) * 100
+      : null;
+  const tg04GapPct = context.moduleId === "M02" ? orderCountGapPct : reconciliationGapPct;
+  const tg04EvidenceReady = context.moduleId === "M02"
+    ? orderCountGapPct !== null
+    : dimensions["Cross-System Reconciliation"] > 0 && reconciliationGapPct !== null;
   const settlementTimingBasis = usesSettlementTimingBasis(context);
   const contractExpirationDate = parseDateValue(
     context.contract?.expiration_date ||
@@ -2516,27 +2545,35 @@ function computeTrustGateScores({
   );
 
   const tg04Score =
-    dimensions["Cross-System Reconciliation"] <= 0 || reconciliationGapPct === null
+    !tg04EvidenceReady || tg04GapPct === null
       ? 0
       : settlementTimingBasis
         ? 100
-      : reconciliationGapPct <= 1
+      : tg04GapPct <= 1
         ? 100
-        : reconciliationGapPct > 5
+        : tg04GapPct > 5
           ? 0
-          : roundInteger(100 - ((reconciliationGapPct - 1) / 4) * 100);
+          : roundInteger(100 - ((tg04GapPct - 1) / 4) * 100);
   const tg04 = buildTrustGateScore(
     "TG04",
     tg04Score,
-    dimensions["Cross-System Reconciliation"] <= 0 || reconciliationGapPct === null
-      ? "POS and source evidence could not be reconciled for the active period."
+    !tg04EvidenceReady || tg04GapPct === null
+      ? context.moduleId === "M02"
+        ? "DSP and POS-certified order counts could not be reconciled for the active period."
+        : "POS and source evidence could not be reconciled for the active period."
       : settlementTimingBasis
         ? "The Toast payout export is a settlement schedule, not an independent POS sales basis. Its difference from processing volume is recorded as timing context and does not reduce TG04."
-      : reconciliationGapPct <= 1
-        ? "POS-to-source reconciliation is within the ±1% tolerance band."
-        : reconciliationGapPct > 5
-          ? "POS-to-source reconciliation gap exceeds 5% and fails the trust gate."
-          : "POS-to-source reconciliation remains in the partial band between 1% and 5%.",
+      : context.moduleId === "M02"
+        ? tg04GapPct <= 1
+          ? "POS-certified order count reconciles to the DSP order count within the ±1% R122 tolerance."
+          : tg04GapPct > 5
+            ? "POS-to-DSP order-count reconciliation exceeds 5% and fails TG04 under R123."
+            : "POS-to-DSP order-count reconciliation remains in the partial band between 1% and 5%."
+        : tg04GapPct <= 1
+          ? "POS-to-source reconciliation is within the ±1% tolerance band."
+          : tg04GapPct > 5
+            ? "POS-to-source reconciliation gap exceeds 5% and fails the trust gate."
+            : "POS-to-source reconciliation remains in the partial band between 1% and 5%.",
     ["R122", "R123"],
   );
 

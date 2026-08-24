@@ -32,13 +32,18 @@ export function deriveM02Calculation(
     expectedCommission: number("expected_commission"),
     expectedDeliveryCommission: number("expected_delivery_commission"),
     expectedPickupCommission: number("expected_pickup_commission"),
+    dspOrderCount: reconciliationNumber("dsp_order_count"),
+    orderCountDifference: reconciliationNumber("order_count_difference"),
+    orderCountDifferencePct: reconciliationNumber("order_count_difference_percent"),
     pickupBasis: number("pickup_basis_amount"),
     pickupRate: number("pickup_rate_pct"),
     posBasis,
+    posCertifiedOrderCount: reconciliationNumber("pos_certified_order_count"),
     reconciliationBasis,
     reconciliationDifference,
     reconciliationPct: reconciliationBasis > 0 ? (reconciliationDifference / reconciliationBasis) * 100 : 0,
     totalBasis: number("commission_base_amount"),
+    tg04Score: reconciliationNumber("tg04_score"),
     ...deriveBankReconciliation(reconciliationNumber),
   };
 }
