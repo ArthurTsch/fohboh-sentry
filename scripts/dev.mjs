@@ -51,11 +51,9 @@ function runPnpm(args, label) {
 
 run(docker, ["compose", "-f", composeFile, "up", "-d", "--wait"], "Starting persistent PostgreSQL");
 runPnpm(["exec", "prisma", "migrate", "deploy"], "Applying database migrations");
-runPnpm(["seed:test"], "Creating the local test account");
 
 console.log("\n[development] Ready");
-console.log("  URL:      http://localhost:3000");
-console.log("  Email:    e2e-superadmin@fohboh.test");
-console.log("  Password: E2eFohBohTestOnly!\n");
+console.log("  URL: http://localhost:3000");
+console.log("  Existing database records were left unchanged.\n");
 
 runPnpm(["dev:app", ...process.argv.slice(2)], "Starting Next.js");

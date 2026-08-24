@@ -9,6 +9,7 @@ async function main() {
   const { default: prisma } = await import("../src/lib/prisma");
   const email = process.env.E2E_MANAGER_EMAIL || "e2e-superadmin@fohboh.test";
   const password = process.env.E2E_MANAGER_PASSWORD || "E2eFohBohTestOnly!";
+  const seedE2eFixtures = process.env.SEED_E2E_FIXTURES !== "false";
 
   const manager = await prisma.managers.upsert({
     where: { email },
@@ -36,34 +37,6 @@ async function main() {
       name: "E2E Test Account",
     },
   });
-  const restaurant = await prisma.restaurants.upsert({
-    where: { unit_id: "E2E-LOC-001" },
-    create: {
-      active: true,
-      created_by: manager.id,
-      name: "E2E Test Restaurant",
-      unit_id: "E2E-LOC-001",
-    },
-    update: {
-      active: true,
-      created_by: manager.id,
-      name: "E2E Test Restaurant",
-    },
-  });
-  await prisma.locations_v2.upsert({
-    where: {
-      customer_id_external_id: {
-        customer_id: customer.id,
-        external_id: "E2E-LOC-001",
-      },
-    },
-    create: {
-      customer_id: customer.id,
-      external_id: "E2E-LOC-001",
-      name: "E2E Test Restaurant",
-    },
-    update: { deleted_at: null, name: "E2E Test Restaurant" },
-  });
   await prisma.account_memberships_v2.upsert({
     where: { manager_id: manager.id },
     create: {
@@ -82,34 +55,65 @@ async function main() {
       team_role: "Owner",
     },
   });
-  await prisma.restaurant_sentry_state.upsert({
-    where: { restaurant_id: restaurant.id },
-    create: {
-      account_id: "e2e-test-account",
-      created_by: manager.id,
-      location_id: "E2E-LOC-001",
-      modules_json: [
-        { label: "M01", status: "Active" },
-        { label: "M02", status: "Active" },
-      ],
-      onboarding_progress: {
-        selectedVendors: { m01: ["toast"], m02: ["uber-eats"] },
+
+  if (seedE2eFixtures) {
+    const restaurant = await prisma.restaurants.upsert({
+      where: { unit_id: "E2E-LOC-001" },
+      create: {
+        active: true,
+        created_by: manager.id,
+        name: "E2E Test Restaurant",
+        unit_id: "E2E-LOC-001",
       },
-      restaurant_id: restaurant.id,
-    },
-    update: {
-      account_id: "e2e-test-account",
-      created_by: manager.id,
-      location_id: "E2E-LOC-001",
-      modules_json: [
-        { label: "M01", status: "Active" },
-        { label: "M02", status: "Active" },
-      ],
-      onboarding_progress: {
-        selectedVendors: { m01: ["toast"], m02: ["uber-eats"] },
+      update: {
+        active: true,
+        created_by: manager.id,
+        name: "E2E Test Restaurant",
       },
-    },
-  });
+    });
+    await prisma.locations_v2.upsert({
+      where: {
+        customer_id_external_id: {
+          customer_id: customer.id,
+          external_id: "E2E-LOC-001",
+        },
+      },
+      create: {
+        customer_id: customer.id,
+        external_id: "E2E-LOC-001",
+        name: "E2E Test Restaurant",
+      },
+      update: { deleted_at: null, name: "E2E Test Restaurant" },
+    });
+    await prisma.restaurant_sentry_state.upsert({
+      where: { restaurant_id: restaurant.id },
+      create: {
+        account_id: "e2e-test-account",
+        created_by: manager.id,
+        location_id: "E2E-LOC-001",
+        modules_json: [
+          { label: "M01", status: "Active" },
+          { label: "M02", status: "Active" },
+        ],
+        onboarding_progress: {
+          selectedVendors: { m01: ["toast"], m02: ["uber-eats"] },
+        },
+        restaurant_id: restaurant.id,
+      },
+      update: {
+        account_id: "e2e-test-account",
+        created_by: manager.id,
+        location_id: "E2E-LOC-001",
+        modules_json: [
+          { label: "M01", status: "Active" },
+          { label: "M02", status: "Active" },
+        ],
+        onboarding_progress: {
+          selectedVendors: { m01: ["toast"], m02: ["uber-eats"] },
+        },
+      },
+    });
+  }
   await prisma.$disconnect();
 }
 
