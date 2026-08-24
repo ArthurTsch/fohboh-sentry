@@ -37,8 +37,7 @@ export const AccessibleDialog = forwardRef<HTMLDivElement, AccessibleDialogProps
       if (!dialog) return;
       const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       const isolatedElements = isolateBackground(dialog);
-      const previousOverflow = document.body.style.overflow;
-      document.body.style.overflow = "hidden";
+      const releaseScrollLock = acquireBodyScrollLock();
       const frame = window.requestAnimationFrame(() => {
         const initial = dialog.querySelector<HTMLElement>("[autofocus]") ?? getFocusable(dialog)[0] ?? dialog;
         initial.focus();
@@ -46,7 +45,7 @@ export const AccessibleDialog = forwardRef<HTMLDivElement, AccessibleDialogProps
 
       return () => {
         window.cancelAnimationFrame(frame);
-        document.body.style.overflow = previousOverflow;
+        releaseScrollLock();
         restoreBackground(isolatedElements);
         if (opener?.isConnected) opener.focus();
       };
@@ -112,19 +111,48 @@ function isTopmostDialog(dialog: HTMLElement | null) {
   return Boolean(dialog && dialogs[dialogs.length - 1] === dialog);
 }
 
-type IsolatedElement = { ariaHidden: string | null; element: HTMLElement; inert: boolean };
+type IsolationState = { ariaHidden: string | null; count: number; inert: boolean };
+
+const isolationStates = new WeakMap<HTMLElement, IsolationState>();
+let bodyScrollLockCount = 0;
+let bodyOverflowBeforeDialogs = "";
+
+function acquireBodyScrollLock() {
+  if (bodyScrollLockCount === 0) {
+    bodyOverflowBeforeDialogs = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+  bodyScrollLockCount += 1;
+  let released = false;
+
+  return () => {
+    if (released) return;
+    released = true;
+    bodyScrollLockCount = Math.max(0, bodyScrollLockCount - 1);
+    if (bodyScrollLockCount === 0) {
+      document.body.style.overflow = bodyOverflowBeforeDialogs;
+      bodyOverflowBeforeDialogs = "";
+    }
+  };
+}
 
 function isolateBackground(dialog: HTMLElement) {
-  const isolated: IsolatedElement[] = [];
+  const isolated: HTMLElement[] = [];
   let branch: HTMLElement = dialog;
   while (branch.parentElement) {
     for (const sibling of Array.from(branch.parentElement.children)) {
       if (sibling === branch || !(sibling instanceof HTMLElement)) continue;
-      isolated.push({
-        ariaHidden: sibling.getAttribute("aria-hidden"),
-        element: sibling,
-        inert: sibling.inert,
-      });
+      const existing = isolationStates.get(sibling);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        isolationStates.set(sibling, {
+          ariaHidden: sibling.getAttribute("aria-hidden"),
+          count: 1,
+          inert: sibling.inert,
+        });
+      }
+      isolated.push(sibling);
       sibling.inert = true;
       sibling.setAttribute("aria-hidden", "true");
     }
@@ -134,10 +162,16 @@ function isolateBackground(dialog: HTMLElement) {
   return isolated;
 }
 
-function restoreBackground(isolated: IsolatedElement[]) {
-  for (const { ariaHidden, element, inert } of isolated) {
-    element.inert = inert;
-    if (ariaHidden === null) element.removeAttribute("aria-hidden");
-    else element.setAttribute("aria-hidden", ariaHidden);
+function restoreBackground(isolated: HTMLElement[]) {
+  for (const element of isolated) {
+    const state = isolationStates.get(element);
+    if (!state) continue;
+    state.count -= 1;
+    if (state.count > 0) continue;
+
+    element.inert = state.inert;
+    if (state.ariaHidden === null) element.removeAttribute("aria-hidden");
+    else element.setAttribute("aria-hidden", state.ariaHidden);
+    isolationStates.delete(element);
   }
 }
