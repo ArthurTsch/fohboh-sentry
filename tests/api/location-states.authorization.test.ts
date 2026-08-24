@@ -142,6 +142,30 @@ describe("POST /api/location-states authorization boundary", () => {
     }
   });
 
+  it("moves a completed onboarding location out of Onboarding", async () => {
+    requireManagerSession.mockResolvedValue(managerSession);
+    getScopedRestaurantWhere.mockResolvedValue({ id: { in: [11] } });
+    findState.mockResolvedValue({
+      account_id: "tenant-a",
+      created_by: 1,
+      location_id: "LOC-A",
+      m01_score: 21,
+      m02_score: 0,
+      restaurant_id: 11,
+      status: "Onboarding",
+    });
+    findRestaurant.mockResolvedValue({ created_by: 1, id: 11, store_id: "STORE-A", unit_id: "UNIT-A" });
+    upsert.mockResolvedValue({ id: 7, location_id: "LOC-A", restaurant_id: 11 });
+    const { POST } = await import("@/app/api/location-states/route");
+    const response = await POST(post({
+      locationId: "LOC-A",
+      onboardingProgress: { completed: true, stepIndex: 5 },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(upsert.mock.calls[0][0].update).toMatchObject({ status: "At Risk" });
+  });
+
   it("derives account, creator, and canonical location when creating state", async () => {
     requireManagerSession.mockResolvedValue(managerSession);
     getScopedRestaurantWhere.mockResolvedValue({ created_by: 2 });

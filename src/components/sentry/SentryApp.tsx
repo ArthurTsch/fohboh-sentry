@@ -2835,8 +2835,11 @@ function mapAssignedRestaurantsToLocations(
               : restaurant.sentry_state?.m02_score ?? module.score,
         }));
       const persistedStatus = toLocationStatus(restaurant.sentry_state?.status);
+      const onboardingComplete = parseOnboardingProgress(
+        restaurant.sentry_state?.onboarding_progress,
+      )?.completed;
       const status =
-        restaurant.sentry_state?.completed && persistedStatus === "Onboarding"
+        onboardingComplete && persistedStatus === "Onboarding"
           ? Math.round(
               ((restaurant.sentry_state?.m01_score ?? 0) +
                 (restaurant.sentry_state?.m02_score ?? 0)) /

@@ -143,6 +143,10 @@ const DIMENSION_ORDER: DimensionName[] = [
   "Auditability",
 ];
 
+function dimensionMq6Key(name: DimensionName) {
+  return name.toLowerCase().replace(/[- ]/g, "_");
+}
+
 const DIMENSION_LABELS: Record<CaarDimension["name"], string> = {
   Auditability: "20%",
   "Cross-System Reconciliation": "25%",
@@ -255,6 +259,10 @@ export function buildCertificationResult({
   const activeModules =
     modules.length > 0 ? modules : [emptyModule("M01"), emptyModule("M02"), emptyModule("M03")];
   const overallDimensions = DIMENSION_ORDER.map((name) => ({
+    explanation: activeModules
+      .map((assessment) => assessment.mq6[dimensionMq6Key(name)]?.detail)
+      .filter((detail): detail is string => Boolean(detail))
+      .join(" "),
     name,
     score: clamp(
       round(

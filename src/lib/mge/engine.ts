@@ -74,6 +74,9 @@ type Metrics = {
   taxRemittedAmount?: number;
   tipAmount?: number;
   transactionCount?: number;
+  certificationPeriodDetectedMonths?: string[];
+  certificationPeriodExcludedRows?: number;
+  certificationPeriodMismatch?: boolean;
   uncontractedFeeAmount?: number;
   voidCount?: number;
   visaCreditAmount?: number;
@@ -1445,15 +1448,19 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
         ? "settlement"
         : "royalty";
   const certificationMonth = input.certificationMonth ?? monthKeyFromDate(input.evaluationDate);
-  const statement = input.moduleId === "M02"
-    ? scopeM02ArtifactToCertificationMonth(resolveArtifact(input.artifacts, statementToken), certificationMonth)
-    : resolveArtifact(input.artifacts, statementToken);
-  const pos = scopeM02ArtifactToCertificationMonth(
+  const statement = scopeArtifactToCertificationMonth(
+    resolveArtifact(input.artifacts, statementToken),
+    certificationMonth,
+  );
+  const pos = scopeArtifactToCertificationMonth(
     resolveArtifact(input.artifacts, "pos"),
     certificationMonth,
   );
   const agreement = resolveArtifact(input.artifacts, "agreement");
-  const bank = resolveArtifact(input.artifacts, "bank");
+  const bank = scopeArtifactToCertificationMonth(
+    resolveArtifact(input.artifacts, "bank"),
+    certificationMonth,
+  );
   const contractArtifact = resolveArtifact(input.artifacts, "contract");
   const contract = contractArtifact?.contractValues ?? null;
 
@@ -1565,19 +1572,28 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
   };
 }
 
-function scopeM02ArtifactToCertificationMonth(
+export function scopeArtifactToCertificationMonth(
   artifact: ModuleArtifactState | null,
   certificationMonth: string,
 ): ModuleArtifactState | null {
+  if (!artifact?.metrics) return artifact;
+
   const monthlyMetrics = artifact?.metrics?.monthlyMetrics;
-  if (!artifact || !monthlyMetrics || Object.keys(monthlyMetrics).length === 0) return artifact;
+  let metrics: Metrics = { ...artifact.metrics };
+  const detectedMonths = new Set<string>();
+  let excludedRows = 0;
 
-  const matchingMetrics = monthlyMetrics[certificationMonth];
-
-  return {
-    ...artifact,
-    metrics: {
-      ...artifact.metrics,
+  if (monthlyMetrics && Object.keys(monthlyMetrics).length > 0) {
+    Object.keys(monthlyMetrics).forEach((month) => detectedMonths.add(month));
+    const matchingMetrics = monthlyMetrics[certificationMonth];
+    excludedRows = Object.entries(monthlyMetrics)
+      .filter(([month]) => month !== certificationMonth)
+      .reduce(
+        (sum, [, month]) => sum + numberValue(month.transactionCount ?? month.orderCount),
+        0,
+      );
+    metrics = {
+      ...metrics,
       basisAmount: numberValue(matchingMetrics?.basisAmount),
       deliveryBasisAmount: numberValue(matchingMetrics?.deliveryBasisAmount),
       deliveryCommissionAmount: numberValue(matchingMetrics?.deliveryCommissionAmount),
@@ -1588,8 +1604,65 @@ function scopeM02ArtifactToCertificationMonth(
       pickupCommissionAmount: numberValue(matchingMetrics?.pickupCommissionAmount),
       pickupOrderCount: numberValue(matchingMetrics?.pickupOrderCount),
       transactionCount: numberValue(matchingMetrics?.transactionCount),
+    };
+  }
+
+  const scopeReferenceRows = (rows: ReferenceRow[] | undefined) => {
+    if (!rows?.length) return rows;
+    const scoped = rows.filter((row) => {
+      const month = referenceRowMonth(row);
+      if (month) detectedMonths.add(month);
+      if (month === certificationMonth) return true;
+      excludedRows += 1;
+      return false;
+    });
+    return scoped;
+  };
+  const payoutReferenceRows = scopeReferenceRows(metrics.payoutReferenceRows);
+  const depositReferenceRows = scopeReferenceRows(metrics.depositReferenceRows);
+
+  if (metrics.payoutReferenceRows?.length) {
+    const amount = roundCurrency((payoutReferenceRows ?? []).reduce((sum, row) => sum + row.amount, 0));
+    metrics = {
+      ...metrics,
+      payoutReferenceRows,
+      payoutAmount: amount,
+      ...(artifact.key.includes("pos") || artifact.key.includes("payout")
+        ? { basisAmount: amount, depositAmount: amount }
+        : {}),
+    };
+  }
+  if (metrics.depositReferenceRows?.length) {
+    const amount = roundCurrency((depositReferenceRows ?? []).reduce((sum, row) => sum + row.amount, 0));
+    metrics = {
+      ...metrics,
+      depositReferenceRows,
+      depositAmount: amount,
+      payoutAmount: amount,
+    };
+  }
+
+  const detected = [...detectedMonths].sort();
+  const mismatch = detected.length > 0 && !detected.includes(certificationMonth);
+
+  return {
+    ...artifact,
+    metrics: {
+      ...metrics,
+      certificationPeriodDetectedMonths: detected,
+      certificationPeriodExcludedRows: excludedRows,
+      certificationPeriodMismatch: mismatch,
     },
   };
+}
+
+function referenceRowMonth(row: ReferenceRow) {
+  const value = row.settledDate ?? row.postedDate;
+  if (!value) return null;
+  const iso = /^(\d{4})-(\d{2})-\d{2}/.exec(value);
+  if (iso) return `${iso[1]}-${iso[2]}`;
+  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(value);
+  return us ? `${us[3]}-${us[1].padStart(2, "0")}` : null;
 }
 
 function monthKeyFromDate(value: Date) {
@@ -2334,6 +2407,9 @@ function computeTrustGateScores({
     (cadence === "weekly_preliminary" || artifactSatisfiesCompleteness(context, context.bank ?? null)) &&
     Boolean(agreementPresent && context.agreement?.hash) &&
     Boolean(context.contract && contractFieldCount(context.contract) >= 3);
+  const periodCoverageFailed = [context.statement, context.pos, context.bank].some(
+    (artifact) => artifact?.metrics?.certificationPeriodMismatch,
+  );
 
   const tg01 = buildTrustGateScore(
     "TG01",
@@ -2416,7 +2492,9 @@ function computeTrustGateScores({
 
   const tg06 = buildTrustGateScore(
     "TG06",
-    cadence === "weekly_preliminary"
+    periodCoverageFailed
+      ? 0
+      : cadence === "weekly_preliminary"
       ? Math.max(75, dimensions["Data Freshness"])
       : allRequiredArtifactsGoverned
         ? 100
@@ -2425,7 +2503,9 @@ function computeTrustGateScores({
           : coreStructuredPackageReady
             ? 75
             : 40,
-    cadence === "weekly_preliminary"
+    periodCoverageFailed
+      ? "One or more evidence files contain no dated rows for the active certification month. Out-of-period and undated rows were excluded."
+      : cadence === "weekly_preliminary"
       ? "Weekly preliminary coverage is accepted without the final bank evidence gate."
       : allRequiredArtifactsGoverned
         ? "All required monthly-final artifacts, including governed bank evidence, cover the active period."
@@ -2666,7 +2746,23 @@ function scoreDataCompleteness(context: RuleContext): Mq6Score {
 }
 
 function scoreDataFreshness(context: RuleContext): Mq6Score {
-  const uploads = context.artifacts.filter((artifact) => artifact.uploaded && artifact.updatedAt);
+  const periodMismatchArtifacts = [context.statement, context.pos, context.bank].filter(
+    (artifact) => artifact?.metrics?.certificationPeriodMismatch,
+  );
+  if (periodMismatchArtifacts.length > 0) {
+    return scoreDetail(
+      0,
+      periodMismatchArtifacts
+        .map(
+          (artifact) =>
+            `${artifact?.label ?? "Evidence"} contains only ${artifact?.metrics?.certificationPeriodDetectedMonths?.join(", ") || "undated"} rows; none belong to the active certification month. ${artifact?.metrics?.certificationPeriodExcludedRows ?? 0} out-of-period or undated rows were excluded.`,
+        )
+        .join(" "),
+    );
+  }
+  const uploads = [context.statement, context.pos, context.bank, context.agreement].filter(
+    (artifact): artifact is ModuleArtifactState => Boolean(artifact?.uploaded && artifact.updatedAt),
+  );
   if (uploads.length === 0) {
     return scoreDetail(0, "No uploaded artifacts were available to score freshness.");
   }
@@ -2746,6 +2842,20 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
       context.statement?.metrics?.payoutAmount,
   );
   const settlementTimingBasis = usesSettlementTimingBasis(context);
+  const periodMismatchArtifacts = [context.statement, context.pos, context.bank].filter(
+    (artifact) => artifact?.metrics?.certificationPeriodMismatch,
+  );
+
+  if (periodMismatchArtifacts.length > 0) {
+    detailParts.push(
+      `Period mismatch: ${periodMismatchArtifacts
+        .map(
+          (artifact) =>
+            `${artifact?.label ?? "evidence"} contains ${artifact?.metrics?.certificationPeriodDetectedMonths?.join(", ") || "undated"} data`,
+        )
+        .join("; ")}. Out-of-period rows were excluded from this certification.`,
+    );
+  }
 
   if (statementGoverned && posGoverned && statementBasis > 0 && posBasis > 0) {
     const delta = relativeDelta(statementBasis, posBasis);

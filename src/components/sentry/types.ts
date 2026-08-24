@@ -62,6 +62,7 @@ export type LocationRecord = {
 };
 
 export type CaarDimension = {
+  explanation?: string;
   name: string;
   score: number;
   weight: string;

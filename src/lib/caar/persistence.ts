@@ -146,7 +146,9 @@ function buildCanonicalPayload({
       {
         badge:
           dimension.score >= 85 ? "PASS" : dimension.score >= 60 ? "PARTIAL" : "FAIL",
-        detail: `${dimension.name} scored ${dimension.score} with weight ${dimension.weight}.`,
+        detail:
+          dimension.explanation?.trim() ||
+          `${dimension.name} scored ${dimension.score} with weight ${dimension.weight}.`,
         score_pct: dimension.score,
       },
     ]),

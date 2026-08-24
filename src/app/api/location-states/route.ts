@@ -112,7 +112,15 @@ export async function POST(request: Request) {
     const stateByLocation = locationId
       ? await prisma.restaurant_sentry_state.findUnique({
           where: { location_id: locationId },
-          select: { account_id: true, created_by: true, location_id: true, restaurant_id: true },
+          select: {
+            account_id: true,
+            created_by: true,
+            location_id: true,
+            m01_score: true,
+            m02_score: true,
+            restaurant_id: true,
+            status: true,
+          },
         })
       : null;
     const scopedWhere = await getScopedRestaurantWhere(session);
@@ -147,7 +155,15 @@ export async function POST(request: Request) {
       ? stateByLocation
       : await prisma.restaurant_sentry_state.findUnique({
           where: { restaurant_id: restaurant.id },
-          select: { account_id: true, created_by: true, location_id: true, restaurant_id: true },
+          select: {
+            account_id: true,
+            created_by: true,
+            location_id: true,
+            m01_score: true,
+            m02_score: true,
+            restaurant_id: true,
+            status: true,
+          },
         });
     const accountId = existingState?.account_id ?? await getTeamAccountId(session);
     if (!accountId) {
@@ -158,6 +174,16 @@ export async function POST(request: Request) {
     }
     const canonicalLocationId =
       existingState?.location_id || restaurant.unit_id || restaurant.store_id || `LOC-DB-${restaurant.id}`;
+    const onboardingCompleted =
+      body.onboardingProgress !== null &&
+      typeof body.onboardingProgress === "object" &&
+      "completed" in body.onboardingProgress &&
+      body.onboardingProgress.completed === true;
+    const completedStatus =
+      existingState?.status === "Certified" ||
+      Math.round(((existingState?.m01_score ?? 0) + (existingState?.m02_score ?? 0)) / 2) >= 85
+        ? "Certified"
+        : "At Risk";
 
     const state = await prisma.restaurant_sentry_state.upsert({
       where: {
@@ -167,6 +193,7 @@ export async function POST(request: Request) {
         modules_json: toNullableJsonInput(body.modules),
         onboarding_checklist: toNullableJsonInput(body.onboardingChecklist),
         onboarding_progress: toNullableJsonInput(body.onboardingProgress),
+        ...(onboardingCompleted ? { status: completedStatus } : {}),
         updated_at: new Date(),
       },
       create: {
@@ -177,6 +204,7 @@ export async function POST(request: Request) {
         onboarding_checklist: toNullableJsonInput(body.onboardingChecklist),
         onboarding_progress: toNullableJsonInput(body.onboardingProgress),
         restaurant_id: restaurant.id,
+        status: onboardingCompleted ? completedStatus : "Onboarding",
       },
       select: {
         id: true,

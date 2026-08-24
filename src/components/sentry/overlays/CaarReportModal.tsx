@@ -28,6 +28,7 @@ type ExhibitRow = {
 type Mq6Row = {
   badge: "At Risk" | "Certified" | "Qualified";
   desc: string;
+  explanation: string;
   name: string;
   pct: number;
   tipFooter: string;
@@ -680,6 +681,11 @@ export function CaarReportModal({
                   </span>
                 </div>
                 <div className="mt-3 text-sm leading-6 text-[var(--muted)]">{row.desc}</div>
+                {row.pct < 100 ? (
+                  <div className="mt-3 rounded-xl border border-[rgba(255,152,0,0.24)] bg-[rgba(255,152,0,0.08)] p-3 text-sm leading-6 text-[var(--text)]">
+                    <strong>Why this is not 100%:</strong> {row.explanation}
+                  </div>
+                ) : null}
                 <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
                   <div
                     className={`h-full rounded-full ${row.pct >= 80 ? "bg-[var(--success)]" : row.pct >= 50 ? "bg-[#ff9800]" : "bg-[var(--accent)]"}`}
@@ -2162,6 +2168,9 @@ function deriveMq6(record: CaarRecord): Mq6Row[] {
   return record.dimensions.map((dimension, index) => ({
     badge: dimension.score >= 85 ? "Certified" : dimension.score >= 50 ? "Qualified" : "At Risk",
     desc: mq6Descriptions[dimension.name] ?? "Certification dimension derived from the trust engine.",
+    explanation:
+      dimension.explanation?.trim() ||
+      "The persisted engine output did not provide a more specific explanation for this deduction.",
     name: dimension.name,
     pct: dimension.score,
     tipFooter: `${dimension.weight} of Trust Score`,

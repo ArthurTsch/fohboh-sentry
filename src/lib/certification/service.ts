@@ -13,6 +13,8 @@ import type {
   LocationRecord,
   SessionState,
 } from "@/components/sentry/types";
+import { buildCertificationUploadLookup } from "@/lib/certification/upload-lookup";
+import { uniqueRuleCitationsByRuleId } from "@/lib/certification/rule-citation-persistence";
 import { normalizeVendorToken } from "@/components/sentry/vendor-catalog";
 import prisma from "@/lib/prisma";
 import { persistGeneratedCaar } from "@/lib/caar/persistence";
@@ -679,10 +681,7 @@ export async function executePersistedCertification({
 
   const [uploadRows, schemaRowsRaw, contractRowsRaw, historicalRunsRaw] = await Promise.all([
     prisma.uploads_v2.findMany({
-      where: {
-        location_id: restaurant.id,
-        superseded_by: null,
-      },
+      where: buildCertificationUploadLookup(locationV2.id),
       orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
       select: {
         artifact_key: true,
@@ -1069,7 +1068,6 @@ export async function executePersistedCertification({
     });
 
     const nextRunIds: number[] = [];
-    const persistedOverallRuleCitations = new Set<string>();
     const runRecords: Array<{
       assessment: (typeof certification.assessments)[number];
       id: number;
@@ -1154,9 +1152,12 @@ export async function executePersistedCertification({
         })),
       });
 
-      if (assessment.ruleCitations.length > 0) {
+      const assessmentCitations = uniqueRuleCitationsByRuleId(assessment.ruleCitations);
+      const persistedRuleIds = new Set(assessmentCitations.map((citation) => citation.ruleId));
+
+      if (assessmentCitations.length > 0) {
         await tx.rule_citations_v2.createMany({
-          data: assessment.ruleCitations.map((citation) => ({
+          data: assessmentCitations.map((citation) => ({
             cert_run_id: run.id,
             fired_count: citation.firedCount,
             rule_id: citation.ruleId,
@@ -1173,15 +1174,10 @@ export async function executePersistedCertification({
       }
 
       if (certification.overallRuleCitations.length > 0) {
-        const overallCitationRows = certification.overallRuleCitations
-          .filter((citation) => {
-            const key = `${run.id}:${citation.ruleId}`;
-            if (persistedOverallRuleCitations.has(key)) {
-              return false;
-            }
-            persistedOverallRuleCitations.add(key);
-            return true;
-          })
+        const overallCitationRows = uniqueRuleCitationsByRuleId(
+          certification.overallRuleCitations,
+          persistedRuleIds,
+        )
           .map((citation) => ({
             cert_run_id: run.id,
             fired_count: citation.firedCount,
