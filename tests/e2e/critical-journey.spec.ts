@@ -3,10 +3,30 @@ import { expect, test } from "@playwright/test";
 test("anonymous users are presented with the sign-in boundary", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("body")).toContainText(/sign in|login|email/i);
-  await page.getByRole("button", { name: /request access/i }).click();
-  await expect(page.getByRole("dialog", { name: /request access/i })).toBeVisible();
+  const opener = page.getByRole("button", { name: "Request Access", exact: true });
+  const openerHandle = await opener.elementHandle();
+  await opener.click();
+  const dialog = page.getByRole("dialog", { name: /request access/i });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("aria-modal", "true");
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  expect(await openerHandle?.evaluate((element) => Boolean(element.closest("[aria-hidden='true']")))).toBe(true);
+
+  const focusable = dialog.locator(
+    "a[href], button:not([disabled]), input:not([disabled]):not([type=hidden]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+  );
+  const first = focusable.first();
+  const last = focusable.last();
+  await last.focus();
+  await page.keyboard.press("Tab");
+  await expect(first).toBeFocused();
+  await first.focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(last).toBeFocused();
+
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: /request access/i })).toBeHidden();
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
 });
 
 test("private SuperAdmin routes do not expose data anonymously", async ({ page }) => {

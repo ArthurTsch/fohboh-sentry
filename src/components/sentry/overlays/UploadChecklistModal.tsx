@@ -1,5 +1,6 @@
 import type { IntakeState, UploadArtifact } from "../types";
 import { Badge, SectionCard } from "../ui/primitives";
+import { AccessibleDialog } from "../ui/AccessibleDialog";
 
 const checklistLabels = [
   { key: "uploaded", label: "File received", detail: "Native source file captured without reformatting." },
@@ -24,7 +25,7 @@ export function UploadChecklistModal({
   const complete = intake.uploaded && intake.hash && intake.schema && intake.fields;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <AccessibleDialog ariaLabel={`Upload checklist for ${artifact.label}`} onClose={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-3xl rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-5">
           <div>
@@ -136,7 +137,7 @@ export function UploadChecklistModal({
           </div>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
 

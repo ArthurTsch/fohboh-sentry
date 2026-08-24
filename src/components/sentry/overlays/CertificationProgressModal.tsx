@@ -1,3 +1,5 @@
+import { AccessibleDialog } from "../ui/AccessibleDialog";
+
 export function CertificationProgressModal({
   cadence,
   certificationMonth,
@@ -22,9 +24,10 @@ export function CertificationProgressModal({
   const determinateProgress = [12, 38, 82, 94][phaseIndex] ?? 12;
 
   return (
-    <div
+    <AccessibleDialog
+      ariaLabel="Certification in progress"
+      closeOnEscape={false}
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
-      role="status"
       aria-live="polite"
       aria-label={`Running ${moduleId} certification for ${locationName}`}
     >
@@ -107,6 +110,6 @@ export function CertificationProgressModal({
           </div>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

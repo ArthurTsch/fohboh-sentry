@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import type { IntakeState, PosSchemaGovernance, Role, SchemaWorkspace, UploadReceipt } from "../types";
 import { Badge, HelpTip, MetaBlock } from "../ui/primitives";
 import { getExpectedHeaders } from "@/lib/uploads/definitions";
+import { AccessibleDialog } from "../ui/AccessibleDialog";
 
 type TabId = "mappings" | "contract" | "missing" | "posschema" | "upload" | "vault";
 
@@ -142,7 +143,7 @@ export function SchemaEditorModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <AccessibleDialog ariaLabel={`Schema editor for ${workspace.module}`} closeOnEscape={false} onClose={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <input
           ref={fileInputRef}
@@ -886,7 +887,7 @@ export function SchemaEditorModal({
           )}
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
 

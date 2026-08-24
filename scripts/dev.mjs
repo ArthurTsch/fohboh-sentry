@@ -59,4 +59,4 @@ console.log("  URL:      http://localhost:3000");
 console.log("  Email:    e2e-superadmin@fohboh.test");
 console.log("  Password: E2eFohBohTestOnly!\n");
 
-runPnpm(["dev:app"], "Starting Next.js");
+runPnpm(["dev:app", ...process.argv.slice(2)], "Starting Next.js");

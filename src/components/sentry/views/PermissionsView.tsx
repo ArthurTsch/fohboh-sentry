@@ -11,6 +11,7 @@ import type {
   TeamRole,
 } from "../types";
 import { HelpTip, SectionCard } from "../ui/primitives";
+import { AccessibleDialog } from "../ui/AccessibleDialog";
 
 const TEAM_ROLES: TeamRole[] = ["Owner", "Finance", "Location Manager", "Read-only"];
 
@@ -91,7 +92,7 @@ function TeamModal({
   const isLocationManager = form.role === "Location Manager";
 
   return (
-    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-[rgba(18,22,31,0.55)] px-4 py-8">
+    <AccessibleDialog ariaLabel={form.mode === "invite" ? "Invite teammate" : "Update teammate access"} closeOnEscape={!saving} onClose={onClose} className="fixed inset-0 z-[140] flex items-center justify-center bg-[rgba(18,22,31,0.55)] px-4 py-8">
       <div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-[28px] border border-[var(--border)] bg-white shadow-[0_20px_70px_rgba(0,0,0,0.22)]">
         <div className="border-b border-[var(--border)] bg-[var(--text)] px-6 py-5 text-white">
           <div className="font-[family-name:var(--font-display)] text-3xl font-bold tracking-[-0.04em]">
@@ -227,7 +228,7 @@ function TeamModal({
           </button>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
 

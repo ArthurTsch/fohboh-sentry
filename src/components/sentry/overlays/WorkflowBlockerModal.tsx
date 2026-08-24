@@ -1,4 +1,5 @@
 import type { LocationWorkflowAction, WorkflowRequirementStatus } from "../types";
+import { AccessibleDialog } from "../ui/AccessibleDialog";
 
 export function WorkflowBlockerModal({
   blockers,
@@ -30,7 +31,7 @@ export function WorkflowBlockerModal({
   const primaryIsUploadAction = primaryAction === "uploads";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <AccessibleDialog ariaLabel={`Workflow requirements for ${locationName}`} onClose={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-4xl rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div className="border-b border-[var(--border)] px-6 py-5">
           <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
@@ -138,7 +139,7 @@ export function WorkflowBlockerModal({
           </button>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
 

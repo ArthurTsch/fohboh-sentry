@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { WgsAccount, WgsUser } from "../types";
+import { AccessibleDialog } from "../ui/AccessibleDialog";
 
 function createEmptyUser(): WgsUser {
   return {
@@ -44,7 +45,7 @@ export function WgsUserModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <AccessibleDialog ariaLabel={isNew ? "Create WGS user" : "Edit WGS user"} closeOnEscape={false} onClose={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-5">
           <div>
@@ -242,6 +243,6 @@ export function WgsUserModal({
           </div>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

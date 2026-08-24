@@ -1,4 +1,5 @@
 import { useRef, type ReactNode } from "react";
+import { AccessibleDialog } from "../ui/AccessibleDialog";
 import type {
   CaarEvidenceTrace,
   CaarProvenanceKind,
@@ -217,7 +218,7 @@ export function CaarReportModal({
   }
 
   return (
-    <div ref={reportRef} className="caar-print-root fixed inset-0 z-50 overflow-y-auto bg-[#f7f7f9]" role="dialog" aria-modal="true" aria-label={`CAAR ${record.id}`}>
+    <AccessibleDialog ref={reportRef} ariaLabel={`CAAR ${record.id}`} onClose={onClose} className="caar-print-root fixed inset-0 z-50 overflow-y-auto bg-[#f7f7f9]">
       <div className="caar-print-controls sticky top-0 z-20 flex items-center gap-4 border-b border-[var(--border)] bg-white px-6 py-4 shadow-[0_6px_20px_rgba(0,0,0,0.05)]">
         <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
           CAAR Viewer
@@ -1020,7 +1021,7 @@ export function CaarReportModal({
           </div>
         </details>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
 

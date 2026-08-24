@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { contractInputDefinitions } from "../data";
 import type { IntakeState, UploadArtifact } from "../types";
+import { AccessibleDialog } from "../ui/AccessibleDialog";
 
 const M01_CARD_BRANDS = [
   "Visa CPS Retail",
@@ -100,12 +101,8 @@ export function ArtifactWorkflowModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <AccessibleDialog aria-labelledby="artifact-workflow-title" aria-busy={isUploading} closeOnEscape={!isUploading} onClose={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="artifact-workflow-title"
-        aria-busy={isUploading}
         className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]"
       >
         <div className="flex items-center justify-between border-b border-[var(--border)] px-6 py-5">
@@ -297,7 +294,7 @@ export function ArtifactWorkflowModal({
           </div>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
 

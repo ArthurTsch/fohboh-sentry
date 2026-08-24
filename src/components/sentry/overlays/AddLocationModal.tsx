@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { AddLocationDraft } from "../types";
 import { HelpTip } from "../ui/primitives";
+import { AccessibleDialog } from "../ui/AccessibleDialog";
 
 const dspOptions = ["DoorDash", "Uber Eats", "Grubhub", "Slice"];
 const processorOptions = ["Heartland", "Toast", "Square", "Worldpay", "Chase Paymentech", "Other"];
@@ -116,7 +117,7 @@ export function AddLocationModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <AccessibleDialog ariaLabel="Add location" onClose={onClose} closeOnEscape={step === 1} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="w-full max-w-3xl rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div className="border-b border-[var(--border)] px-6 pb-0 pt-5">
           <div className="mb-4 flex items-center justify-between">
@@ -375,6 +376,6 @@ export function AddLocationModal({
           </div>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

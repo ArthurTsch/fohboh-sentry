@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ActionNotice, ReadinessChecklist, WorkflowContextBar } from "../ui/workflow-ux";
+import { AccessibleDialog } from "../ui/AccessibleDialog";
 
 function getDefaultCertificationMonth() {
   const date = new Date();
@@ -55,7 +56,7 @@ export function CertificationCadenceModal({
   const selectedModule = selectableModules.find((module) => module.moduleId === selectedModules[0]);
   const selectedVendor = selectableVendors.find((vendor) => vendor.key === selectedVendorKey);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="certification-preflight-title">
+    <AccessibleDialog onClose={onClose} aria-labelledby="certification-preflight-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
         <div className="border-b border-[var(--border)] px-6 py-5">
           <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--accent)]">
@@ -287,6 +288,6 @@ export function CertificationCadenceModal({
           </button>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

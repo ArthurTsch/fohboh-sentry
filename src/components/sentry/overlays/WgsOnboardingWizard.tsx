@@ -1,6 +1,7 @@
 import { wgsOnboardingSteps } from "../data";
 import type { LocationRecord, WgsOnboardingProgress, WgsOnboardingStep } from "../types";
 import { Badge } from "../ui/primitives";
+import { AccessibleDialog } from "../ui/AccessibleDialog";
 
 function buildEmptyChecks(step: WgsOnboardingStep) {
   return step.items?.map(() => false) ?? [];
@@ -162,7 +163,7 @@ export function WgsOnboardingWizard({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+    <AccessibleDialog ariaLabel={`Onboarding ${location.name}`} closeOnEscape={false} onClose={onClose} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="flex max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-[28px] border border-[var(--border)] bg-white shadow-[0_28px_90px_rgba(0,0,0,0.28)]">
         <aside className="hidden w-[290px] flex-col border-r border-[var(--border)] bg-[var(--surface)] p-6 lg:flex">
           <div className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em]">
@@ -283,6 +284,6 @@ export function WgsOnboardingWizard({
           </div>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

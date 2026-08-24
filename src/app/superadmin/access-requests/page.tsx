@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import prisma from "@/lib/prisma";
+import { AccessibleDialog } from "@/components/sentry/ui/AccessibleDialog";
 import {
   createManagerFromAccessRequestAction,
   updateAccessRequestReviewAction,
@@ -395,7 +396,7 @@ function CreateAccountModal({
   };
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <AccessibleDialog ariaLabel="Create manager account" closeOnEscape={false} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-3xl overflow-hidden rounded-[28px] border border-[var(--border)] bg-white shadow-[0_30px_90px_rgba(0,0,0,0.22)]">
         <div className="border-b border-[var(--border)] px-6 py-5">
           <div className="flex items-start justify-between gap-4">
@@ -540,7 +541,7 @@ function CreateAccountModal({
           </div>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
 
