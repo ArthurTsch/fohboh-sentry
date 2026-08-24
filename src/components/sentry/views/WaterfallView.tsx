@@ -1,8 +1,9 @@
-import type { LocationRecord, LocationWorkflowState, Role } from "../types";
+import type { CaarRecord, LocationRecord, LocationWorkflowState, Role } from "../types";
 import { HelpTip, SectionCard } from "../ui/primitives";
 import { formatCurrency } from "../utils";
 
 export function WaterfallView({
+  caars,
   hasTeamAccount,
   locations,
   onAddLocation,
@@ -11,6 +12,7 @@ export function WaterfallView({
   role,
   workflowByLocation,
 }: {
+  caars: CaarRecord[];
   hasTeamAccount: boolean;
   locations: LocationRecord[];
   onAddLocation: () => void;
@@ -20,7 +22,7 @@ export function WaterfallView({
   workflowByLocation: Record<string, LocationWorkflowState>;
 }) {
   return (
-    <SectionCard className="overflow-hidden p-0">
+    <SectionCard className="overflow-visible p-0">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
         <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
           <span>Select a location to open its dedicated workspace.</span>
@@ -90,6 +92,10 @@ export function WaterfallView({
           const workflow = workflowByLocation[location.id];
           const hasM01 = location.modules.some((module) => module.label === "M01");
           const hasM02 = location.modules.some((module) => module.label === "M02");
+          const m02Scores = deriveM02ProviderScores(caars, location.id);
+          const m02Average = m02Scores.length > 0
+            ? truncateScore(m02Scores.reduce((sum, provider) => sum + provider.score, 0) / m02Scores.length)
+            : location.m02;
 
           return (
             <button
@@ -128,7 +134,9 @@ export function WaterfallView({
                 </div>
               </div>
               <div className="lg:pt-1">{hasM01 ? <TrustBadge score={location.m01} /> : <MissingModule />}</div>
-              <div className="lg:pt-1">{hasM02 ? <TrustBadge score={location.m02} /> : <MissingModule />}</div>
+              <div className="lg:pt-1">
+                {hasM02 ? <M02TrustBadge average={m02Average} providers={m02Scores} /> : <MissingModule />}
+              </div>
               <div className="lg:pt-1">
                 <span className="inline-flex rounded-full border border-[var(--border)] bg-[var(--panel-soft)] px-2 py-1 text-[11px] font-semibold text-[var(--muted)]">
                   Lock M03
@@ -179,6 +187,91 @@ function TrustBadge({ score }: { score: number }) {
       {score}
     </span>
   );
+}
+
+function M02TrustBadge({
+  average,
+  providers,
+}: {
+  average: number;
+  providers: M02ProviderScore[];
+}) {
+  return (
+    <span className="group relative inline-flex" onClick={(event) => event.stopPropagation()}>
+      <TrustBadge score={average} />
+      {providers.length > 0 ? (
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 hidden min-w-52 -translate-x-1/2 rounded-xl border border-[var(--border)] bg-white p-3 text-left shadow-xl group-hover:block group-focus-within:block"
+        >
+          <span className="block font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--muted)]">
+            M02 provider scores
+          </span>
+          {providers.map((provider) => (
+            <span key={provider.key} className="mt-2 flex items-center justify-between gap-5 text-xs text-[var(--text)]">
+              <span>{provider.name}</span>
+              <strong>{formatScore(provider.score)}</strong>
+            </span>
+          ))}
+          <span className="mt-2 flex items-center justify-between gap-5 border-t border-[var(--border)] pt-2 text-xs text-[var(--text)]">
+            <span>Average</span>
+            <strong>{formatScore(average)}</strong>
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+type M02ProviderScore = {
+  completedAt: string;
+  key: string;
+  name: string;
+  score: number;
+};
+
+export function deriveM02ProviderScores(caars: CaarRecord[], locationId: string): M02ProviderScore[] {
+  const latestByProvider = new Map<string, M02ProviderScore>();
+  for (const caar of caars) {
+    if (caar.locationId !== locationId || caar.traceability?.module !== "M02") continue;
+    const vendor = caar.traceability.evidence.find(
+      (evidence) => evidence.artifactKey.startsWith("m02-settlement") && evidence.vendor,
+    )?.vendor ?? caar.traceability.evidence.find((evidence) => evidence.vendor)?.vendor;
+    if (!vendor) continue;
+    const key = normalizeProviderKey(vendor);
+    const completedAt = caar.traceability.certCompletedAt ?? "";
+    const current = latestByProvider.get(key);
+    if (!current || completedAt > current.completedAt) {
+      latestByProvider.set(key, {
+        completedAt,
+        key,
+        name: formatProviderName(vendor),
+        score: caar.trustScore,
+      });
+    }
+  }
+  return [...latestByProvider.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function normalizeProviderKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function formatProviderName(value: string) {
+  const key = normalizeProviderKey(value);
+  if (key === "ubereats") return "Uber Eats";
+  if (key === "doordash") return "DoorDash";
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function truncateScore(value: number) {
+  return Math.trunc(value * 100) / 100;
+}
+
+function formatScore(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function MissingModule() {

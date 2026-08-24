@@ -205,6 +205,7 @@ export function SentryViewRouter({
   if (activeView === "waterfall") {
     return (
       <WaterfallView
+        caars={caars}
         hasTeamAccount={hasTeamAccount}
         locations={locations}
         onAddLocation={onAddLocation}
@@ -225,6 +226,7 @@ export function SentryViewRouter({
     if (!activeLocation) {
       return (
         <WaterfallView
+          caars={caars}
           hasTeamAccount={hasTeamAccount}
           locations={locations}
           onAddLocation={onAddLocation}
