@@ -289,6 +289,8 @@ To recover development on a new machine:
 
 - Application entry: [`src/app/page.tsx`](src/app/page.tsx)
 - Main client orchestration: [`src/components/sentry/SentryApp.tsx`](src/components/sentry/SentryApp.tsx)
+- Typed client request boundary: [`src/components/sentry/api/client.ts`](src/components/sentry/api/client.ts). It owns fetch/JSON response mechanics; React components continue to own request sequencing, loading, errors, and state application.
+- Pure CAAR calculation projections: [`src/components/sentry/caar/calculations.ts`](src/components/sentry/caar/calculations.ts). These project persisted citation evidence for display and never recompute certified recovery.
 - View routing: [`src/components/sentry/SentryViewRouter.tsx`](src/components/sentry/SentryViewRouter.tsx)
 - Provider catalog: [`src/components/sentry/vendor-catalog.ts`](src/components/sentry/vendor-catalog.ts)
 - Upload intake: [`src/lib/uploads/intake.ts`](src/lib/uploads/intake.ts)
@@ -296,6 +298,7 @@ To recover development on a new machine:
 - Authentication: [`src/lib/auth`](src/lib/auth)
 - Certification service: [`src/lib/certification/service.ts`](src/lib/certification/service.ts)
 - Rule engine: [`src/lib/mge/engine.ts`](src/lib/mge/engine.ts)
+- Deterministic engine value normalization: [`src/lib/mge/values.ts`](src/lib/mge/values.ts). These helpers contain no state, I/O, or rule decisions; engine phase ordering remains in `engine.ts`.
 - CAAR persistence/access: [`src/lib/caar`](src/lib/caar)
 - API routes: [`src/app/api`](src/app/api)
 - SuperAdmin: [`src/app/superadmin`](src/app/superadmin)
@@ -304,7 +307,7 @@ To recover development on a new machine:
 
 ## Known limitations and maintenance notes
 
-- `SentryApp.tsx` remains a large orchestration component and should be decomposed incrementally.
+- `SentryApp.tsx`, `UploadCenterView.tsx`, `CaarReportModal.tsx`, and the MGE remain intentionally incremental decomposition targets. State stays with the owning component and domain phase instead of a global client store.
 - Fourteen unused-code warnings remain, although lint has no errors.
 - The archived synthetic M02 recovery packs do not represent the current DoorDash export schema.
 - Blob storage in PostgreSQL is operational but may require an external object-storage strategy as evidence volume grows.

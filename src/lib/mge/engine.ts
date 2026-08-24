@@ -1,3 +1,15 @@
+import {
+  centsToDollars,
+  clamp,
+  dollarsToCents,
+  formatCurrency,
+  numberValue,
+  parseDateValue,
+  roundCurrency,
+  roundInteger,
+  textValue,
+} from "./values";
+
 type ModuleId = "M01" | "M02" | "M03";
 type Cadence = "monthly_final" | "weekly_preliminary";
 
@@ -3804,34 +3816,6 @@ function scoreDetail(scorePct: number, detail: string): Mq6Score {
   };
 }
 
-function centsToDollars(value: number) {
-  return value / 100;
-}
-
-function dollarsToCents(value: number) {
-  return Math.round(value * 100);
-}
-
-function numberValue(value: number | string | undefined | null) {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : 0;
-  }
-  if (!value) return 0;
-  const cleaned = value.replace(/[^0-9.-]/g, "");
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function parseDateValue(value: string | undefined | null) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function textValue(value: string | undefined | null) {
-  return String(value ?? "").trim().toLowerCase();
-}
-
 function truthyContractFlag(contract: Record<string, string> | null | undefined, key: string) {
   const value = textValue(contract?.[key]);
   return value === "true" || value === "yes" || value === "1" || value === "enabled";
@@ -3854,25 +3838,4 @@ function resolveVendorName(context: RuleContext) {
 function surchargeRestrictedState(contract: Record<string, string> | null | undefined) {
   const state = textValue(contract?.state || contract?.jurisdiction);
   return ["ca", "co", "ct", "ma", "me", "ny", "ok"].some((token) => state === token || state.includes(token));
-}
-
-function roundCurrency(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function roundInteger(value: number) {
-  return Math.round(value);
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    currency: "USD",
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-    style: "currency",
-  }).format(value);
 }

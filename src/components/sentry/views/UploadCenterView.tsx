@@ -13,6 +13,7 @@ import type {
 import { getVendorCatalog } from "../vendor-catalog";
 import { getTemplateHeaders } from "@/lib/uploads/definitions";
 import { AccessibleDialog } from "../ui/AccessibleDialog";
+import { requestApiJson } from "../api/client";
 
 type UploadCardState = {
   phase: "idle" | "uploading" | "success" | "review" | "error";
@@ -217,11 +218,7 @@ export function UploadCenterView({
     });
 
     try {
-      const response = await fetch(`/api/v1/uploads/${uploadId}/extracted-text`, {
-        method: "GET",
-        credentials: "same-origin",
-      });
-      const payload = (await response.json()) as
+      const { ok, payload } = await requestApiJson<
         | {
             artifactKey: string;
             fileName: string;
@@ -232,9 +229,13 @@ export function UploadCenterView({
             text: string;
             uploadId: number;
           }
-        | { error?: string };
+        | { error?: string }
+      >(`/api/v1/uploads/${uploadId}/extracted-text`, {
+        method: "GET",
+        credentials: "same-origin",
+      });
 
-      if (!response.ok || !("uploadId" in payload)) {
+      if (!ok || !("uploadId" in payload)) {
         const message =
           "error" in payload && typeof payload.error === "string"
             ? payload.error

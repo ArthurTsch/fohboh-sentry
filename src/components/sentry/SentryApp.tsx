@@ -64,6 +64,7 @@ import type {
 } from "./types";
 import { resolveVendorKey, resolveVendorSelections } from "./vendor-catalog";
 import { LandingPage } from "./views/LandingPage";
+import { readApiJson } from "./api/client";
 
 type ActiveArtifactState = {
   accountId: string;
@@ -397,17 +398,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
-    const response = await fetch("/api/restaurants", {
+    const payload = await readApiJson<{ restaurants?: DatabaseRestaurant[] }>("/api/restaurants", {
       cache: "no-store",
     });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as {
-      restaurants?: DatabaseRestaurant[];
-    };
+    if (!payload) return;
 
     setWgsOnboardingState((current) => ({
       ...current,
@@ -429,17 +423,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
-    const response = await fetch("/api/caars", {
+    const payload = await readApiJson<{ reports?: DatabaseCaarRecord[] }>("/api/caars", {
       cache: "no-store",
     });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as {
-      reports?: DatabaseCaarRecord[];
-    };
+    if (!payload) return;
 
     setCaarState(payload.reports ?? []);
   }, [effectiveSession, persistenceHydrated]);
@@ -544,17 +531,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
-    const response = await fetch("/api/v1/governance/workspaces", {
+    const payload = await readApiJson<{ workspaces?: PersistedWorkspaceRecord[] }>("/api/v1/governance/workspaces", {
       cache: "no-store",
     });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as {
-      workspaces?: PersistedWorkspaceRecord[];
-    };
+    if (!payload) return;
 
     const persistedWorkspaces = payload.workspaces ?? [];
     if (persistedWorkspaces.length === 0) {
@@ -667,17 +647,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
-    const response = await fetch("/api/v1/uploads", {
+    const payload = await readApiJson<{ uploads?: PersistedUploadRecord[] }>("/api/v1/uploads", {
       cache: "no-store",
     });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as {
-      uploads?: PersistedUploadRecord[];
-    };
+    if (!payload) return;
 
     const uploadRecords = payload.uploads ?? [];
     for (const upload of uploadRecords) {
@@ -709,15 +682,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
-    const response = await fetch("/api/v1/support/tickets?queue=1", {
+    const payload = await readApiJson<{ tickets?: PersistedSupportTicket[] }>("/api/v1/support/tickets?queue=1", {
       cache: "no-store",
     });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as { tickets?: PersistedSupportTicket[] };
+    if (!payload) return;
 
     setWgsQueueState(
       (payload.tickets ?? [])
@@ -747,17 +715,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
-    const response = await fetch("/api/v1/access-requests", {
+    const payload = await readApiJson<{ requests?: PersistedAccessRequest[] }>("/api/v1/access-requests", {
       cache: "no-store",
     });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as {
-      requests?: PersistedAccessRequest[];
-    };
+    if (!payload) return;
 
     setWgsApprovalState(payload.requests ?? []);
   }, [effectiveSession, persistenceHydrated]);
@@ -769,17 +730,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       return;
     }
 
-    const response = await fetch("/api/v1/activity-log", {
+    const payload = await readApiJson<{ logs?: PersistedActivityLog[] }>("/api/v1/activity-log", {
       cache: "no-store",
     });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as {
-      logs?: PersistedActivityLog[];
-    };
+    if (!payload) return;
 
     setLogState(payload.logs ?? []);
   }, [effectiveSession, persistenceHydrated]);
