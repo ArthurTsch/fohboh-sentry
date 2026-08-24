@@ -18,6 +18,9 @@ export function deriveM02Calculation(
     ?.sampleEvidence.find((row) => typeof row.commission_base_amount === "number");
   if (!sample) return null;
   const number = (key: string) => typeof sample[key] === "number" ? sample[key] as number : 0;
+  const reconciliationSample = findReconciliationSample(ruleCitations);
+  const reconciliationNumber = (key: string) =>
+    typeof reconciliationSample?.[key] === "number" ? reconciliationSample[key] as number : null;
   const reconciliationBasis = number("reconciliation_statement_basis");
   const posBasis = number("pos_basis_amount");
   const reconciliationDifference = number("reconciliation_difference");
@@ -36,6 +39,7 @@ export function deriveM02Calculation(
     reconciliationDifference,
     reconciliationPct: reconciliationBasis > 0 ? (reconciliationDifference / reconciliationBasis) * 100 : 0,
     totalBasis: number("commission_base_amount"),
+    ...deriveBankReconciliation(reconciliationNumber),
   };
 }
 
@@ -48,6 +52,9 @@ export function deriveM01Calculation(
     ?.sampleEvidence.find((row) => typeof row.expected_fee_amount === "number");
   if (!sample) return null;
   const number = (key: string) => typeof sample[key] === "number" ? sample[key] as number : 0;
+  const reconciliationSample = findReconciliationSample(ruleCitations);
+  const reconciliationNumber = (key: string) =>
+    typeof reconciliationSample?.[key] === "number" ? reconciliationSample[key] as number : null;
   const basis = number("basis_amount");
   const reconciliationDifference = number("reconciliation_difference");
   return {
@@ -65,5 +72,26 @@ export function deriveM01Calculation(
     transactionFees: number("expected_txn_component"),
     transactionCount: number("transaction_count"),
     transactionFee: number("contracted_per_txn_fee"),
+    ...deriveBankReconciliation(reconciliationNumber),
+  };
+}
+
+function findReconciliationSample(ruleCitations: CaarRuleCitationSummary[]) {
+  return ruleCitations
+    .find((citation) => citation.ruleId === "R122")
+    ?.sampleEvidence.find((row) => typeof row.pos_basis === "number");
+}
+
+function deriveBankReconciliation(number: (key: string) => number | null) {
+  return {
+    bankBasis: number("bank_basis"),
+    bankDifference: number("bank_difference"),
+    bankDifferencePct: number("bank_difference_percent"),
+    bankMatchCount: number("bank_match_count"),
+    bankScoreContribution: number("bank_score_contribution"),
+    feeScoreContribution: number("fee_score_contribution"),
+    payoutBasis: number("payout_basis"),
+    posScoreContribution: number("pos_score_contribution"),
+    reconciliationTotalScore: number("reconciliation_total_score"),
   };
 }

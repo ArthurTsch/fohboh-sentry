@@ -2161,6 +2161,7 @@ function buildCanonicalTrustGateCitations({
     ? (reconciliationDifference / processorBasis) * 100
     : null;
   const settlementTimingBasis = usesSettlementTimingBasis(context);
+  const reconciliationBreakdown = resolveCrossSystemReconciliationBreakdown(context);
 
   const citations = [
     buildNarrativeCitation("R116", {
@@ -2216,6 +2217,15 @@ function buildCanonicalTrustGateCitations({
         : "Independent POS transaction basis",
       settlement_timing_context: settlementTimingBasis,
       tg04_score: trustGates.TG04.scorePct,
+      bank_basis: roundCurrency(reconciliationBreakdown.bankDeposit),
+      bank_difference: reconciliationBreakdown.bankDifference,
+      bank_difference_percent: reconciliationBreakdown.bankDifferencePct,
+      bank_match_count: reconciliationBreakdown.bankMatchCount,
+      bank_score_contribution: reconciliationBreakdown.bankContribution,
+      fee_score_contribution: reconciliationBreakdown.feeContribution,
+      payout_basis: roundCurrency(reconciliationBreakdown.payoutAmount),
+      pos_score_contribution: reconciliationBreakdown.posContribution,
+      reconciliation_total_score: reconciliationBreakdown.totalScore,
     }),
     buildNarrativeCitation("R123", {
       detail:
@@ -2817,7 +2827,14 @@ function scoreSourceAuthenticity(context: RuleContext): Mq6Score {
 }
 
 function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
-  let score = 0;
+  const breakdown = resolveCrossSystemReconciliationBreakdown(context);
+  return scoreDetail(breakdown.totalScore, breakdown.detailParts.join(" "));
+}
+
+function resolveCrossSystemReconciliationBreakdown(context: RuleContext) {
+  let posContribution = 0;
+  let feeContribution = 0;
+  let bankContribution = 0;
   const detailParts: string[] = [];
   const statementGoverned = Boolean(
     context.statement?.uploaded &&
@@ -2837,8 +2854,8 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
   const matchedToastDeposits = context.moduleId === "M01" ? reconcileToastBankDeposits(context) : null;
   const bankDeposit = numberValue(matchedToastDeposits?.matchedDepositAmount ?? context.bank?.metrics?.depositAmount);
   const payoutAmount = numberValue(
-    matchedToastDeposits?.matchedPayoutAmount ??
-      context.pos?.metrics?.payoutAmount ??
+    matchedToastDeposits?.matchedPayoutAmount ||
+      context.pos?.metrics?.payoutAmount ||
       context.statement?.metrics?.payoutAmount,
   );
   const settlementTimingBasis = usesSettlementTimingBasis(context);
@@ -2860,13 +2877,13 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
   if (statementGoverned && posGoverned && statementBasis > 0 && posBasis > 0) {
     const delta = relativeDelta(statementBasis, posBasis);
     if (settlementTimingBasis) {
-      score += 25;
+      posContribution = 25;
       detailParts.push("Processing volume and settled batches use different timing bases; the difference is retained as timing context and does not count as a POS failure.");
     } else if (delta <= 0.05) {
-      score += 25;
+      posContribution = 25;
       detailParts.push("POS-to-source basis tied within 5%.");
     } else if (delta <= 0.12) {
-      score += 12;
+      posContribution = 12;
       detailParts.push("POS-to-source basis tied within 12% but remains outside final tolerance.");
     } else {
       detailParts.push("POS-to-source basis failed tolerance.");
@@ -2876,29 +2893,29 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
   }
 
   if (statementGoverned && statementFees > 0 && context.contract) {
-    score += 25;
+    feeContribution = 25;
     detailParts.push("Contract-driven shadow fee could be computed from governed statement evidence.");
   } else {
     detailParts.push("Contract or statement evidence was insufficient for shadow fee computation.");
   }
 
   if (!bankRequired) {
-    score += 50;
+    bankContribution = 50;
     detailParts.push("No governed bank tie-out is required for the active royalty module.");
   } else if (context.cadence === "weekly_preliminary") {
-    score += 50;
+    bankContribution = 50;
     detailParts.push("Monthly bank tie-out deferred by weekly preliminary cadence.");
   } else if (statementGoverned && bankGoverned && bankDeposit > 0 && payoutAmount > 0) {
     const delta = relativeDelta(bankDeposit, payoutAmount);
     if (delta <= 0.05) {
-      score += 50;
+      bankContribution = 50;
       detailParts.push(
         matchedToastDeposits
           ? `Toast payout-reference bank tie-out cleared within 5% across ${matchedToastDeposits.matchCount} matched deposits.`
           : "Settlement-to-bank tie-out cleared within 5%.",
       );
     } else if (delta <= 0.12) {
-      score += 25;
+      bankContribution = 25;
       detailParts.push(
         matchedToastDeposits
           ? `Toast payout-reference bank tie-out remains outside final tolerance across ${matchedToastDeposits.matchCount} matched deposits.`
@@ -2915,7 +2932,23 @@ function scoreCrossSystemReconciliation(context: RuleContext): Mq6Score {
     detailParts.push("Bank reconciliation evidence missing.");
   }
 
-  return scoreDetail(score, detailParts.join(" "));
+  return {
+    bankContribution,
+    bankDeposit,
+    bankDifference: bankDeposit > 0 && payoutAmount > 0 ? roundCurrency(Math.abs(bankDeposit - payoutAmount)) : null,
+    bankDifferencePct:
+      bankDeposit > 0 && payoutAmount > 0
+        ? roundCurrency(relativeDelta(bankDeposit, payoutAmount) * 100)
+        : null,
+    bankMatchCount: matchedToastDeposits?.matchCount ?? 0,
+    detailParts,
+    feeContribution,
+    payoutAmount,
+    posBasis,
+    posContribution,
+    statementBasis,
+    totalScore: posContribution + feeContribution + bankContribution,
+  };
 }
 
 function reconcileToastBankDeposits(context: RuleContext) {

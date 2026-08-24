@@ -1,6 +1,12 @@
 import { useRef, type ReactNode } from "react";
 import { AccessibleDialog } from "../ui/AccessibleDialog";
-import { deriveM01Calculation, deriveM02Calculation, uniqueRuleCitations } from "../caar/calculations";
+import {
+  deriveM01Calculation,
+  deriveM02Calculation,
+  uniqueRuleCitations,
+  type M01Calculation,
+  type M02Calculation,
+} from "../caar/calculations";
 import type {
   CaarEvidenceTrace,
   CaarProvenanceKind,
@@ -440,6 +446,7 @@ export function CaarReportModal({
               Actual fees: {formatMoneyLike(m01Calculation.actualFees)} · Expected fees: {formatMoneyLike(m01Calculation.expectedFees)}
               <br /><strong>Persisted certified recovery: {m01Calculation.certifiedRecoveryDisplay}</strong>
             </div>
+            <ReconciliationBreakdown calculation={m01Calculation} />
             <details className="mt-4 rounded-2xl border border-[var(--border)] bg-white p-4">
               <summary className="cursor-pointer font-[family-name:var(--font-display)] text-base font-bold text-[var(--text)]">
                 View detailed calculation methodology
@@ -527,6 +534,7 @@ export function CaarReportModal({
                 </div>
               </div>
             </div>
+            <ReconciliationBreakdown calculation={m02Calculation} />
             <details className="mt-4 rounded-2xl border border-[var(--border)] bg-white p-4">
               <summary className="cursor-pointer font-[family-name:var(--font-display)] text-base font-bold text-[var(--text)]">
                 View detailed calculation methodology
@@ -2286,6 +2294,81 @@ function CoverMeta({ label, mono = false, value }: { label: string; mono?: boole
       </div>
       <div className={`mt-2 text-sm font-medium text-[var(--text)] ${mono ? "font-[family-name:var(--font-mono)]" : ""}`}>
         {value}
+      </div>
+    </div>
+  );
+}
+
+function ReconciliationBreakdown({
+  calculation,
+}: {
+  calculation: NonNullable<M01Calculation | M02Calculation>;
+}) {
+  const persisted = calculation.reconciliationTotalScore !== null;
+  const bankStatus =
+    calculation.bankScoreContribution === 50
+      ? "Passed"
+      : calculation.bankScoreContribution === 25
+        ? "Partial"
+        : calculation.bankBasis !== null && calculation.payoutBasis !== null
+          ? "Failed"
+          : "Unavailable";
+
+  return (
+    <div className="mt-4 rounded-2xl border border-[var(--border)] bg-white p-4">
+      <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+        Complete cross-system reconciliation
+      </div>
+      {persisted ? (
+        <>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <ValueChip label="DSP / processor payout" value={formatMoneyLike(calculation.payoutBasis)} />
+            <ValueChip label="Bank deposit" value={formatMoneyLike(calculation.bankBasis)} />
+            <ValueChip label="Bank difference" value={formatMoneyLike(calculation.bankDifference)} />
+            <ValueChip
+              label="Bank difference %"
+              value={`${(calculation.bankDifferencePct ?? 0).toFixed(2)}%`}
+            />
+          </div>
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            <ScoreContribution
+              label="POS-to-source comparison"
+              score={calculation.posScoreContribution ?? 0}
+              total={25}
+            />
+            <ScoreContribution
+              label="Contract shadow-fee calculation"
+              score={calculation.feeScoreContribution ?? 0}
+              total={25}
+            />
+            <ScoreContribution
+              label="Payout-to-bank reconciliation"
+              score={calculation.bankScoreContribution ?? 0}
+              total={50}
+            />
+          </div>
+          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
+            <strong>Bank result: {bankStatus}.</strong> Difference {formatMoneyLike(calculation.bankDifference)} ({(calculation.bankDifferencePct ?? 0).toFixed(2)}%). Full credit requires a difference within 5%; partial credit applies through 12%.
+            {calculation.bankMatchCount ? ` ${calculation.bankMatchCount} payout/deposit references matched.` : " No payout/deposit reference match was persisted."}
+            <br />
+            <strong>Cross-System Reconciliation: {calculation.reconciliationTotalScore}/100.</strong>
+          </div>
+        </>
+      ) : (
+        <div className="mt-3 rounded-xl border border-[rgba(214,48,49,0.2)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]">
+          This historical CAAR does not contain the persisted bank-reconciliation inputs required to reproduce the complete calculation. Rerun certification to generate the expanded calculation record.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScoreContribution({ label, score, total }: { label: string; score: number; total: number }) {
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm text-[var(--text)]">
+      <div className="text-[var(--muted)]">{label}</div>
+      <div className="mt-1 font-[family-name:var(--font-display)] text-xl font-bold">
+        {score}/{total}
       </div>
     </div>
   );

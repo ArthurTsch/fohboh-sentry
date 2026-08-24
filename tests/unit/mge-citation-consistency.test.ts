@@ -68,6 +68,14 @@ describe("M02 citation consistency", () => {
     expect(citation("R123")?.disposition).toBe("passed");
     expect(citation("R125")?.disposition).toBe("passed");
     expect(citation("R123")?.firedCount).toBe(0);
+    expect(citation("R122")?.sampleEvidence[0]).toMatchObject({
+      bank_basis: 4_783.38,
+      bank_score_contribution: 0,
+      fee_score_contribution: 25,
+      payout_basis: 3_656.82,
+      pos_score_contribution: 25,
+      reconciliation_total_score: 50,
+    });
     expect(citation("R125")?.firedCount).toBe(0);
     expect(result.ruleCitations.filter((row) => row.disposition === "blocking")).toEqual([]);
     expect(result.ready).toBe(true);

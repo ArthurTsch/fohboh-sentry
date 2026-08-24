@@ -26,9 +26,35 @@ describe("CAAR calculation display", () => {
         }],
         varianceDisplay: "$0.17",
       },
+      {
+        firedCount: 1,
+        ruleId: "R122",
+        ruleVersion: "mge-v1.0.0",
+        sampleEvidenceCount: 1,
+        sampleEvidence: [{
+          bank_basis: 80,
+          bank_difference: 20,
+          bank_difference_percent: 20,
+          bank_match_count: 0,
+          bank_score_contribution: 0,
+          fee_score_contribution: 25,
+          payout_basis: 100,
+          pos_basis: 400,
+          pos_score_contribution: 25,
+          reconciliation_total_score: 50,
+        }],
+        varianceDisplay: "$0.00",
+      },
     ], "$0.17");
 
     expect(result?.certifiedRecoveryDisplay).toBe("$0.17");
+    expect(result).toMatchObject({
+      bankBasis: 80,
+      bankDifference: 20,
+      bankScoreContribution: 0,
+      payoutBasis: 100,
+      reconciliationTotalScore: 50,
+    });
     expect(result).not.toHaveProperty("commissionVariance");
   });
 

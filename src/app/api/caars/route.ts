@@ -842,9 +842,8 @@ export async function GET(request: Request) {
     const persistedCaarById = new Map(persistedCaars.map((row) => [row.caar_external_id, row]));
     const certRunIds = persistedCaars.map((row) => row.cert_run_id);
     const governedLocationIds = [...new Set(persistedCaars.map((row) => row.location_id))];
-    const uploadRestaurantIds = [...new Set(canonicalReports.map((row) => row.restaurant_id).filter((value): value is number => typeof value === "number"))];
 
-    const [certRuns, ruleCitations, uploads, sealedSchemas, sealedContracts] = await Promise.all([
+    const [certRuns, ruleCitations, sealedSchemas, sealedContracts] = await Promise.all([
       certRunIds.length
         ? prisma.cert_runs_v2.findMany({
             where: {
@@ -879,30 +878,6 @@ export async function GET(request: Request) {
               rule_version: true,
               sample_evidence: true,
               variance_cents: true,
-            },
-          })
-        : Promise.resolve([]),
-      uploadRestaurantIds.length
-        ? prisma.uploads_v2.findMany({
-            where: {
-              location_id: {
-                in: uploadRestaurantIds,
-              },
-              superseded_by: null,
-            },
-            orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
-            select: {
-              artifact_key: true,
-              file_name: true,
-              id: true,
-              location_id: true,
-              module: true,
-              page_count: true,
-              row_count: true,
-              sha256: true,
-              uploaded_at: true,
-              validation_summary: true,
-              vendor: true,
             },
           })
         : Promise.resolve([]),
@@ -947,6 +922,28 @@ export async function GET(request: Request) {
           })
         : Promise.resolve([]),
     ]);
+    const persistedUploadIds = [...new Set(certRuns.flatMap((run) => parseNumericIds(run.upload_ids)))];
+    const uploads = persistedUploadIds.length
+      ? await prisma.uploads_v2.findMany({
+          where: {
+            id: { in: persistedUploadIds },
+          },
+          orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
+          select: {
+            artifact_key: true,
+            file_name: true,
+            id: true,
+            location_id: true,
+            module: true,
+            page_count: true,
+            row_count: true,
+            sha256: true,
+            uploaded_at: true,
+            validation_summary: true,
+            vendor: true,
+          },
+        })
+      : [];
 
     const certRunById = new Map(certRuns.map((row) => [row.id, row]));
     const ruleCitationsByRun = new Map<number, typeof ruleCitations>();
@@ -984,13 +981,11 @@ export async function GET(request: Request) {
         const scoreNeutralCitations = citations.filter(
           (citation) => !problemCitationIds.has(citation.rule_id) && !scoreReducingCitationIds.has(citation.rule_id),
         );
-        const uploadLocationId = report.restaurant_id ?? null;
         const certRunUploadIds = new Set(parseNumericIds(certRun?.upload_ids));
         const moduleUploads =
-          uploadLocationId && moduleId
+          moduleId
             ? uploads.filter(
                 (upload) =>
-                  upload.location_id === uploadLocationId &&
                   upload.module === moduleId &&
                   certRunUploadIds.has(upload.id),
               )
