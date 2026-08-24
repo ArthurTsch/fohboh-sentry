@@ -86,19 +86,33 @@ type Metrics = {
 };
 
 type MonthlyMetrics = {
+  adjustmentAmount?: number;
   basisAmount?: number;
+  chargebackCount?: number;
   deliveryBasisAmount?: number;
   deliveryCommissionAmount?: number;
+  deliveryFeeAmount?: number;
   deliveryOrderCount?: number;
   feeAmount?: number;
+  duplicateOrderCount?: number;
+  duplicateTransactionCount?: number;
+  errorChargeAmount?: number;
+  marketingFeeAmount?: number;
+  memberOrderCount?: number;
   orderCount?: number;
+  otherFeeAmount?: number;
+  payoutAmount?: number;
   pickupBasisAmount?: number;
   pickupCommissionAmount?: number;
   pickupOrderCount?: number;
+  promoOrderCount?: number;
+  refundCount?: number;
   transactionCount?: number;
+  voidCount?: number;
 };
 
 type ReferenceRow = {
+  activityMonth?: string;
   amount: number;
   candidateAmounts?: number[];
   externalRefId: string;
@@ -1594,23 +1608,46 @@ export function scopeArtifactToCertificationMonth(
       );
     metrics = {
       ...metrics,
+      adjustmentAmount: numberValue(matchingMetrics?.adjustmentAmount),
       basisAmount: numberValue(matchingMetrics?.basisAmount),
+      chargebackCount: numberValue(matchingMetrics?.chargebackCount),
       deliveryBasisAmount: numberValue(matchingMetrics?.deliveryBasisAmount),
       deliveryCommissionAmount: numberValue(matchingMetrics?.deliveryCommissionAmount),
+      deliveryFeeAmount: numberValue(matchingMetrics?.deliveryFeeAmount),
       deliveryOrderCount: numberValue(matchingMetrics?.deliveryOrderCount),
+      duplicateOrderCount: numberValue(matchingMetrics?.duplicateOrderCount),
+      duplicateTransactionCount: numberValue(matchingMetrics?.duplicateTransactionCount),
+      errorChargeAmount: numberValue(matchingMetrics?.errorChargeAmount),
       feeAmount: numberValue(matchingMetrics?.feeAmount),
+      marketingFeeAmount: numberValue(matchingMetrics?.marketingFeeAmount),
+      memberOrderCount: numberValue(matchingMetrics?.memberOrderCount),
       orderCount: numberValue(matchingMetrics?.orderCount),
+      otherFeeAmount: numberValue(matchingMetrics?.otherFeeAmount),
+      payoutAmount:
+        matchingMetrics?.payoutAmount !== undefined
+          ? numberValue(matchingMetrics.payoutAmount)
+          : Object.keys(monthlyMetrics).length === 1 && matchingMetrics
+            ? numberValue(metrics.payoutAmount)
+            : 0,
       pickupBasisAmount: numberValue(matchingMetrics?.pickupBasisAmount),
       pickupCommissionAmount: numberValue(matchingMetrics?.pickupCommissionAmount),
       pickupOrderCount: numberValue(matchingMetrics?.pickupOrderCount),
+      promoOrderCount: numberValue(matchingMetrics?.promoOrderCount),
+      refundCount: numberValue(matchingMetrics?.refundCount),
       transactionCount: numberValue(matchingMetrics?.transactionCount),
+      voidCount: numberValue(matchingMetrics?.voidCount),
     };
   }
 
-  const scopeReferenceRows = (rows: ReferenceRow[] | undefined) => {
+  const scopeReferenceRows = (
+    rows: ReferenceRow[] | undefined,
+    useActivityMonth = false,
+  ) => {
     if (!rows?.length) return rows;
     const scoped = rows.filter((row) => {
-      const month = referenceRowMonth(row);
+      const month = useActivityMonth
+        ? row.activityMonth ?? null
+        : referenceRowMonth(row);
       if (month) detectedMonths.add(month);
       if (month === certificationMonth) return true;
       excludedRows += 1;
@@ -1618,7 +1655,17 @@ export function scopeArtifactToCertificationMonth(
     });
     return scoped;
   };
-  const payoutReferenceRows = scopeReferenceRows(metrics.payoutReferenceRows);
+  const m02PayoutRowsHaveActivityMonth =
+    artifact.key === "m02-settlement" &&
+    Boolean(metrics.payoutReferenceRows?.some((row) => row.activityMonth));
+  const retainLegacyM02PayoutRows =
+    artifact.key === "m02-settlement" &&
+    !m02PayoutRowsHaveActivityMonth &&
+    detectedMonths.size === 1 &&
+    detectedMonths.has(certificationMonth);
+  const payoutReferenceRows = retainLegacyM02PayoutRows
+    ? metrics.payoutReferenceRows
+    : scopeReferenceRows(metrics.payoutReferenceRows, m02PayoutRowsHaveActivityMonth);
   const depositReferenceRows = scopeReferenceRows(metrics.depositReferenceRows);
 
   if (metrics.payoutReferenceRows?.length) {
@@ -1661,8 +1708,10 @@ function referenceRowMonth(row: ReferenceRow) {
   if (!value) return null;
   const iso = /^(\d{4})-(\d{2})-\d{2}/.exec(value);
   if (iso) return `${iso[1]}-${iso[2]}`;
-  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(value);
-  return us ? `${us[3]}-${us[1].padStart(2, "0")}` : null;
+  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})/.exec(value);
+  if (!us) return null;
+  const year = us[3].length === 2 ? `20${us[3]}` : us[3];
+  return `${year}-${us[1].padStart(2, "0")}`;
 }
 
 function monthKeyFromDate(value: Date) {

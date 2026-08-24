@@ -52,19 +52,33 @@ type UploadMetrics = {
 };
 
 type UploadMonthlyMetrics = {
+  adjustmentAmount: number;
   basisAmount: number;
+  chargebackCount: number;
   deliveryBasisAmount: number;
   deliveryCommissionAmount: number;
+  deliveryFeeAmount: number;
   deliveryOrderCount: number;
+  duplicateOrderCount: number;
+  duplicateTransactionCount: number;
+  errorChargeAmount: number;
   feeAmount: number;
+  marketingFeeAmount: number;
+  memberOrderCount: number;
   orderCount: number;
+  otherFeeAmount: number;
+  payoutAmount: number;
   pickupBasisAmount: number;
   pickupCommissionAmount: number;
   pickupOrderCount: number;
+  promoOrderCount: number;
+  refundCount: number;
   transactionCount: number;
+  voidCount: number;
 };
 
 type UploadReferenceRow = {
+  activityMonth?: string;
   amount: number;
   externalRefId: string;
   rowNumber?: number;
@@ -322,6 +336,8 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
   let settlementLagDaysTotal = 0;
   const seenOrderIds = new Map<string, number>();
   const seenTransactionIds = new Map<string, number>();
+  const seenMonthlyOrderIds = new Map<string, number>();
+  const seenMonthlyTransactionIds = new Map<string, number>();
   const monthlyMetrics: Record<string, UploadMonthlyMetrics> = {};
 
   for (const row of rows) {
@@ -374,16 +390,29 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     metrics.basisAmount += rowBasisAmount;
     if (artifactKey === "m02-pos" && rowMonthKey) {
         const bucket = monthlyMetrics[rowMonthKey] ?? {
+          adjustmentAmount: 0,
           basisAmount: 0,
+          chargebackCount: 0,
           deliveryBasisAmount: 0,
           deliveryCommissionAmount: 0,
+          deliveryFeeAmount: 0,
           deliveryOrderCount: 0,
+          duplicateOrderCount: 0,
+          duplicateTransactionCount: 0,
+          errorChargeAmount: 0,
           feeAmount: 0,
+          marketingFeeAmount: 0,
+          memberOrderCount: 0,
           orderCount: 0,
+          otherFeeAmount: 0,
+          payoutAmount: 0,
           pickupBasisAmount: 0,
           pickupCommissionAmount: 0,
           pickupOrderCount: 0,
+          promoOrderCount: 0,
+          refundCount: 0,
           transactionCount: 0,
+          voidCount: 0,
         };
         bucket.basisAmount += rowBasisAmount;
         bucket.orderCount += read("order_count", "menu_item_count", "order count") || 1;
@@ -423,16 +452,29 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     }
     if (artifactKey === "m02-settlement" && rowMonthKey) {
       const bucket = monthlyMetrics[rowMonthKey] ?? {
+        adjustmentAmount: 0,
         basisAmount: 0,
+        chargebackCount: 0,
         deliveryBasisAmount: 0,
         deliveryCommissionAmount: 0,
+        deliveryFeeAmount: 0,
         deliveryOrderCount: 0,
+        duplicateOrderCount: 0,
+        duplicateTransactionCount: 0,
+        errorChargeAmount: 0,
         feeAmount: 0,
+        marketingFeeAmount: 0,
+        memberOrderCount: 0,
         orderCount: 0,
+        otherFeeAmount: 0,
+        payoutAmount: 0,
         pickupBasisAmount: 0,
         pickupCommissionAmount: 0,
         pickupOrderCount: 0,
+        promoOrderCount: 0,
+        refundCount: 0,
         transactionCount: 0,
+        voidCount: 0,
       };
       bucket.basisAmount += rowBasisAmount;
       bucket.feeAmount += rowCommissionAmount;
@@ -459,15 +501,20 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     );
     metrics.serviceFeeAmount +=
       artifactKey === "m02-settlement" ? Math.abs(serviceFeeAmount) : serviceFeeAmount;
-    metrics.otherFeeAmount += read("other_merchant_fees", "assessment", "withholdings", "external");
-    metrics.marketingFeeAmount +=
+    const otherFeeAmount = read("other_merchant_fees", "assessment", "withholdings", "external");
+    const marketingFeeAmount =
       readAbs("marketing adjustment", "offer redemption fee", "marketing fees") ||
       read("marketing_fee", "marketing_contribution", "marketing_fees");
+    const adjustmentAmount = read("adjustment_amount", "adjustment", "adjustments", "external");
+    const errorChargeAmount = readAbs("error_charge", "error_charges");
+    const deliveryFeeAmount = read("delivery_fee", "consumer_fee");
+    metrics.otherFeeAmount += otherFeeAmount;
+    metrics.marketingFeeAmount += marketingFeeAmount;
     metrics.taxRemittedAmount += read("tax_remitted", "tax");
     metrics.tipAmount += read("tip");
-    metrics.adjustmentAmount += read("adjustment_amount", "adjustment", "adjustments", "external");
-    metrics.errorChargeAmount += readAbs("error_charge", "error_charges");
-    metrics.deliveryFeeAmount += read("delivery_fee", "consumer_fee");
+    metrics.adjustmentAmount += adjustmentAmount;
+    metrics.errorChargeAmount += errorChargeAmount;
+    metrics.deliveryFeeAmount += deliveryFeeAmount;
     const payoutAmount = read(
       "payout_amount",
       "net_payout",
@@ -478,6 +525,15 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "net total",
     );
     metrics.payoutAmount += payoutAmount;
+    if (artifactKey === "m02-settlement" && rowMonthKey) {
+      const bucket = monthlyMetrics[rowMonthKey];
+      bucket.adjustmentAmount += adjustmentAmount;
+      bucket.deliveryFeeAmount += deliveryFeeAmount;
+      bucket.errorChargeAmount += errorChargeAmount;
+      bucket.marketingFeeAmount += marketingFeeAmount;
+      bucket.otherFeeAmount += otherFeeAmount;
+      bucket.payoutAmount += payoutAmount;
+    }
     metrics.depositAmount += read(
       "bank_deposit_amount",
       "total_dsp_deposits",
@@ -514,6 +570,9 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       payoutAmount !== 0
     ) {
       metrics.payoutReferenceRows.push({
+        ...(artifactKey === "m02-settlement" && rowMonthKey
+          ? { activityMonth: rowMonthKey }
+          : {}),
         amount: roundTo2(payoutAmount),
         externalRefId,
         rowNumber: metrics.payoutReferenceRows.length + 1,
@@ -534,18 +593,29 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       if (orderType.includes("pickup")) metrics.pickupOrderCount += 1;
       if (orderType.includes("delivery")) metrics.deliveryOrderCount += 1;
     }
-    if (orderType.includes("dashpass") || orderType.includes("member") || orderType.includes("uber one")) {
+    const isMemberOrder = orderType.includes("dashpass") || orderType.includes("member") || orderType.includes("uber one");
+    if (isMemberOrder) {
       metrics.memberOrderCount += 1;
+      if (artifactKey === "m02-settlement" && rowMonthKey) monthlyMetrics[rowMonthKey].memberOrderCount += 1;
     }
 
-    if (read("marketing_fee", "marketing_contribution") > 0) {
+    const isPromoOrder = read("marketing_fee", "marketing_contribution") > 0;
+    if (isPromoOrder) {
       metrics.promoOrderCount += 1;
+      if (artifactKey === "m02-settlement" && rowMonthKey) monthlyMetrics[rowMonthKey].promoOrderCount += 1;
     }
 
     const orderStatusIndex = valueFor("order_status", "trans_type", "description");
     const orderStatus = orderStatusIndex >= 0 ? String(row[orderStatusIndex] ?? "").toLowerCase() : "";
-    if (orderStatus.includes("refund")) metrics.refundCount += 1;
-    if (orderStatus.includes("void")) metrics.voidCount += 1;
+    const refundCountBeforeRow = metrics.refundCount;
+    const voidCountBeforeRow = metrics.voidCount;
+    const chargebackCountBeforeRow = metrics.chargebackCount;
+    if (orderStatus.includes("refund")) {
+      metrics.refundCount += 1;
+    }
+    if (orderStatus.includes("void")) {
+      metrics.voidCount += 1;
+    }
 
     if (read("refunds") > 0) metrics.refundCount += 1;
     if (read("chargebacks") > 0) metrics.chargebackCount += 1;
@@ -558,12 +628,22 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     if (refundIdIndex >= 0 && String(row[refundIdIndex] ?? "").trim()) {
       metrics.refundCount += 1;
     }
+    if (artifactKey === "m02-settlement" && rowMonthKey) {
+      const bucket = monthlyMetrics[rowMonthKey];
+      bucket.chargebackCount += metrics.chargebackCount - chargebackCountBeforeRow;
+      bucket.refundCount += metrics.refundCount - refundCountBeforeRow;
+      bucket.voidCount += metrics.voidCount - voidCountBeforeRow;
+    }
 
     const orderIdIndex = valueFor("order_id");
     if (orderIdIndex >= 0) {
       const orderId = String(row[orderIdIndex] ?? "").trim();
       if (orderId) {
         seenOrderIds.set(orderId, (seenOrderIds.get(orderId) ?? 0) + 1);
+        if (artifactKey === "m02-settlement" && rowMonthKey) {
+          const monthlyId = `${rowMonthKey}:${orderId}`;
+          seenMonthlyOrderIds.set(monthlyId, (seenMonthlyOrderIds.get(monthlyId) ?? 0) + 1);
+        }
       }
     }
 
@@ -572,6 +652,10 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       const transactionId = String(row[transactionIdIndex] ?? "").trim();
       if (transactionId) {
         seenTransactionIds.set(transactionId, (seenTransactionIds.get(transactionId) ?? 0) + 1);
+        if (artifactKey === "m02-settlement" && rowMonthKey) {
+          const monthlyId = `${rowMonthKey}:${transactionId}`;
+          seenMonthlyTransactionIds.set(monthlyId, (seenMonthlyTransactionIds.get(monthlyId) ?? 0) + 1);
+        }
       }
     }
 
@@ -622,6 +706,15 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     (sum, count) => sum + Math.max(0, count - 1),
     0,
   );
+  for (const [month, bucket] of Object.entries(monthlyMetrics)) {
+    const prefix = `${month}:`;
+    bucket.duplicateOrderCount = [...seenMonthlyOrderIds.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .reduce((sum, [, count]) => sum + Math.max(0, count - 1), 0);
+    bucket.duplicateTransactionCount = [...seenMonthlyTransactionIds.entries()]
+      .filter(([key]) => key.startsWith(prefix))
+      .reduce((sum, [, count]) => sum + Math.max(0, count - 1), 0);
+  }
 
   if (commissionRateSampleCount > 0) {
     metrics.commissionRateAppliedAvg = round(metrics.commissionRateAppliedAvg / commissionRateSampleCount);
@@ -638,16 +731,29 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
   if ((artifactKey === "m02-pos" || artifactKey === "m02-settlement") && Object.keys(monthlyMetrics).length > 0) {
     metrics.monthlyMetrics = Object.fromEntries(
       Object.entries(monthlyMetrics).map(([month, bucket]) => [month, {
+        adjustmentAmount: roundTo2(bucket.adjustmentAmount),
         basisAmount: roundTo2(bucket.basisAmount),
+        chargebackCount: round(bucket.chargebackCount),
         deliveryBasisAmount: roundTo2(bucket.deliveryBasisAmount),
         deliveryCommissionAmount: roundTo2(bucket.deliveryCommissionAmount),
+        deliveryFeeAmount: roundTo2(bucket.deliveryFeeAmount),
         deliveryOrderCount: round(bucket.deliveryOrderCount),
+        duplicateOrderCount: round(bucket.duplicateOrderCount),
+        duplicateTransactionCount: round(bucket.duplicateTransactionCount),
+        errorChargeAmount: roundTo2(bucket.errorChargeAmount),
         feeAmount: roundTo2(bucket.feeAmount),
+        marketingFeeAmount: roundTo2(bucket.marketingFeeAmount),
+        memberOrderCount: round(bucket.memberOrderCount),
         orderCount: round(bucket.orderCount),
+        otherFeeAmount: roundTo2(bucket.otherFeeAmount),
+        payoutAmount: roundTo2(bucket.payoutAmount),
         pickupBasisAmount: roundTo2(bucket.pickupBasisAmount),
         pickupCommissionAmount: roundTo2(bucket.pickupCommissionAmount),
         pickupOrderCount: round(bucket.pickupOrderCount),
+        promoOrderCount: round(bucket.promoOrderCount),
+        refundCount: round(bucket.refundCount),
         transactionCount: round(bucket.transactionCount),
+        voidCount: round(bucket.voidCount),
       }]),
     );
   }
@@ -704,9 +810,10 @@ function aggregatePayoutReferenceRows(rows: UploadMetrics["payoutReferenceRows"]
   const grouped = new Map<string, NonNullable<UploadMetrics["payoutReferenceRows"]>[number]>();
 
   for (const row of rows ?? []) {
-    const existing = grouped.get(row.externalRefId);
+    const groupKey = `${row.externalRefId}:${row.activityMonth ?? ""}`;
+    const existing = grouped.get(groupKey);
     if (!existing) {
-      grouped.set(row.externalRefId, { ...row });
+      grouped.set(groupKey, { ...row });
       continue;
     }
 
