@@ -12,9 +12,13 @@ import {
   type PersistedUploadValidation,
   validateUploadArtifact,
 } from "@/lib/uploads/intake";
-import { persistUploadBlob } from "@/lib/uploads/storage";
+import { deleteUploadBlob, persistUploadBlob } from "@/lib/uploads/storage";
+import {
+  acquireMultipartAdmission,
+  isDeclaredRequestTooLarge,
+  MAX_EVIDENCE_FILE_BYTES,
+} from "@/lib/uploads/request-limits";
 
-const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const DATABASE_READ_RETRY_DELAY_MS = 200;
 
 type ScopedRestaurant = {
@@ -295,6 +299,9 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const requestContext = getRequestContextFromRequest(request);
+  let releaseMultipartAdmission: (() => void) | null = null;
+  let stagedObjectKey: string | null = null;
+  let blobCommitted = false;
   try {
     const session = await requireManagerSession();
     if (session.role === "Viewer") {
@@ -333,6 +340,22 @@ export async function POST(request: Request) {
       return withRequestHeaders(response, requestContext);
     }
 
+    if (isDeclaredRequestTooLarge(request)) {
+      return withRequestHeaders(
+        NextResponse.json({ error: "Multipart request exceeds the 4.5 MB platform limit." }, { status: 413 }),
+        requestContext,
+      );
+    }
+    releaseMultipartAdmission = acquireMultipartAdmission(request);
+    if (!releaseMultipartAdmission) {
+      const response = NextResponse.json(
+        { error: "Upload capacity is temporarily busy. Try again shortly." },
+        { status: 503 },
+      );
+      response.headers.set("retry-after", "2");
+      return withRequestHeaders(response, requestContext);
+    }
+
     const formData = await request.formData();
     const file = formData.get("file");
     const locationId = String(formData.get("locationId") ?? "").trim();
@@ -359,9 +382,9 @@ export async function POST(request: Request) {
       ), requestContext);
     }
 
-    if (file.size > MAX_UPLOAD_BYTES) {
+    if (file.size > MAX_EVIDENCE_FILE_BYTES) {
       return withRequestHeaders(NextResponse.json(
-        { error: "Maximum upload size is 100MB per file." },
+        { error: "Maximum server-upload size is 4 MB per file." },
         { status: 413 },
       ), requestContext);
     }
@@ -455,6 +478,7 @@ export async function POST(request: Request) {
       buffer,
       objectKey,
     });
+    stagedObjectKey = objectKey;
 
     const created = await prisma.$transaction(async (tx) => {
       const uploads: Array<{ id: number }> = [];
@@ -523,6 +547,7 @@ export async function POST(request: Request) {
       maxWait: 10_000,
       timeout: 30_000,
     });
+    blobCommitted = true;
 
     const uploadResponses = validatedTargets.map((target, index) => buildUploadResponse({
       artifactKey: target.artifactKey,
@@ -559,6 +584,16 @@ export async function POST(request: Request) {
       { error: "Unable to persist this upload right now." },
       { status: 500 },
     ), requestContext);
+  } finally {
+    if (stagedObjectKey && !blobCommitted) {
+      await deleteUploadBlob(stagedObjectKey).catch((cleanupError) => {
+        logServerError("upload_blob_compensation_failed", cleanupError, {
+          objectKey: stagedObjectKey,
+          requestId: requestContext.requestId,
+        });
+      });
+    }
+    releaseMultipartAdmission?.();
   }
 }
 

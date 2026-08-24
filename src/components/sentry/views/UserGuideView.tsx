@@ -54,7 +54,7 @@ const guidePhases: GuidePhase[] = [
       {
         id: "2.1",
         text:
-          "Go to Upload Data and upload your card processor's transaction-level CSV export. Use the exact file downloaded from the processor portal - never open and resave in Excel, as this changes the file hash. Maximum file size: 100MB.",
+          "Go to Upload Data and upload your card processor's transaction-level CSV export. Use the exact file downloaded from the processor portal - never open and resave in Excel, as this changes the file hash. Maximum file size: 4 MB.",
         title: "Upload Your Processor Statement",
         where: "Where: Upload Data -> M01 -> Processor Statement CSV",
       },

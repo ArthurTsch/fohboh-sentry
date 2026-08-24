@@ -166,7 +166,9 @@ pnpm set-manager-password
 9. Review the persisted certification result and CAAR.
 10. Download the report or claim pack when the release conditions are met.
 
-Uploads are limited to 100 MB per request. Files and generated artifacts are currently stored in the `object_blobs_v2` PostgreSQL table rather than an external object-storage service.
+Evidence uploads are limited to 4 MB so the complete multipart request stays below Vercel's 4.5 MB function-body limit. Support tickets accept at most five attachments, 2 MB each and 4 MB in aggregate. Each application instance admits at most 24 MB of concurrent multipart buffering; excess requests receive `503` with a short retry interval.
+
+Files and generated artifacts are currently stored in the `object_blobs_v2` PostgreSQL table. A failed database write compensates by deleting any blob staged for that request. Operators can inspect unreferenced upload blobs older than 24 hours with `pnpm cleanup:upload-blobs` and delete only the reported objects with `pnpm cleanup:upload-blobs --apply`. The grace period protects in-flight writes. Larger uploads require a future direct-to-object-storage client upload flow rather than raising the function limit.
 
 ## Quality gate
 

@@ -12,8 +12,11 @@ const findMany = vi.fn();
 const findFirst = vi.fn();
 const findUniqueOrThrow = vi.fn();
 const updateMany = vi.fn();
+const create = vi.fn();
 const writeAuditLog = vi.fn();
 const readUploadBlob = vi.fn();
+const persistUploadBlob = vi.fn();
+const deleteUploadBlob = vi.fn();
 
 vi.mock("@/lib/auth/session", () => ({ requireManagerSession }));
 vi.mock("@/lib/ops/audit", () => ({
@@ -22,10 +25,10 @@ vi.mock("@/lib/ops/audit", () => ({
 }));
 vi.mock("@/lib/prisma", () => ({
   default: {
-    support_tickets_v2: { findFirst, findMany, findUniqueOrThrow, updateMany },
+    support_tickets_v2: { create, findFirst, findMany, findUniqueOrThrow, updateMany },
   },
 }));
-vi.mock("@/lib/uploads/storage", () => ({ readUploadBlob }));
+vi.mock("@/lib/uploads/storage", () => ({ deleteUploadBlob, persistUploadBlob, readUploadBlob }));
 
 const sessions = {
   admin: { accountId: "tenant-a", email: "admin@a.test", managerId: 1, role: "Admin" },
@@ -42,8 +45,11 @@ describe("support ticket authorization matrix", () => {
     findFirst.mockReset();
     findUniqueOrThrow.mockReset();
     updateMany.mockReset();
+    create.mockReset();
     writeAuditLog.mockReset();
     readUploadBlob.mockReset();
+    persistUploadBlob.mockReset();
+    deleteUploadBlob.mockReset();
   });
 
   it.each([sessions.wgs, sessions.superAdmin])("grants $role global queue access", (session) => {
@@ -134,5 +140,38 @@ describe("support ticket authorization matrix", () => {
       where: { AND: [{ external_id: "TENANT-B" }, { account_id: "tenant-a" }] },
     }));
     expect(readUploadBlob).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized multipart requests before buffering or storage", async () => {
+    requireManagerSession.mockResolvedValue(sessions.admin);
+    const { POST } = await import("@/app/api/v1/support/tickets/route");
+    const response = await POST(new Request("http://test/api/v1/support/tickets", {
+      method: "POST",
+      headers: {
+        "content-length": String(Math.floor(4.5 * 1024 * 1024) + 1),
+        "content-type": "multipart/form-data; boundary=test",
+      },
+    }));
+    expect(response.status).toBe(413);
+    expect(persistUploadBlob).not.toHaveBeenCalled();
+  });
+
+  it("deletes staged attachments when ticket insertion fails", async () => {
+    requireManagerSession.mockResolvedValue(sessions.admin);
+    persistUploadBlob.mockResolvedValue({ objectKey: "support/TCK/attachment.txt" });
+    deleteUploadBlob.mockResolvedValue({ count: 1 });
+    create.mockRejectedValue(new Error("database unavailable"));
+    const body = new FormData();
+    body.set("subject", "Upload issue");
+    body.set("description", "The submitted evidence could not be processed.");
+    body.set("attachments", new File(["evidence"], "attachment.txt", { type: "text/plain" }));
+    const { POST } = await import("@/app/api/v1/support/tickets/route");
+    const response = await POST(new Request("http://test/api/v1/support/tickets", {
+      body,
+      method: "POST",
+    }));
+    expect(response.status).toBe(500);
+    expect(persistUploadBlob).toHaveBeenCalledOnce();
+    expect(deleteUploadBlob).toHaveBeenCalledOnce();
   });
 });

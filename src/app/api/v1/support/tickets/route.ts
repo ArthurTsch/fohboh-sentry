@@ -25,10 +25,15 @@ import {
   serializeSupportTicketIssue,
   type SupportTicketDraft,
 } from "@/lib/support/tickets";
-import { persistUploadBlob } from "@/lib/uploads/storage";
+import { deleteUploadBlob, persistUploadBlob } from "@/lib/uploads/storage";
+import {
+  acquireMultipartAdmission,
+  isDeclaredRequestTooLarge,
+  MAX_SUPPORT_ATTACHMENT_BYTES,
+  MAX_SUPPORT_ATTACHMENTS_BYTES,
+} from "@/lib/uploads/request-limits";
 
 const MAX_ATTACHMENTS = 5;
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const ALLOWED_ATTACHMENT_TYPES = new Set([
   "application/msword",
   "application/pdf",
@@ -210,15 +215,37 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const requestContext = getRequestContextFromRequest(request);
+  let releaseMultipartAdmission: (() => void) | null = null;
+  let stagedObjectKeys: string[] = [];
+  let attachmentsCommitted = false;
   try {
     const session = await requireManagerSession();
     const contentType = request.headers.get("content-type") || "";
     const externalId = `TCK-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 
+    if (contentType.includes("multipart/form-data")) {
+      if (isDeclaredRequestTooLarge(request)) {
+        return withRequestHeaders(
+          NextResponse.json({ error: "Multipart request exceeds the 4.5 MB platform limit." }, { status: 413 }),
+          requestContext,
+        );
+      }
+      releaseMultipartAdmission = acquireMultipartAdmission(request);
+      if (!releaseMultipartAdmission) {
+        const response = NextResponse.json(
+          { error: "Attachment capacity is temporarily busy. Try again shortly." },
+          { status: 503 },
+        );
+        response.headers.set("retry-after", "2");
+        return withRequestHeaders(response, requestContext);
+      }
+    }
+
     const parsed =
       contentType.includes("multipart/form-data")
         ? await parseMultipartTicketRequest(request, externalId, session.accountId || null)
         : await parseJsonTicketRequest(request, session.accountId || null);
+    stagedObjectKeys = parsed.attachments.flatMap((attachment) => attachment.objectKey ? [attachment.objectKey] : []);
     parsed.accountId = getSupportTicketAccountId(session, parsed.accountId);
 
     if (!parsed.subject) {
@@ -286,6 +313,7 @@ export async function POST(request: Request) {
         updated_at: true,
       },
     });
+    attachmentsCommitted = true;
 
     await writeAuditLog({
       action: "support_ticket_created",
@@ -339,6 +367,18 @@ export async function POST(request: Request) {
       NextResponse.json({ error: error instanceof Error ? error.message : "Unable to create support ticket right now." }, { status: 500 }),
       requestContext,
     );
+  } finally {
+    if (!attachmentsCommitted && stagedObjectKeys.length > 0) {
+      await Promise.all(stagedObjectKeys.map((objectKey) =>
+        deleteUploadBlob(objectKey).catch((cleanupError) => {
+          logServerError("support_attachment_compensation_failed", cleanupError, {
+            objectKey,
+            requestId: requestContext.requestId,
+          });
+        }),
+      ));
+    }
+    releaseMultipartAdmission?.();
   }
 }
 
@@ -379,8 +419,9 @@ async function parseMultipartTicketRequest(request: Request, externalId: string,
     throw new Error(`A support ticket can include at most ${MAX_ATTACHMENTS} attachments.`);
   }
 
-  const attachments = await Promise.all(
-    files.map(async (file) => {
+  const preparedAttachments: Array<SupportTicketAttachment & { buffer: Buffer }> = [];
+  let aggregateBytes = 0;
+  for (const file of files) {
       if (!file.name.trim()) {
         throw new Error("Every attachment must have a file name.");
       }
@@ -394,24 +435,41 @@ async function parseMultipartTicketRequest(request: Request, externalId: string,
       if (buffer.byteLength === 0) {
         throw new Error(`${file.name} is empty.`);
       }
-      if (buffer.byteLength > MAX_ATTACHMENT_BYTES) {
-        throw new Error(`${file.name} exceeds the 10 MB attachment limit.`);
+      if (buffer.byteLength > MAX_SUPPORT_ATTACHMENT_BYTES) {
+        throw new Error(`${file.name} exceeds the 2 MB attachment limit.`);
+      }
+      aggregateBytes += buffer.byteLength;
+      if (aggregateBytes > MAX_SUPPORT_ATTACHMENTS_BYTES) {
+        throw new Error("Support attachments exceed the 4 MB aggregate limit.");
       }
 
       const attachmentId = randomUUID();
       const safeName = sanitizeFilename(file.name);
       const objectKey = `support-tickets/${externalId}/${attachmentId}-${safeName}`;
-      await persistUploadBlob({ buffer, objectKey });
-
-      return {
+      preparedAttachments.push({
+        buffer,
         contentType,
         id: attachmentId,
         name: safeName,
         objectKey,
         sizeBytes: buffer.byteLength,
-      } satisfies SupportTicketAttachment;
-    }),
-  );
+      });
+  }
+
+  const persistedKeys: string[] = [];
+  try {
+    for (const attachment of preparedAttachments) {
+      await persistUploadBlob({ buffer: attachment.buffer, objectKey: attachment.objectKey! });
+      persistedKeys.push(attachment.objectKey!);
+    }
+  } catch (error) {
+    await Promise.all(persistedKeys.map((objectKey) => deleteUploadBlob(objectKey).catch(() => null)));
+    throw error;
+  }
+  const attachments = preparedAttachments.map(({ buffer, ...attachment }) => {
+    void buffer;
+    return attachment;
+  });
 
   return {
     accountId: stringValue(formData.get("accountId")) || fallbackAccountId,

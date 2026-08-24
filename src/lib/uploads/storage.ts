@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import { parseSupportTicketIssue } from "@/lib/support/tickets";
 
 type BlobBucket = "artifacts" | "uploads";
 
@@ -80,4 +81,45 @@ export async function readArtifactBlob(objectKey: string) {
 
 export async function readUploadBlob(objectKey: string) {
   return readDatabaseBlob("uploads", objectKey);
+}
+
+export async function deleteUploadBlob(objectKey: string) {
+  return prisma.object_blobs_v2.deleteMany({
+    where: { storage_key: toStorageKey("uploads", objectKey) },
+  });
+}
+
+export async function cleanupUnreferencedUploadBlobs({
+  apply = false,
+  olderThan = new Date(Date.now() - 24 * 60 * 60 * 1000),
+}: {
+  apply?: boolean;
+  olderThan?: Date;
+} = {}) {
+  const [blobs, uploads, tickets] = await Promise.all([
+    prisma.object_blobs_v2.findMany({
+      where: { bucket: "uploads", created_at: { lt: olderThan } },
+      select: { byte_count: true, storage_key: true },
+    }),
+    prisma.uploads_v2.findMany({ select: { s3_key: true } }),
+    prisma.support_tickets_v2.findMany({ select: { issue: true } }),
+  ]);
+  const referencedKeys = new Set(uploads.map((upload) => toStorageKey("uploads", upload.s3_key)));
+  for (const ticket of tickets) {
+    for (const attachment of parseSupportTicketIssue(ticket.issue).attachments) {
+      if (attachment.objectKey) referencedKeys.add(toStorageKey("uploads", attachment.objectKey));
+    }
+  }
+  const orphaned = blobs.filter((blob) => !referencedKeys.has(blob.storage_key));
+  if (apply && orphaned.length > 0) {
+    await prisma.object_blobs_v2.deleteMany({
+      where: { storage_key: { in: orphaned.map((blob) => blob.storage_key) } },
+    });
+  }
+  return {
+    applied: apply,
+    byteCount: orphaned.reduce((sum, blob) => sum + blob.byte_count, BigInt(0)),
+    keys: orphaned.map((blob) => blob.storage_key),
+    orphanCount: orphaned.length,
+  };
 }
