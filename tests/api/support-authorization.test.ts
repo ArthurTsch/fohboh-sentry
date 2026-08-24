@@ -17,6 +17,7 @@ const writeAuditLog = vi.fn();
 const readUploadBlob = vi.fn();
 const persistUploadBlob = vi.fn();
 const deleteUploadBlob = vi.fn();
+const prepareSupportTicketEmail = vi.fn();
 
 vi.mock("@/lib/auth/session", () => ({ requireManagerSession }));
 vi.mock("@/lib/ops/audit", () => ({
@@ -29,6 +30,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/uploads/storage", () => ({ deleteUploadBlob, persistUploadBlob, readUploadBlob }));
+vi.mock("@/lib/support/email", () => ({ prepareSupportTicketEmail }));
 
 const sessions = {
   admin: { accountId: "tenant-a", email: "admin@a.test", managerId: 1, role: "Admin" },
@@ -50,6 +52,7 @@ describe("support ticket authorization matrix", () => {
     readUploadBlob.mockReset();
     persistUploadBlob.mockReset();
     deleteUploadBlob.mockReset();
+    prepareSupportTicketEmail.mockReset();
   });
 
   it.each([sessions.wgs, sessions.superAdmin])("grants $role global queue access", (session) => {
@@ -173,5 +176,46 @@ describe("support ticket authorization matrix", () => {
     expect(response.status).toBe(500);
     expect(persistUploadBlob).toHaveBeenCalledOnce();
     expect(deleteUploadBlob).toHaveBeenCalledOnce();
+  });
+
+  it("returns the persisted ticket when notification delivery fails", async () => {
+    requireManagerSession.mockResolvedValue(sessions.admin);
+    create.mockResolvedValue({
+      account_id: "tenant-a",
+      created_at: new Date("2026-08-24T00:00:00Z"),
+      external_id: "TCK-PERSISTED",
+      issue: "TICKET_V2:{}",
+      location_id: null,
+      notification_status: "pending",
+      priority: "Low",
+      requester_email: sessions.admin.email,
+      requester_name: null,
+      requester_role: sessions.admin.role,
+      source: "support_ticket_portal",
+      status: "open",
+      updated_at: new Date("2026-08-24T00:00:00Z"),
+    });
+    prepareSupportTicketEmail.mockResolvedValue({
+      delivery: "failed",
+      error: "Email provider request timed out.",
+      payload: { html: "", subject: "", text: "", to: "" },
+    });
+    updateMany.mockResolvedValue({ count: 1 });
+    writeAuditLog.mockResolvedValue({});
+    const { POST } = await import("@/app/api/v1/support/tickets/route");
+    const response = await POST(new Request("http://test/api/v1/support/tickets", {
+      body: JSON.stringify({ description: "Still create this ticket", subject: "Email unavailable" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    }));
+    expect(response.status).toBe(200);
+    expect(create).toHaveBeenCalledOnce();
+    expect(prepareSupportTicketEmail).toHaveBeenCalledOnce();
+    expect(create.mock.invocationCallOrder[0]).toBeLessThan(
+      prepareSupportTicketEmail.mock.invocationCallOrder[0],
+    );
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ notification_status: "failed" }),
+    }));
   });
 });

@@ -11,6 +11,8 @@ export type SupportTicketEmailDispatch = {
   };
 };
 
+export const SUPPORT_EMAIL_TIMEOUT_MS = 4_000;
+
 export function buildSupportTicketEmailPayload(ticketId: string, draft: SupportTicketDraft) {
   const to = process.env.SUPPORT_INBOX_EMAIL?.trim() || "";
   const subject = `[Sentry Support] ${ticketId} | ${draft.subject}`;
@@ -79,7 +81,11 @@ export function buildSupportTicketEmailPayload(ticketId: string, draft: SupportT
   return { html, subject, text, to };
 }
 
-export async function prepareSupportTicketEmail(ticketId: string, draft: SupportTicketDraft): Promise<SupportTicketEmailDispatch> {
+export async function prepareSupportTicketEmail(
+  ticketId: string,
+  draft: SupportTicketDraft,
+  options: { timeoutMs?: number } = {},
+): Promise<SupportTicketEmailDispatch> {
   const payload = buildSupportTicketEmailPayload(ticketId, draft);
   const apiKey = process.env.RESEND_API_KEY?.trim();
   const from = process.env.SUPPORT_FROM_EMAIL?.trim();
@@ -93,10 +99,12 @@ export async function prepareSupportTicketEmail(ticketId: string, draft: Support
 
   try {
     const response = await fetch("https://api.resend.com/emails", {
+      signal: AbortSignal.timeout(options.timeoutMs ?? SUPPORT_EMAIL_TIMEOUT_MS),
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        "Idempotency-Key": `support-ticket/${ticketId}`,
       },
       body: JSON.stringify({
         from,
@@ -108,10 +116,9 @@ export async function prepareSupportTicketEmail(ticketId: string, draft: Support
     });
 
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
       return {
         delivery: "failed",
-        error: body || `Email API responded with ${response.status}.`,
+        error: `Email provider returned HTTP ${response.status}.`,
         payload,
       };
     }
@@ -123,7 +130,9 @@ export async function prepareSupportTicketEmail(ticketId: string, draft: Support
   } catch (error) {
     return {
       delivery: "failed",
-      error: error instanceof Error ? error.message : "Unknown email dispatch error.",
+      error: error instanceof Error && error.name === "TimeoutError"
+        ? "Email provider request timed out."
+        : "Email provider request failed.",
       payload,
     };
   }

@@ -108,6 +108,7 @@ function mapTicketRecord(params: {
   requesterRole: string | null;
   resolvedAt?: Date | null;
   source: string;
+  notificationStatus?: string | null;
   status: string;
   updatedAt: Date | null;
 }): SupportTicketRecord {
@@ -120,7 +121,8 @@ function mapTicketRecord(params: {
     createdAt: params.createdAt?.toISOString() ?? null,
     description: parsed.description,
     emailDelivery: normalizeEmailDeliveryStatus(
-      params.source === "support_ticket_portal_email_ready" ? "prepared" : "not_configured",
+      params.notificationStatus ??
+        (params.source === "support_ticket_portal_email_ready" ? "prepared" : "not_configured"),
     ),
     id: params.externalId,
     lastUpdatedAt: params.updatedAt?.toISOString() ?? params.resolvedAt?.toISOString() ?? null,
@@ -167,6 +169,7 @@ export async function GET(request: Request) {
         external_id: true,
         issue: true,
         location_id: true,
+        notification_status: true,
         priority: true,
         requester_email: true,
         requester_name: true,
@@ -186,6 +189,7 @@ export async function GET(request: Request) {
         externalId: ticket.external_id,
         issue: ticket.issue,
         locationId: ticket.location_id ?? null,
+        notificationStatus: ticket.notification_status,
         priority: ticket.priority,
         requesterEmail: ticket.requester_email,
         requesterName: ticket.requester_name ?? null,
@@ -278,7 +282,6 @@ export async function POST(request: Request) {
     };
 
     const priority = getSupportTicketPriority(draft);
-    const emailDispatch = await prepareSupportTicketEmail(externalId, draft);
 
     const created = await prisma.support_tickets_v2.create({
       data: {
@@ -291,10 +294,8 @@ export async function POST(request: Request) {
         requester_email: session.email,
         requester_name: session.name ?? null,
         requester_role: session.role,
-        source:
-          emailDispatch.delivery === "not_configured"
-            ? "support_ticket_portal"
-            : "support_ticket_portal_email_ready",
+        notification_status: "pending",
+        source: "support_ticket_portal",
         status: "open",
         updated_at: new Date(),
       },
@@ -304,6 +305,7 @@ export async function POST(request: Request) {
         external_id: true,
         issue: true,
         location_id: true,
+        notification_status: true,
         priority: true,
         requester_email: true,
         requester_name: true,
@@ -314,6 +316,31 @@ export async function POST(request: Request) {
       },
     });
     attachmentsCommitted = true;
+
+    const emailDispatch = await prepareSupportTicketEmail(externalId, draft);
+    const notificationAttemptedAt = new Date();
+    const notificationSource = emailDispatch.delivery === "not_configured"
+      ? "support_ticket_portal"
+      : "support_ticket_portal_email_ready";
+    try {
+      await prisma.support_tickets_v2.updateMany({
+        where: { external_id: externalId, notification_status: { not: "sent" } },
+        data: {
+          notification_attempts: emailDispatch.delivery === "not_configured" ? 0 : { increment: 1 },
+          notification_error: emailDispatch.error?.slice(0, 255) ?? null,
+          notification_last_attempt_at:
+            emailDispatch.delivery === "not_configured" ? null : notificationAttemptedAt,
+          notification_status: emailDispatch.delivery,
+          source: notificationSource,
+          updated_at: notificationAttemptedAt,
+        },
+      });
+    } catch (statusError) {
+      logServerError("support_notification_status_update_failed", statusError, {
+        requestId: requestContext.requestId,
+        ticketId: externalId,
+      });
+    }
 
     await writeAuditLog({
       action: "support_ticket_created",
@@ -344,6 +371,7 @@ export async function POST(request: Request) {
           externalId: created.external_id,
           issue: created.issue,
           locationId: created.location_id ?? null,
+          notificationStatus: emailDispatch.delivery,
           priority: created.priority,
           requesterEmail: created.requester_email,
           requesterName: created.requester_name ?? null,

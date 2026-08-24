@@ -20,9 +20,9 @@ describe("upload blob cleanup", () => {
     findManyUploads.mockReset();
     findManyTickets.mockReset();
     findManyBlobs.mockResolvedValue([
-      { byte_count: 10n, storage_key: "uploads:evidence/referenced.csv" },
-      { byte_count: 20n, storage_key: "uploads:support/referenced.txt" },
-      { byte_count: 30n, storage_key: "uploads:orphan.bin" },
+      { byte_count: BigInt(10), storage_key: "uploads:evidence/referenced.csv" },
+      { byte_count: BigInt(20), storage_key: "uploads:support/referenced.txt" },
+      { byte_count: BigInt(30), storage_key: "uploads:orphan.bin" },
     ]);
     findManyUploads.mockResolvedValue([{ s3_key: "evidence/referenced.csv" }]);
     findManyTickets.mockResolvedValue([{
@@ -41,7 +41,7 @@ describe("upload blob cleanup", () => {
   it("reports only unreferenced objects during a dry run", async () => {
     const { cleanupUnreferencedUploadBlobs } = await import("@/lib/uploads/storage");
     const result = await cleanupUnreferencedUploadBlobs({ olderThan: new Date(0) });
-    expect(result).toMatchObject({ applied: false, byteCount: 30n, orphanCount: 1 });
+    expect(result).toMatchObject({ applied: false, byteCount: BigInt(30), orphanCount: 1 });
     expect(result.keys).toEqual(["uploads:orphan.bin"]);
     expect(deleteMany).not.toHaveBeenCalled();
   });
