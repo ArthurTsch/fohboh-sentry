@@ -4,6 +4,7 @@ import { revalidateManagerSession } from "@/lib/auth/manager-auth";
 
 let managerId = 0;
 let membershipId = 0;
+let accountId = "";
 
 describe("database-backed session revocation", () => {
   beforeAll(async () => {
@@ -18,10 +19,12 @@ describe("database-backed session revocation", () => {
       },
     });
     managerId = manager.id;
+    accountId = `session-test-${unique}`;
+    await prisma.customers.create({ data: { account_id: accountId, name: "TEST Session Account" } });
     const membership = await prisma.account_memberships_v2.create({
       data: {
         access_scope: "all_locations",
-        account_id: `session-test-${unique}`,
+        account_id: accountId,
         manager_id: manager.id,
         status: "active",
         team_role: "Location Manager",
@@ -36,6 +39,7 @@ describe("database-backed session revocation", () => {
       await prisma.account_memberships_v2.deleteMany({ where: { id: membershipId } });
     }
     if (managerId) await prisma.managers.deleteMany({ where: { id: managerId } });
+    if (accountId) await prisma.customers.deleteMany({ where: { account_id: accountId } });
     await prisma.$disconnect();
   });
 

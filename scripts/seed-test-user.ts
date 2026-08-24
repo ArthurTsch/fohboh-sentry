@@ -26,6 +26,16 @@ async function main() {
       role: "SuperAdmin",
     },
   });
+  await prisma.customers.upsert({
+    where: { account_id: "e2e-test-account" },
+    create: {
+      account_id: "e2e-test-account",
+      name: "E2E Test Account",
+    },
+    update: {
+      name: "E2E Test Account",
+    },
+  });
   const restaurant = await prisma.restaurants.upsert({
     where: { unit_id: "E2E-LOC-001" },
     create: {

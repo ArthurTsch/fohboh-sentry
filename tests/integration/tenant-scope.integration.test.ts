@@ -8,6 +8,13 @@ let tenantBRestaurantId = 0;
 
 describe("tenant restaurant scope against PostgreSQL", () => {
   beforeAll(async () => {
+    await prisma.managers.createMany({ data: Object.entries(managerIds).map(([role, id]) => ({
+      email: `tenant-scope-${role}-${Date.now()}@test.invalid`, id, password_hash: "test-only", role: role === "viewer" ? "Viewer" : role === "admin" ? "Admin" : "Manager",
+    })) });
+    await prisma.customers.createMany({ data: [
+      { account_id: "test-tenant-a", name: "TEST Tenant A" },
+      { account_id: "test-tenant-b", name: "TEST Tenant B" },
+    ] });
     const [a1, a2, b1] = await Promise.all([
       prisma.restaurants.create({ data: { active: true, name: "TEST Tenant A One", unit_id: `TEST-A-${Date.now()}-1` } }),
       prisma.restaurants.create({ data: { active: true, name: "TEST Tenant A Two", unit_id: `TEST-A-${Date.now()}-2` } }),
@@ -35,6 +42,8 @@ describe("tenant restaurant scope against PostgreSQL", () => {
     await prisma.account_memberships_v2.deleteMany({ where: { manager_id: { in: Object.values(managerIds) } } });
     await prisma.restaurant_sentry_state.deleteMany({ where: { restaurant_id: { in: [...tenantARestaurantIds, tenantBRestaurantId] } } });
     await prisma.restaurants.deleteMany({ where: { id: { in: [...tenantARestaurantIds, tenantBRestaurantId] } } });
+    await prisma.managers.deleteMany({ where: { id: { in: Object.values(managerIds) } } });
+    await prisma.customers.deleteMany({ where: { account_id: { in: ["test-tenant-a", "test-tenant-b"] } } });
     await prisma.$disconnect();
   });
 

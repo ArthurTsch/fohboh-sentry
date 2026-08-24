@@ -19,6 +19,14 @@ const sessions = {
 
 describe("support ticket tenant scope against PostgreSQL", () => {
   beforeAll(async () => {
+    await prisma.customers.createMany({ data: [
+      { account_id: "test-web004-a", name: "TEST WEB-004 Tenant A" },
+      { account_id: "test-web004-b", name: "TEST WEB-004 Tenant B" },
+    ] });
+    await prisma.managers.createMany({ data: [
+      { id: sessions.managerA.managerId, email: `web004-a-${runId}@test.invalid`, password_hash: "test-only", role: "Manager" },
+      { id: 929999, email: `web004-b-${runId}@test.invalid`, password_hash: "test-only", role: "Manager" },
+    ] });
     await prisma.support_tickets_v2.createMany({
       data: [
         {
@@ -45,6 +53,8 @@ describe("support ticket tenant scope against PostgreSQL", () => {
     await prisma.support_tickets_v2.deleteMany({
       where: { external_id: { in: Object.values(ticketIds) } },
     });
+    await prisma.managers.deleteMany({ where: { id: { in: [sessions.managerA.managerId!, 929999] } } });
+    await prisma.customers.deleteMany({ where: { account_id: { in: ["test-web004-a", "test-web004-b"] } } });
     await prisma.$disconnect();
   });
 

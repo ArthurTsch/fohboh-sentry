@@ -8,48 +8,71 @@ datasource db {
 }
 
 model managers {
-  id                  Int       @id @default(autoincrement())
-  email               String    @unique @db.VarChar(255)
-  password_hash       String    @db.VarChar(255)
-  role                String    @db.VarChar(50)
-  session_version     Int       @default(1)
-  active              Boolean?  @default(true)
-  email_verified      Boolean?  @default(false)
-  full_name           String?   @db.VarChar(100)
-  phone_number        String?   @db.VarChar(20)
-  title               String?   @db.VarChar(100)
-  address             String?
-  profile_image       String?   @db.VarChar(255)
-  two_factor_enabled  Boolean   @default(false)
-  two_factor_method   String    @default("none") @db.VarChar(30)
-  notify_caar_certified Boolean @default(true)
-  notify_trust_score_blocked Boolean @default(true)
-  notify_statement_due Boolean @default(true)
-  notify_weekly_digest Boolean @default(false)
-  notify_access_changes Boolean @default(true)
-  created_at          DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at          DateTime? @default(now()) @db.Timestamptz(6)
-  created_by          Int?
-  regional_manager_id Int?
+  id                                                                 Int                       @id @default(autoincrement())
+  email                                                              String                    @unique @db.VarChar(255)
+  password_hash                                                      String                    @db.VarChar(255)
+  role                                                               String                    @db.VarChar(50)
+  active                                                             Boolean?                  @default(true)
+  email_verified                                                     Boolean?                  @default(false)
+  full_name                                                          String?                   @db.VarChar(100)
+  phone_number                                                       String?                   @db.VarChar(20)
+  address                                                            String?
+  profile_image                                                      String?                   @db.VarChar(255)
+  created_at                                                         DateTime?                 @default(now()) @db.Timestamptz(6)
+  created_by                                                         Int?
+  regional_manager_id                                                Int?
+  title                                                              String?                   @db.VarChar(100)
+  two_factor_enabled                                                 Boolean                   @default(false)
+  two_factor_method                                                  String                    @default("none") @db.VarChar(30)
+  notify_caar_certified                                              Boolean                   @default(true)
+  notify_trust_score_blocked                                         Boolean                   @default(true)
+  notify_statement_due                                               Boolean                   @default(true)
+  notify_weekly_digest                                               Boolean                   @default(false)
+  notify_access_changes                                              Boolean                   @default(true)
+  updated_at                                                         DateTime?                 @default(now()) @db.Timestamptz(6)
+  session_version                                                    Int                       @default(1)
+  access_requests_v2                                                 access_requests_v2[]
+  account_memberships_v2_account_memberships_v2_invited_byTomanagers account_memberships_v2[]  @relation("account_memberships_v2_invited_byTomanagers")
+  account_memberships_v2_account_memberships_v2_manager_idTomanagers account_memberships_v2?   @relation("account_memberships_v2_manager_idTomanagers")
+  audit_log_v2                                                       audit_log_v2[]
+  caar_reports                                                       caar_reports[]
+  cert_runs_v2                                                       cert_runs_v2[]
+  contract_configs_v2                                                contract_configs_v2[]
+  managers_managers_created_byTomanagers                             managers?                 @relation("managers_created_byTomanagers", fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_managers_created_by")
+  other_managers_managers_created_byTomanagers                       managers[]                @relation("managers_created_byTomanagers")
+  managers_managers_regional_manager_idTomanagers                    managers?                 @relation("managers_regional_manager_idTomanagers", fields: [regional_manager_id], references: [id], onUpdate: NoAction, map: "fk_managers_regional_manager")
+  other_managers_managers_regional_manager_idTomanagers              managers[]                @relation("managers_regional_manager_idTomanagers")
+  restaurant_sentry_state                                            restaurant_sentry_state[]
+  restaurants                                                        restaurants[]
+  schema_registry_v2                                                 schema_registry_v2[]
+  support_tickets_v2_support_tickets_v2_created_byTomanagers         support_tickets_v2[]      @relation("support_tickets_v2_created_byTomanagers")
+  support_tickets_v2_support_tickets_v2_resolved_byTomanagers        support_tickets_v2[]      @relation("support_tickets_v2_resolved_byTomanagers")
+  team_invitations_v2                                                team_invitations_v2[]
+  uploads_v2                                                         uploads_v2[]
 
   @@index([email], map: "idx_managers_email")
 }
 
 model restaurants {
-  id             Int       @id @default(autoincrement())
-  store_id       String?   @db.VarChar(255)
-  name           String    @db.VarChar(255)
-  location       String?
-  city           String?   @db.VarChar(100)
-  state          String?   @db.VarChar(100)
-  zip_code       String?   @db.VarChar(20)
-  country        String?   @db.VarChar(100)
-  contact_number String?   @db.VarChar(50)
-  created_by     Int?
-  created_at     DateTime? @default(now()) @db.Timestamp(6)
-  updated_at     DateTime? @default(now()) @db.Timestamp(6)
-  active         Boolean?  @default(true)
-  unit_id        String?   @unique @db.VarChar(50)
+  id                           Int                            @id @default(autoincrement())
+  store_id                     String?                        @db.VarChar(255)
+  name                         String                         @db.VarChar(255)
+  location                     String?
+  city                         String?                        @db.VarChar(100)
+  state                        String?                        @db.VarChar(100)
+  zip_code                     String?                        @db.VarChar(20)
+  country                      String?                        @db.VarChar(100)
+  contact_number               String?                        @db.VarChar(50)
+  created_by                   Int?
+  created_at                   DateTime?                      @default(now()) @db.Timestamp(6)
+  updated_at                   DateTime?                      @default(now()) @db.Timestamp(6)
+  active                       Boolean?                       @default(true)
+  unit_id                      String?                        @unique @db.VarChar(50)
+  account_member_locations_v2  account_member_locations_v2[]
+  caar_reports                 caar_reports[]
+  restaurant_sentry_state      restaurant_sentry_state?
+  managers                     managers?                      @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_restaurants_created_by")
+  team_invitation_locations_v2 team_invitation_locations_v2[]
 
   @@index([created_by], map: "idx_restaurants_created_by")
   @@index([name], map: "idx_restaurants_name")
@@ -57,24 +80,27 @@ model restaurants {
 }
 
 model caar_reports {
-  id             Int       @id @default(autoincrement())
-  caar_id        String    @unique @db.VarChar(100)
-  account_id     String?   @db.VarChar(255)
+  id             Int          @id @default(autoincrement())
+  caar_id        String       @unique @db.VarChar(100)
+  account_id     String?      @db.VarChar(255)
   restaurant_id  Int?
   created_by     Int?
-  location_id    String    @db.VarChar(100)
-  location_name  String    @db.VarChar(255)
-  period         String    @db.VarChar(100)
+  location_id    String       @db.VarChar(100)
+  location_name  String       @db.VarChar(255)
+  period         String       @db.VarChar(100)
   trust_score    Int
   amount_cents   Int
-  amount_display String    @db.VarChar(50)
-  status         String    @db.VarChar(50)
-  exhibits       Int?      @default(0)
+  amount_display String       @db.VarChar(50)
+  status         String       @db.VarChar(50)
+  exhibits       Int?         @default(0)
   narrative      String
   findings       Json
   dimensions     Json
-  created_at     DateTime? @default(now()) @db.Timestamp(6)
-  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+  created_at     DateTime?    @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?    @default(now()) @db.Timestamp(6)
+  customers      customers?   @relation(fields: [account_id], references: [account_id], onUpdate: NoAction, map: "fk_caar_reports_account")
+  managers       managers?    @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_caar_reports_created_by")
+  restaurants    restaurants? @relation(fields: [restaurant_id], references: [id], onUpdate: NoAction, map: "fk_caar_reports_restaurant")
 
   @@index([account_id], map: "idx_caar_reports_account_id")
   @@index([created_by], map: "idx_caar_reports_created_by")
@@ -83,57 +109,77 @@ model caar_reports {
 }
 
 model restaurant_sentry_state {
-  id                  Int       @id @default(autoincrement())
-  restaurant_id       Int       @unique
-  location_id         String    @unique @db.VarChar(100)
-  account_id          String?   @db.VarChar(255)
-  created_by          Int?
-  status              String    @default("Onboarding") @db.VarChar(50)
-  governance_status   String    @default("uninitialized") @db.VarChar(30)
-  governance_initialized_at DateTime? @db.Timestamp(6)
-  governance_sealed_at DateTime? @db.Timestamp(6)
-  m01_score           Int       @default(0)
-  m02_score           Int       @default(0)
-  ium                 String?   @default("--") @db.VarChar(50)
-  recovery_display    String?   @default("$0") @db.VarChar(50)
-  last_certified      String?   @default("Pending") @db.VarChar(50)
-  modules_json        Json?
-  onboarding_progress Json?
-  onboarding_checklist Json?
-  completed           Boolean?  @default(false)
-  created_at          DateTime? @default(now()) @db.Timestamp(6)
-  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+  id                        Int         @id @default(autoincrement())
+  restaurant_id             Int         @unique
+  location_id               String      @unique @db.VarChar(100)
+  account_id                String?     @db.VarChar(255)
+  created_by                Int?
+  status                    String      @default("Onboarding") @db.VarChar(50)
+  m01_score                 Int         @default(0)
+  m02_score                 Int         @default(0)
+  ium                       String?     @default("--") @db.VarChar(50)
+  recovery_display          String?     @default("$0") @db.VarChar(50)
+  last_certified            String?     @default("Pending") @db.VarChar(50)
+  modules_json              Json?
+  onboarding_progress       Json?
+  onboarding_checklist      Json?
+  completed                 Boolean?    @default(false)
+  created_at                DateTime?   @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?   @default(now()) @db.Timestamp(6)
+  governance_status         String      @default("uninitialized") @db.VarChar(30)
+  governance_initialized_at DateTime?   @db.Timestamp(6)
+  governance_sealed_at      DateTime?   @db.Timestamp(6)
+  customers                 customers?  @relation(fields: [account_id], references: [account_id], onDelete: Restrict, onUpdate: NoAction, map: "fk_restaurant_state_account")
+  managers                  managers?   @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_restaurant_state_created_by")
+  restaurants               restaurants @relation(fields: [restaurant_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_restaurant_state_restaurant")
 
   @@index([account_id], map: "idx_restaurant_sentry_state_account_id")
   @@index([created_by], map: "idx_restaurant_sentry_state_created_by")
 }
 
 model customers {
-  id             Int       @id @default(autoincrement())
-  account_id     String?   @unique @db.VarChar(255)
-  name           String
-  plan           String    @default("wgs") @db.VarChar(50)
-  cortex_enabled Boolean   @default(false)
-  created_at     DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime? @default(now()) @db.Timestamptz(6)
-  deleted_at     DateTime? @db.Timestamptz(6)
+  id                      Int                       @id @default(autoincrement())
+  name                    String
+  plan                    String                    @default("wgs") @db.VarChar(50)
+  cortex_enabled          Boolean                   @default(false)
+  created_at              DateTime?                 @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime?                 @default(now()) @db.Timestamptz(6)
+  deleted_at              DateTime?                 @db.Timestamptz(6)
+  account_id              String?                   @unique(map: "uq_customers_account_id") @db.VarChar(255)
+  account_memberships_v2  account_memberships_v2[]
+  audit_log_v2            audit_log_v2[]
+  billing_accounts_v2     billing_accounts_v2?
+  caar_reports            caar_reports[]
+  locations_v2            locations_v2[]
+  restaurant_sentry_state restaurant_sentry_state[]
+  support_tickets_v2      support_tickets_v2[]
+  team_invitations_v2     team_invitations_v2[]
 
   @@index([account_id], map: "idx_customers_account_id")
   @@index([name], map: "idx_customers_name")
 }
 
 model locations_v2 {
-  id           Int       @id @default(autoincrement())
-  customer_id  Int
-  external_id  String
-  name         String
-  address      String?
-  pos_system   String?   @db.VarChar(50)
-  status       String    @default("onboarding") @db.VarChar(50)
-  activated_at DateTime? @db.Timestamptz(6)
-  created_at   DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime? @default(now()) @db.Timestamptz(6)
-  deleted_at   DateTime? @db.Timestamptz(6)
+  id                      Int                       @id @default(autoincrement())
+  customer_id             Int
+  external_id             String
+  name                    String
+  address                 String?
+  pos_system              String?                   @db.VarChar(50)
+  status                  String                    @default("onboarding") @db.VarChar(50)
+  activated_at            DateTime?                 @db.Timestamptz(6)
+  created_at              DateTime?                 @default(now()) @db.Timestamptz(6)
+  updated_at              DateTime?                 @default(now()) @db.Timestamptz(6)
+  deleted_at              DateTime?                 @db.Timestamptz(6)
+  audit_log_v2            audit_log_v2[]
+  caars_v2                caars_v2[]
+  cert_runs_v2            cert_runs_v2[]
+  contract_configs_v2     contract_configs_v2[]
+  customers               customers                 @relation(fields: [customer_id], references: [id], onUpdate: NoAction, map: "fk_locations_customer")
+  loop_b_findings_v2      loop_b_findings_v2[]
+  schema_registry_v2      schema_registry_v2[]
+  system_health_events_v2 system_health_events_v2[]
+  uploads_v2              uploads_v2[]
 
   @@unique([customer_id, external_id], map: "uq_locations_v2_customer_external_id")
   @@index([customer_id, status], map: "idx_locations_v2_customer_status")
@@ -141,18 +187,22 @@ model locations_v2 {
 }
 
 model contract_configs_v2 {
-  id          Int       @id @default(autoincrement())
-  location_id Int
-  module      String    @db.VarChar(10)
-  vendor      String    @db.VarChar(100)
-  version     Int
-  terms       Json
-  status      String    @default("sealed") @db.VarChar(20)
-  sealed_by   Int
-  sealed_at   DateTime? @default(now()) @db.Timestamptz(6)
-  sha256      String    @db.Char(64)
-  prev_sha256 String?   @db.Char(64)
+  id               Int            @id @default(autoincrement())
+  location_id      Int
+  module           String         @db.VarChar(10)
+  version          Int
+  terms            Json
+  sealed_by        Int
+  sealed_at        DateTime?      @default(now()) @db.Timestamptz(6)
+  sha256           String         @db.Char(64)
+  prev_sha256      String?        @db.Char(64)
+  vendor           String         @db.VarChar(100)
+  status           String         @default("sealed") @db.VarChar(20)
   source_upload_id Int?
+  cert_runs_v2     cert_runs_v2[]
+  locations_v2     locations_v2   @relation(fields: [location_id], references: [id], onUpdate: NoAction, map: "fk_contract_location")
+  managers         managers       @relation(fields: [sealed_by], references: [id], onUpdate: NoAction, map: "fk_contract_sealed_by")
+  uploads_v2       uploads_v2?    @relation(fields: [source_upload_id], references: [id], onUpdate: NoAction, map: "fk_contract_source_upload")
 
   @@unique([location_id, module, vendor, version], map: "uq_contract_configs_v2_location_module_vendor_version")
   @@index([location_id, module, vendor, version], map: "idx_contract_configs_v2_location_module_vendor_version")
@@ -160,19 +210,22 @@ model contract_configs_v2 {
 }
 
 model schema_registry_v2 {
-  id          Int       @id @default(autoincrement())
-  location_id Int
-  module      String    @db.VarChar(10)
-  vendor      String    @db.VarChar(100)
-  version     Int
-  fields      Json
-  status      String    @default("sealed") @db.VarChar(20)
-  sample_headers Json?
+  id               Int          @id @default(autoincrement())
+  location_id      Int
+  module           String       @db.VarChar(10)
+  vendor           String       @db.VarChar(100)
+  version          Int
+  fields           Json
+  sealed_by        Int
+  sealed_at        DateTime?    @default(now()) @db.Timestamptz(6)
+  sha256           String       @db.Char(64)
+  status           String       @default("sealed") @db.VarChar(20)
+  sample_headers   Json?
   source_upload_id Int?
-  sealed_by   Int
-  sealed_at   DateTime? @default(now()) @db.Timestamptz(6)
-  sha256      String    @db.Char(64)
-  prev_sha256 String?   @db.Char(64)
+  prev_sha256      String?      @db.Char(64)
+  locations_v2     locations_v2 @relation(fields: [location_id], references: [id], onUpdate: NoAction, map: "fk_schema_location")
+  managers         managers     @relation(fields: [sealed_by], references: [id], onUpdate: NoAction, map: "fk_schema_sealed_by")
+  uploads_v2       uploads_v2?  @relation(fields: [source_upload_id], references: [id], onUpdate: NoAction, map: "fk_schema_source_upload")
 
   @@unique([location_id, module, vendor, version], map: "uq_schema_registry_v2_location_module_vendor_version")
   @@index([location_id, module, vendor, version], map: "idx_schema_registry_v2_location_module_vendor_version")
@@ -180,22 +233,28 @@ model schema_registry_v2 {
 }
 
 model uploads_v2 {
-  id            Int       @id @default(autoincrement())
-  location_id   Int
-  module        String    @db.VarChar(10)
-  artifact_key  String    @db.VarChar(100)
-  file_purpose  String    @db.VarChar(100)
-  vendor        String?   @db.VarChar(100)
-  file_name     String
-  s3_key        String
-  byte_count    BigInt
-  row_count     Int?
-  page_count    Int?
-  sha256        String    @db.Char(64)
-  validation_summary Json?
-  uploaded_by   Int
-  uploaded_at   DateTime? @default(now()) @db.Timestamptz(6)
-  superseded_by Int?
+  id                  Int                   @id @default(autoincrement())
+  location_id         Int
+  module              String                @db.VarChar(10)
+  file_purpose        String                @db.VarChar(100)
+  vendor              String?               @db.VarChar(100)
+  file_name           String
+  s3_key              String
+  byte_count          BigInt
+  row_count           Int?
+  page_count          Int?
+  sha256              String                @db.Char(64)
+  uploaded_by         Int
+  uploaded_at         DateTime?             @default(now()) @db.Timestamptz(6)
+  superseded_by       Int?
+  artifact_key        String                @db.VarChar(100)
+  validation_summary  Json?
+  contract_configs_v2 contract_configs_v2[]
+  schema_registry_v2  schema_registry_v2[]
+  locations_v2        locations_v2          @relation(fields: [location_id], references: [id], onUpdate: NoAction, map: "fk_upload_location")
+  uploads_v2          uploads_v2?           @relation("uploads_v2Touploads_v2", fields: [superseded_by], references: [id], onUpdate: NoAction, map: "fk_upload_superseded_by")
+  other_uploads_v2    uploads_v2[]          @relation("uploads_v2Touploads_v2")
+  managers            managers              @relation(fields: [uploaded_by], references: [id], onUpdate: NoAction, map: "fk_upload_uploaded_by")
 
   @@index([location_id, module], map: "idx_uploads_v2_location_module")
   @@index([location_id, module, artifact_key], map: "idx_uploads_v2_location_module_artifact")
@@ -219,23 +278,29 @@ model object_blobs_v2 {
 }
 
 model cert_runs_v2 {
-  id                  Int       @id @default(autoincrement())
+  id                  Int                 @id @default(autoincrement())
   location_id         Int
-  module              String    @db.VarChar(10)
-  vendor              String?   @db.VarChar(100)
-  period              String    @db.VarChar(50)
+  module              String              @db.VarChar(10)
+  period              String              @db.VarChar(50)
   contract_config_id  Int
   schema_registry_ids Json
   upload_ids          Json
-  rule_set_version    String    @db.VarChar(100)
-  status              String    @default("queued") @db.VarChar(50)
-  started_at          DateTime? @db.Timestamptz(6)
-  completed_at        DateTime? @db.Timestamptz(6)
+  rule_set_version    String              @db.VarChar(100)
+  status              String              @default("queued") @db.VarChar(50)
+  started_at          DateTime?           @db.Timestamptz(6)
+  completed_at        DateTime?           @db.Timestamptz(6)
   trust_score         Int?
   variance_cents      BigInt?
   triggered_by        Int
-  created_at          DateTime? @default(now()) @db.Timestamptz(6)
+  created_at          DateTime?           @default(now()) @db.Timestamptz(6)
   error_message       String?
+  vendor              String?             @db.VarChar(100)
+  caars_v2            caars_v2?
+  contract_configs_v2 contract_configs_v2 @relation(fields: [contract_config_id], references: [id], onUpdate: NoAction, map: "fk_cert_contract")
+  locations_v2        locations_v2        @relation(fields: [location_id], references: [id], onUpdate: NoAction, map: "fk_cert_location")
+  managers            managers            @relation(fields: [triggered_by], references: [id], onUpdate: NoAction, map: "fk_cert_triggered_by")
+  mq6_scores_v2       mq6_scores_v2[]
+  rule_citations_v2   rule_citations_v2[]
 
   @@index([location_id, module, period], map: "idx_cert_runs_v2_location_module_period")
   @@index([location_id, module, vendor, period], map: "idx_cert_runs_v2_location_module_vendor_period")
@@ -244,26 +309,33 @@ model cert_runs_v2 {
 }
 
 model caars_v2 {
-  id                         Int       @id @default(autoincrement())
-  caar_external_id           String    @unique
-  cert_run_id                Int       @unique
+  id                         Int                       @id @default(autoincrement())
+  caar_external_id           String                    @unique
+  cert_run_id                Int                       @unique
   location_id                Int
-  module                     String    @db.VarChar(10)
-  vendor                     String?   @db.VarChar(100)
-  period                     String    @db.VarChar(50)
-  status                     String    @db.VarChar(50)
-  court_admissible           Boolean   @default(false)
+  module                     String                    @db.VarChar(10)
+  period                     String                    @db.VarChar(50)
+  status                     String                    @db.VarChar(50)
+  court_admissible           Boolean                   @default(false)
   trust_score                Int
-  finding_class              String    @db.VarChar(100)
+  finding_class              String                    @db.VarChar(100)
   recoverable_variance_cents BigInt
   canonical_payload_s3_key   String
   pdf_s3_key                 String?
   exportpack_s3_key          String?
-  sha256                     String    @db.Char(64)
-  prev_sha256                String?   @db.Char(64)
-  sealed_at                  DateTime? @default(now()) @db.Timestamptz(6)
+  sha256                     String                    @db.Char(64)
+  prev_sha256                String?                   @db.Char(64)
+  sealed_at                  DateTime?                 @default(now()) @db.Timestamptz(6)
   superseded_by              Int?
   superseded_reason          String?
+  vendor                     String?                   @db.VarChar(100)
+  caar_artifacts_v2          caar_artifacts_v2[]
+  cert_runs_v2               cert_runs_v2              @relation(fields: [cert_run_id], references: [id], onUpdate: NoAction, map: "fk_caar_cert_run")
+  locations_v2               locations_v2              @relation(fields: [location_id], references: [id], onUpdate: NoAction, map: "fk_caar_location")
+  caars_v2                   caars_v2?                 @relation("caars_v2Tocaars_v2", fields: [superseded_by], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fk_caar_superseded_by")
+  other_caars_v2             caars_v2[]                @relation("caars_v2Tocaars_v2")
+  loop_b_findings_v2         loop_b_findings_v2[]
+  system_health_events_v2    system_health_events_v2[]
 
   @@index([location_id, sealed_at], map: "idx_caars_v2_location_sealed_at")
   @@index([location_id, module, vendor, sealed_at], map: "idx_caars_v2_location_module_vendor_sealed")
@@ -282,19 +354,21 @@ model caar_artifacts_v2 {
   byte_count    BigInt
   sha256        String    @db.Char(64)
   created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  caars_v2      caars_v2  @relation(fields: [caar_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_caar_artifact_caar")
 
   @@unique([caar_id, seq], map: "uq_caar_artifacts_v2_caar_seq")
   @@map("caar_artifacts_v2")
 }
 
 model rule_citations_v2 {
-  id              Int       @id @default(autoincrement())
+  id              Int          @id @default(autoincrement())
   cert_run_id     Int
-  rule_id         String    @db.VarChar(100)
-  rule_version    String    @db.VarChar(50)
-  fired_count     Int       @default(0)
-  variance_cents  BigInt    @default(0)
+  rule_id         String       @db.VarChar(100)
+  rule_version    String       @db.VarChar(50)
+  fired_count     Int          @default(0)
+  variance_cents  BigInt       @default(0)
   sample_evidence Json?
+  cert_runs_v2    cert_runs_v2 @relation(fields: [cert_run_id], references: [id], onUpdate: NoAction, map: "fk_rule_citation_cert")
 
   @@unique([cert_run_id, rule_id], map: "uq_rule_citations_v2_cert_run_rule")
   @@index([cert_run_id], map: "idx_rule_citations_v2_cert_run_id")
@@ -303,13 +377,14 @@ model rule_citations_v2 {
 }
 
 model mq6_scores_v2 {
-  id           Int       @id @default(autoincrement())
+  id           Int          @id @default(autoincrement())
   cert_run_id  Int
-  dimension    String    @db.VarChar(50)
+  dimension    String       @db.VarChar(50)
   score        Int
   weight_bps   Int
   evidence     Json?
-  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+  created_at   DateTime?    @default(now()) @db.Timestamptz(6)
+  cert_runs_v2 cert_runs_v2 @relation(fields: [cert_run_id], references: [id], onUpdate: NoAction, map: "fk_mq6_score_cert")
 
   @@unique([cert_run_id, dimension], map: "uq_mq6_scores_v2_cert_run_dimension")
   @@index([cert_run_id], map: "idx_mq6_scores_v2_cert_run_id")
@@ -317,20 +392,22 @@ model mq6_scores_v2 {
 }
 
 model loop_b_findings_v2 {
-  id               Int       @id @default(autoincrement())
-  location_id      Int
-  caar_id          Int?
-  module           String    @db.VarChar(10)
-  rule_id          String    @db.VarChar(20)
-  pattern_code     String    @db.VarChar(100)
-  confidence_bps   Int
-  status           String    @db.VarChar(30)
-  caar_eligible    Boolean   @default(false)
-  impacts_certification Boolean @default(false)
-  affected_periods Json
-  detail           String
-  metadata         Json?
-  created_at       DateTime? @default(now()) @db.Timestamptz(6)
+  id                    Int          @id @default(autoincrement())
+  location_id           Int
+  caar_id               Int?
+  module                String       @db.VarChar(10)
+  rule_id               String       @db.VarChar(20)
+  pattern_code          String       @db.VarChar(100)
+  confidence_bps        Int
+  status                String       @db.VarChar(30)
+  caar_eligible         Boolean      @default(false)
+  impacts_certification Boolean      @default(false)
+  affected_periods      Json
+  detail                String
+  metadata              Json?
+  created_at            DateTime?    @default(now()) @db.Timestamptz(6)
+  caars_v2              caars_v2?    @relation(fields: [caar_id], references: [id], onUpdate: NoAction, map: "fk_loop_b_caar")
+  locations_v2          locations_v2 @relation(fields: [location_id], references: [id], onUpdate: NoAction, map: "fk_loop_b_location")
 
   @@index([location_id, created_at], map: "idx_loop_b_findings_v2_location_created_at")
   @@index([caar_id], map: "idx_loop_b_findings_v2_caar_id")
@@ -339,18 +416,20 @@ model loop_b_findings_v2 {
 }
 
 model system_health_events_v2 {
-  id             Int       @id @default(autoincrement())
-  location_id    Int
-  caar_id        Int?
-  cert_run_ids   Json?
-  rule_id        String    @db.VarChar(20)
-  status         String    @db.VarChar(20)
-  severity       String    @db.VarChar(20)
-  impacts_trust  Boolean   @default(false)
-  detail         String
-  metadata       Json?
-  created_at     DateTime? @default(now()) @db.Timestamptz(6)
-  resolved_at    DateTime? @db.Timestamptz(6)
+  id            Int          @id @default(autoincrement())
+  location_id   Int
+  caar_id       Int?
+  cert_run_ids  Json?
+  rule_id       String       @db.VarChar(20)
+  status        String       @db.VarChar(20)
+  severity      String       @db.VarChar(20)
+  impacts_trust Boolean      @default(false)
+  detail        String
+  metadata      Json?
+  created_at    DateTime?    @default(now()) @db.Timestamptz(6)
+  resolved_at   DateTime?    @db.Timestamptz(6)
+  caars_v2      caars_v2?    @relation(fields: [caar_id], references: [id], onUpdate: NoAction, map: "fk_health_caar")
+  locations_v2  locations_v2 @relation(fields: [location_id], references: [id], onUpdate: NoAction, map: "fk_health_location")
 
   @@index([location_id, created_at], map: "idx_system_health_events_v2_location_created_at")
   @@index([caar_id], map: "idx_system_health_events_v2_caar_id")
@@ -359,18 +438,21 @@ model system_health_events_v2 {
 }
 
 model audit_log_v2 {
-  id            Int       @id @default(autoincrement())
+  id            Int           @id @default(autoincrement())
   customer_id   Int?
   location_id   Int?
   actor_user_id Int?
   action        String
-  entity_type   String    @db.VarChar(100)
-  entity_id     String    @db.VarChar(100)
+  entity_type   String        @db.VarChar(100)
+  entity_id     String        @db.VarChar(100)
   summary       String
   metadata      Json?
-  ip_address    String?   @db.VarChar(64)
+  ip_address    String?       @db.VarChar(64)
   user_agent    String?
-  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  created_at    DateTime?     @default(now()) @db.Timestamptz(6)
+  managers      managers?     @relation(fields: [actor_user_id], references: [id], onUpdate: NoAction, map: "fk_audit_actor")
+  customers     customers?    @relation(fields: [customer_id], references: [id], onUpdate: NoAction, map: "fk_audit_customer")
+  locations_v2  locations_v2? @relation(fields: [location_id], references: [id], onUpdate: NoAction, map: "fk_audit_location")
 
   @@index([customer_id], map: "idx_audit_log_v2_customer_id")
   @@index([location_id], map: "idx_audit_log_v2_location_id")
@@ -380,22 +462,25 @@ model audit_log_v2 {
 }
 
 model support_tickets_v2 {
-  id              Int       @id @default(autoincrement())
-  external_id     String    @unique @db.VarChar(100)
-  account_id      String?   @db.VarChar(255)
-  location_id     String?   @db.VarChar(100)
-  requester_email String    @db.VarChar(255)
-  requester_name  String?   @db.VarChar(255)
-  requester_role  String?   @db.VarChar(50)
-  issue           String
-  priority        String    @db.VarChar(20)
-  status          String    @default("open") @db.VarChar(20)
-  source          String    @default("support_chat") @db.VarChar(50)
-  created_by      Int?
-  resolved_by     Int?
-  resolved_at     DateTime? @db.Timestamptz(6)
-  created_at      DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime? @default(now()) @db.Timestamptz(6)
+  id                                                Int        @id @default(autoincrement())
+  external_id                                       String     @unique @db.VarChar(100)
+  account_id                                        String?    @db.VarChar(255)
+  location_id                                       String?    @db.VarChar(100)
+  requester_email                                   String     @db.VarChar(255)
+  requester_name                                    String?    @db.VarChar(255)
+  requester_role                                    String?    @db.VarChar(50)
+  issue                                             String
+  priority                                          String     @db.VarChar(20)
+  status                                            String     @default("open") @db.VarChar(20)
+  source                                            String     @default("support_chat") @db.VarChar(50)
+  created_by                                        Int?
+  resolved_by                                       Int?
+  resolved_at                                       DateTime?  @db.Timestamptz(6)
+  created_at                                        DateTime?  @default(now()) @db.Timestamptz(6)
+  updated_at                                        DateTime?  @default(now()) @db.Timestamptz(6)
+  customers                                         customers? @relation(fields: [account_id], references: [account_id], onUpdate: NoAction, map: "fk_support_account")
+  managers_support_tickets_v2_created_byTomanagers  managers?  @relation("support_tickets_v2_created_byTomanagers", fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_support_created_by")
+  managers_support_tickets_v2_resolved_byTomanagers managers?  @relation("support_tickets_v2_resolved_byTomanagers", fields: [resolved_by], references: [id], onUpdate: NoAction, map: "fk_support_resolved_by")
 
   @@index([account_id, status], map: "idx_support_tickets_v2_account_status")
   @@index([status, priority], map: "idx_support_tickets_v2_status_priority")
@@ -414,24 +499,25 @@ model rate_limit_buckets {
 }
 
 model access_requests_v2 {
-  id             Int       @id @default(autoincrement())
-  external_id    String    @unique @db.VarChar(100)
-  company        String    @db.VarChar(255)
-  requester_email String   @db.VarChar(255)
-  requester_name String?   @db.VarChar(255)
-  phone          String?   @db.VarChar(50)
-  locations      String?   @db.VarChar(100)
-  monthly_volume String?   @db.VarChar(100)
-  modules        Json
-  module_plan    String    @db.VarChar(20)
-  processors     Json?
-  dsps           Json?
-  notes          String?
-  status         String    @default("pending") @db.VarChar(20)
-  reviewed_by    Int?
-  reviewed_at    DateTime? @db.Timestamptz(6)
-  created_at     DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime? @default(now()) @db.Timestamptz(6)
+  id              Int       @id @default(autoincrement())
+  external_id     String    @unique @db.VarChar(100)
+  company         String    @db.VarChar(255)
+  requester_email String    @db.VarChar(255)
+  requester_name  String?   @db.VarChar(255)
+  phone           String?   @db.VarChar(50)
+  locations       String?   @db.VarChar(100)
+  monthly_volume  String?   @db.VarChar(100)
+  modules         Json
+  module_plan     String    @db.VarChar(20)
+  processors      Json?
+  dsps            Json?
+  notes           String?
+  status          String    @default("pending") @db.VarChar(20)
+  reviewed_by     Int?
+  reviewed_at     DateTime? @db.Timestamptz(6)
+  created_at      DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime? @default(now()) @db.Timestamptz(6)
+  managers        managers? @relation(fields: [reviewed_by], references: [id], onUpdate: NoAction, map: "fk_access_request_reviewer")
 
   @@index([status, created_at], map: "idx_access_requests_v2_status_created")
   @@index([requester_email], map: "idx_access_requests_v2_email")
@@ -439,54 +525,59 @@ model access_requests_v2 {
 }
 
 model billing_accounts_v2 {
-  id                 Int       @id @default(autoincrement())
-  account_id         String    @unique @db.VarChar(255)
-  plan_code          String    @default("m01_m02_bundle") @db.VarChar(50)
-  subscription_cents Int       @default(29900)
-  fee_rate_bps       Int       @default(1250)
-  autopay_enabled    Boolean   @default(false)
-  cycle_day          Int       @default(25)
-  created_at         DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime? @default(now()) @db.Timestamptz(6)
+  id                    Int                     @id @default(autoincrement())
+  account_id            String                  @unique @db.VarChar(255)
+  plan_code             String                  @default("m01_m02_bundle") @db.VarChar(50)
+  subscription_cents    Int                     @default(29900)
+  fee_rate_bps          Int                     @default(1250)
+  autopay_enabled       Boolean                 @default(false)
+  cycle_day             Int                     @default(25)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @default(now()) @db.Timestamptz(6)
+  customers             customers               @relation(fields: [account_id], references: [account_id], onUpdate: NoAction, map: "fk_billing_account_customer")
+  billing_statements_v2 billing_statements_v2[]
+  payment_methods_v2    payment_methods_v2[]
 
   @@index([account_id], map: "idx_billing_accounts_v2_account_id")
   @@map("billing_accounts_v2")
 }
 
 model payment_methods_v2 {
-  id               Int       @id @default(autoincrement())
-  account_id       String    @db.VarChar(255)
-  method_type      String    @db.VarChar(30)
-  provider         String?   @db.VarChar(50)
-  brand            String?   @db.VarChar(50)
-  masked_label     String    @db.VarChar(100)
-  billing_name     String?   @db.VarChar(255)
-  expires_month    Int?
-  expires_year     Int?
-  status           String    @default("pending") @db.VarChar(30)
-  is_primary       Boolean   @default(false)
-  token_reference  String?   @db.VarChar(255)
-  created_at       DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at       DateTime? @default(now()) @db.Timestamptz(6)
+  id                  Int                 @id @default(autoincrement())
+  account_id          String              @db.VarChar(255)
+  method_type         String              @db.VarChar(30)
+  provider            String?             @db.VarChar(50)
+  brand               String?             @db.VarChar(50)
+  masked_label        String              @db.VarChar(100)
+  billing_name        String?             @db.VarChar(255)
+  expires_month       Int?
+  expires_year        Int?
+  status              String              @default("pending") @db.VarChar(30)
+  is_primary          Boolean             @default(false)
+  token_reference     String?             @db.VarChar(255)
+  created_at          DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime            @default(now()) @db.Timestamptz(6)
+  billing_accounts_v2 billing_accounts_v2 @relation(fields: [account_id], references: [account_id], onDelete: Cascade, onUpdate: NoAction, map: "fk_payment_billing_account")
 
   @@index([account_id, status], map: "idx_payment_methods_v2_account_status")
   @@map("payment_methods_v2")
 }
 
 model billing_statements_v2 {
-  id                 Int       @id @default(autoincrement())
-  statement_id       String    @unique @db.VarChar(100)
-  account_id         String    @db.VarChar(255)
-  period_label       String    @db.VarChar(50)
-  subscription_cents Int       @default(0)
-  caar_fee_cents     Int       @default(0)
-  total_cents        Int       @default(0)
-  status             String    @default("draft") @db.VarChar(30)
-  due_on             DateTime? @db.Timestamptz(6)
-  paid_on            DateTime? @db.Timestamptz(6)
-  source             String    @default("derived") @db.VarChar(30)
-  created_at         DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime? @default(now()) @db.Timestamptz(6)
+  id                  Int                 @id @default(autoincrement())
+  statement_id        String              @unique @db.VarChar(100)
+  account_id          String              @db.VarChar(255)
+  period_label        String              @db.VarChar(50)
+  subscription_cents  Int                 @default(0)
+  caar_fee_cents      Int                 @default(0)
+  total_cents         Int                 @default(0)
+  status              String              @default("draft") @db.VarChar(30)
+  due_on              DateTime?           @db.Timestamptz(6)
+  paid_on             DateTime?           @db.Timestamptz(6)
+  source              String              @default("derived") @db.VarChar(30)
+  created_at          DateTime            @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime            @default(now()) @db.Timestamptz(6)
+  billing_accounts_v2 billing_accounts_v2 @relation(fields: [account_id], references: [account_id], onUpdate: NoAction, map: "fk_statement_billing_account")
 
   @@index([account_id, period_label], map: "idx_billing_statements_v2_account_period")
   @@index([account_id, status], map: "idx_billing_statements_v2_account_status")
@@ -494,20 +585,24 @@ model billing_statements_v2 {
 }
 
 model account_memberships_v2 {
-  id                Int       @id @default(autoincrement())
-  manager_id        Int       @unique
-  account_id        String    @db.VarChar(255)
-  team_role         String    @db.VarChar(50)
-  access_scope      String    @default("all_locations") @db.VarChar(30)
-  status            String    @default("active") @db.VarChar(20)
-  account_holder    Boolean   @default(false)
-  invited_by        Int?
-  invited_at        DateTime? @db.Timestamptz(6)
-  accepted_at       DateTime? @db.Timestamptz(6)
-  revoked_at        DateTime? @db.Timestamptz(6)
-  last_active_at    DateTime? @db.Timestamptz(6)
-  created_at        DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime? @default(now()) @db.Timestamptz(6)
+  id                                                   Int                           @id @default(autoincrement())
+  manager_id                                           Int                           @unique
+  account_id                                           String                        @db.VarChar(255)
+  team_role                                            String                        @db.VarChar(50)
+  access_scope                                         String                        @default("all_locations") @db.VarChar(30)
+  status                                               String                        @default("active") @db.VarChar(20)
+  account_holder                                       Boolean                       @default(false)
+  invited_by                                           Int?
+  invited_at                                           DateTime?                     @db.Timestamptz(6)
+  accepted_at                                          DateTime?                     @db.Timestamptz(6)
+  revoked_at                                           DateTime?                     @db.Timestamptz(6)
+  last_active_at                                       DateTime?                     @db.Timestamptz(6)
+  created_at                                           DateTime                      @default(now()) @db.Timestamptz(6)
+  updated_at                                           DateTime                      @default(now()) @db.Timestamptz(6)
+  account_member_locations_v2                          account_member_locations_v2[]
+  customers                                            customers                     @relation(fields: [account_id], references: [account_id], onUpdate: NoAction, map: "fk_membership_account")
+  managers_account_memberships_v2_invited_byTomanagers managers?                     @relation("account_memberships_v2_invited_byTomanagers", fields: [invited_by], references: [id], onUpdate: NoAction, map: "fk_membership_invited_by")
+  managers_account_memberships_v2_manager_idTomanagers managers                      @relation("account_memberships_v2_manager_idTomanagers", fields: [manager_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_membership_manager")
 
   @@index([account_id, status], map: "idx_account_memberships_v2_account_status")
   @@index([manager_id, status], map: "idx_account_memberships_v2_manager_status")
@@ -515,10 +610,12 @@ model account_memberships_v2 {
 }
 
 model account_member_locations_v2 {
-  id            Int       @id @default(autoincrement())
-  membership_id Int
-  restaurant_id Int
-  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  id                     Int                    @id @default(autoincrement())
+  membership_id          Int
+  restaurant_id          Int
+  created_at             DateTime               @default(now()) @db.Timestamptz(6)
+  account_memberships_v2 account_memberships_v2 @relation(fields: [membership_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_member_location_membership")
+  restaurants            restaurants            @relation(fields: [restaurant_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_member_location_restaurant")
 
   @@unique([membership_id, restaurant_id], map: "uq_account_member_locations_v2_membership_restaurant")
   @@index([membership_id], map: "idx_account_member_locations_v2_membership_id")
@@ -527,19 +624,22 @@ model account_member_locations_v2 {
 }
 
 model team_invitations_v2 {
-  id            Int       @id @default(autoincrement())
-  account_id    String    @db.VarChar(255)
-  email         String    @db.VarChar(255)
-  team_role     String    @db.VarChar(50)
-  access_scope  String    @default("all_locations") @db.VarChar(30)
-  status        String    @default("pending") @db.VarChar(20)
-  invite_token  String    @unique @db.VarChar(120)
-  invited_by    Int?
-  created_at    DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at    DateTime? @default(now()) @db.Timestamptz(6)
-  cancelled_at  DateTime? @db.Timestamptz(6)
-  accepted_at   DateTime? @db.Timestamptz(6)
-  expires_at    DateTime? @db.Timestamptz(6)
+  id                           Int                            @id @default(autoincrement())
+  account_id                   String                         @db.VarChar(255)
+  email                        String                         @db.VarChar(255)
+  team_role                    String                         @db.VarChar(50)
+  access_scope                 String                         @default("all_locations") @db.VarChar(30)
+  status                       String                         @default("pending") @db.VarChar(20)
+  invite_token                 String                         @unique @db.VarChar(120)
+  invited_by                   Int?
+  created_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime                       @default(now()) @db.Timestamptz(6)
+  cancelled_at                 DateTime?                      @db.Timestamptz(6)
+  accepted_at                  DateTime?                      @db.Timestamptz(6)
+  expires_at                   DateTime?                      @db.Timestamptz(6)
+  team_invitation_locations_v2 team_invitation_locations_v2[]
+  customers                    customers                      @relation(fields: [account_id], references: [account_id], onUpdate: NoAction, map: "fk_team_invitation_account")
+  managers                     managers?                      @relation(fields: [invited_by], references: [id], onUpdate: NoAction, map: "fk_team_invitation_invited_by")
 
   @@index([account_id, status], map: "idx_team_invitations_v2_account_status")
   @@index([email, status], map: "idx_team_invitations_v2_email_status")
@@ -547,10 +647,12 @@ model team_invitations_v2 {
 }
 
 model team_invitation_locations_v2 {
-  id            Int       @id @default(autoincrement())
-  invitation_id Int
-  restaurant_id Int
-  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  id                  Int                 @id @default(autoincrement())
+  invitation_id       Int
+  restaurant_id       Int
+  created_at          DateTime            @default(now()) @db.Timestamptz(6)
+  team_invitations_v2 team_invitations_v2 @relation(fields: [invitation_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_invitation_location_invitation")
+  restaurants         restaurants         @relation(fields: [restaurant_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_invitation_location_restaurant")
 
   @@unique([invitation_id, restaurant_id], map: "uq_team_invitation_locations_v2_invitation_restaurant")
   @@index([invitation_id], map: "idx_team_invitation_locations_v2_invitation_id")

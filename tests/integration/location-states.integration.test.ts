@@ -18,6 +18,15 @@ function post(body: Record<string, unknown>) {
 describe("POST /api/location-states against PostgreSQL", () => {
   beforeAll(async () => {
     const suffix = Date.now();
+    await prisma.managers.create({
+      data: { id: managerId, email: `web001-manager-${suffix}@test.invalid`, password_hash: "test-only", role: "Admin" },
+    });
+    await prisma.customers.createMany({
+      data: [
+        { account_id: "web001-tenant-a", name: "TEST WEB-001 Tenant A" },
+        { account_id: "web001-tenant-b", name: "TEST WEB-001 Tenant B" },
+      ],
+    });
     const [tenantA, tenantB] = await Promise.all([
       prisma.restaurants.create({
         data: { active: true, name: "TEST WEB-001 Tenant A", store_id: `WEB001-A-STORE-${suffix}`, unit_id: `WEB001-A-UNIT-${suffix}` },
@@ -66,6 +75,8 @@ describe("POST /api/location-states against PostgreSQL", () => {
     await prisma.account_memberships_v2.deleteMany({ where: { manager_id: managerId } });
     await prisma.restaurant_sentry_state.deleteMany({ where: { restaurant_id: { in: [tenantARestaurantId, tenantBRestaurantId] } } });
     await prisma.restaurants.deleteMany({ where: { id: { in: [tenantARestaurantId, tenantBRestaurantId] } } });
+    await prisma.managers.deleteMany({ where: { id: managerId } });
+    await prisma.customers.deleteMany({ where: { account_id: { in: ["web001-tenant-a", "web001-tenant-b"] } } });
     await prisma.$disconnect();
   });
 
