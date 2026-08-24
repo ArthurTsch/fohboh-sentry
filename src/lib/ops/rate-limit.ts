@@ -1,56 +1,87 @@
-type LimitConfig = {
+import { createHash } from "node:crypto";
+import { Prisma } from "@/app/generated/prisma/client";
+import prisma from "@/lib/prisma";
+import { logServerError } from "@/lib/ops/audit";
+
+export type RateLimitFailureMode = "closed" | "open";
+
+export type LimitConfig = {
+  failureMode: RateLimitFailureMode;
   key: string;
   limit: number;
   windowMs: number;
 };
 
-type Bucket = {
-  count: number;
+export type RateLimitResult = {
+  allowed: boolean;
+  remaining: number;
   resetAt: number;
+  storeAvailable: boolean;
 };
 
-const globalStore = globalThis as typeof globalThis & {
-  __sentryRateLimitStore?: Map<string, Bucket>;
+type BucketRow = {
+  count: number;
+  reset_at: Date;
 };
 
-function getStore() {
-  if (!globalStore.__sentryRateLimitStore) {
-    globalStore.__sentryRateLimitStore = new Map<string, Bucket>();
-  }
-  return globalStore.__sentryRateLimitStore;
+function hashKey(key: string) {
+  return createHash("sha256").update(key).digest("hex");
 }
 
-export function checkRateLimit(config: LimitConfig) {
+export async function checkRateLimit(config: LimitConfig): Promise<RateLimitResult> {
   const now = Date.now();
-  const store = getStore();
-  const current = store.get(config.key);
+  const fallbackResetAt = now + config.windowMs;
 
-  if (!current || current.resetAt <= now) {
-    const next: Bucket = {
-      count: 1,
-      resetAt: now + config.windowMs,
-    };
-    store.set(config.key, next);
+  try {
+    const rows = await prisma.$queryRaw<BucketRow[]>(Prisma.sql`
+      INSERT INTO public.rate_limit_buckets (key_hash, count, reset_at, updated_at)
+      VALUES (${hashKey(config.key)}, 1, ${new Date(fallbackResetAt)}, now())
+      ON CONFLICT (key_hash) DO UPDATE
+      SET
+        count = CASE
+          WHEN public.rate_limit_buckets.reset_at <= now() THEN 1
+          ELSE public.rate_limit_buckets.count + 1
+        END,
+        reset_at = CASE
+          WHEN public.rate_limit_buckets.reset_at <= now() THEN EXCLUDED.reset_at
+          ELSE public.rate_limit_buckets.reset_at
+        END,
+        updated_at = now()
+      RETURNING count, reset_at
+    `);
+
+    const bucket = rows[0];
+    if (!bucket) throw new Error("Rate limiter did not return a bucket.");
+
     return {
-      allowed: true,
-      remaining: config.limit - 1,
-      resetAt: next.resetAt,
+      allowed: bucket.count <= config.limit,
+      remaining: Math.max(0, config.limit - bucket.count),
+      resetAt: bucket.reset_at.getTime(),
+      storeAvailable: true,
+    };
+  } catch (error) {
+    logServerError("rate_limit_store_failed", error, {
+      failureMode: config.failureMode,
+      keyHash: hashKey(config.key),
+    });
+    return {
+      allowed: config.failureMode === "open",
+      remaining: config.failureMode === "open" ? config.limit : 0,
+      resetAt: fallbackResetAt,
+      storeAvailable: false,
     };
   }
+}
 
-  if (current.count >= config.limit) {
-    return {
-      allowed: false,
-      remaining: 0,
-      resetAt: current.resetAt,
-    };
-  }
+export async function checkRateLimits(configs: LimitConfig[]): Promise<RateLimitResult> {
+  const results = await Promise.all(configs.map(checkRateLimit));
+  return results.reduce((strictest, result) => {
+    if (!result.allowed && strictest.allowed) return result;
+    if (result.allowed === strictest.allowed && result.remaining < strictest.remaining) return result;
+    return strictest;
+  });
+}
 
-  current.count += 1;
-  store.set(config.key, current);
-  return {
-    allowed: true,
-    remaining: Math.max(0, config.limit - current.count),
-    resetAt: current.resetAt,
-  };
+export function getRetryAfterSeconds(result: RateLimitResult) {
+  return Math.max(1, Math.ceil((result.resetAt - Date.now()) / 1000));
 }

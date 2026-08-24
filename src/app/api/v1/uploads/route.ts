@@ -4,7 +4,7 @@ import type { SessionState } from "@/components/sentry/types";
 import { requireManagerSession } from "@/lib/auth/session";
 import { logServerError, writeAuditLog } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
-import { checkRateLimit } from "@/lib/ops/rate-limit";
+import { checkRateLimits, getRetryAfterSeconds } from "@/lib/ops/rate-limit";
 import prisma from "@/lib/prisma";
 import { getArtifactPurpose, getExpectedKind } from "@/lib/uploads/definitions";
 import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
@@ -310,17 +310,26 @@ export async function POST(request: Request) {
       ), requestContext);
     }
     const uploaderId = session.managerId;
-    const limiter = checkRateLimit({
-      key: `upload:${uploaderId}:${requestContext.ipAddress ?? "unknown"}`,
-      limit: 120,
-      windowMs: 60 * 60 * 1000,
-    });
+    const limiter = await checkRateLimits([
+      {
+        failureMode: "open",
+        key: `upload-identity:${uploaderId}`,
+        limit: 120,
+        windowMs: 60 * 60 * 1000,
+      },
+      {
+        failureMode: "open",
+        key: `upload-address:${requestContext.ipAddress ?? "unknown"}`,
+        limit: 600,
+        windowMs: 60 * 60 * 1000,
+      },
+    ]);
     if (!limiter.allowed) {
       const response = NextResponse.json(
         { error: "Upload rate limit reached. Try again later." },
         { status: 429 },
       );
-      response.headers.set("retry-after", String(Math.ceil((limiter.resetAt - Date.now()) / 1000)));
+      response.headers.set("retry-after", String(getRetryAfterSeconds(limiter)));
       return withRequestHeaders(response, requestContext);
     }
 

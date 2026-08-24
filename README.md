@@ -118,8 +118,19 @@ Open:
 | `SUPPORT_INBOX_EMAIL` | Optional | Destination for support-ticket notifications |
 | `SUPPORT_FROM_EMAIL` | Optional | Verified sender for support email |
 | `RESEND_API_KEY` | Optional | Enables support-ticket email through Resend |
+| `VERCEL` | Set automatically by Vercel | Enables trust of Vercel's platform-controlled client-IP header |
 
 Production startup rejects session creation when neither `SENTRY_SESSION_SECRET` nor `AUTH_SECRET` is configured. Use a long, unique secret stored in the hosting provider's secret manager.
+
+### Rate limiting and trusted proxies
+
+Rate-limit buckets are stored atomically in PostgreSQL so limits are shared by every application instance and persist across warm-instance rotation. Bucket keys are SHA-256 hashes; normalized account identifiers are not stored in plaintext. Expired buckets reset on their next use and can be removed by routine database maintenance using the indexed `reset_at` column.
+
+Login limits use independent normalized-account and client-address buckets. Authenticated uploads, certifications, and location creation use independent manager-identity and address buckets. Login fails closed when the limiter store is unavailable; authenticated expensive operations fail open to preserve access for already authenticated users. Every store failure is logged as `rate_limit_store_failed`.
+
+Client addresses are accepted only from Vercel's `x-vercel-forwarded-for` header when `VERCEL=1`. Generic `x-forwarded-for` and `x-real-ip` values are never trusted. Vercel must remain the public ingress and must overwrite the trusted header. Local and unsupported self-hosted deployments use the shared `unknown` address bucket; do not enable a custom proxy header without restricting direct access to the application and adding a verified trust policy.
+
+Deploy migration `20260824_add_shared_rate_limits` before application code that uses the shared limiter. If the migration is missing, login intentionally fails closed with HTTP 429 while authenticated expensive operations continue under their documented fail-open policy.
 
 ## Authentication and authorization
 

@@ -9,7 +9,7 @@ import {
 } from "@/lib/auth/session";
 import { logServerError, logServerEvent, writeAuditLog } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
-import { checkRateLimit } from "@/lib/ops/rate-limit";
+import { checkRateLimits, getRetryAfterSeconds } from "@/lib/ops/rate-limit";
 
 export async function POST(request: Request) {
   const requestContext = getRequestContextFromRequest(request);
@@ -19,18 +19,27 @@ export async function POST(request: Request) {
       password?: string;
     };
     const normalizedEmail = (body.email ?? "").trim().toLowerCase();
-    const limiter = checkRateLimit({
-      key: `login:${requestContext.ipAddress ?? "unknown"}:${normalizedEmail || "unknown"}`,
-      limit: 8,
-      windowMs: 15 * 60 * 1000,
-    });
+    const limiter = await checkRateLimits([
+      {
+        failureMode: "closed",
+        key: `login-account:${normalizedEmail || "unknown"}`,
+        limit: 8,
+        windowMs: 15 * 60 * 1000,
+      },
+      {
+        failureMode: "closed",
+        key: `login-address:${requestContext.ipAddress ?? "unknown"}`,
+        limit: 40,
+        windowMs: 15 * 60 * 1000,
+      },
+    ]);
 
     if (!limiter.allowed) {
       const response = NextResponse.json(
         { error: "Too many login attempts. Try again later." },
         { status: 429 },
       );
-      response.headers.set("retry-after", String(Math.ceil((limiter.resetAt - Date.now()) / 1000)));
+      response.headers.set("retry-after", String(getRetryAfterSeconds(limiter)));
       return withRequestHeaders(response, requestContext);
     }
 

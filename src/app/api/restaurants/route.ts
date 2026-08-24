@@ -3,7 +3,7 @@ import { Prisma } from "@/app/generated/prisma/client";
 import { requireManagerSession } from "@/lib/auth/session";
 import { logServerError, writeAuditLog } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
-import { checkRateLimit } from "@/lib/ops/rate-limit";
+import { checkRateLimits, getRetryAfterSeconds } from "@/lib/ops/rate-limit";
 import prisma from "@/lib/prisma";
 import { buildGeneratedUnitId } from "@/lib/restaurants/ids";
 import { resolveVendorKey } from "@/components/sentry/vendor-catalog";
@@ -170,17 +170,26 @@ export async function POST(request: Request) {
         requestContext,
       );
     }
-    const limiter = checkRateLimit({
-      key: `restaurant-create:${session.managerId ?? session.email}:${requestContext.ipAddress ?? "unknown"}`,
-      limit: 20,
-      windowMs: 60 * 60 * 1000,
-    });
+    const limiter = await checkRateLimits([
+      {
+        failureMode: "open",
+        key: `restaurant-create-identity:${session.managerId ?? session.email}`,
+        limit: 20,
+        windowMs: 60 * 60 * 1000,
+      },
+      {
+        failureMode: "open",
+        key: `restaurant-create-address:${requestContext.ipAddress ?? "unknown"}`,
+        limit: 100,
+        windowMs: 60 * 60 * 1000,
+      },
+    ]);
     if (!limiter.allowed) {
       const response = NextResponse.json(
         { error: "Too many location creation attempts. Try again later." },
         { status: 429 },
       );
-      response.headers.set("retry-after", String(Math.ceil((limiter.resetAt - Date.now()) / 1000)));
+      response.headers.set("retry-after", String(getRetryAfterSeconds(limiter)));
       return withRequestHeaders(response, requestContext);
     }
 

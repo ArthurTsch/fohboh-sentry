@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireManagerSession } from "@/lib/auth/session";
 import { logServerError, logServerEvent } from "@/lib/ops/audit";
 import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/request";
-import { checkRateLimit } from "@/lib/ops/rate-limit";
+import { checkRateLimits, getRetryAfterSeconds } from "@/lib/ops/rate-limit";
 import { executePersistedCertification } from "@/lib/certification/service";
 
 function getAuthErrorResponse(error: unknown) {
@@ -35,17 +35,26 @@ export async function POST(request: Request) {
         { status: 403 },
       ), requestContext);
     }
-    const limiter = checkRateLimit({
-      key: `certification:${session.managerId ?? session.email}:${requestContext.ipAddress ?? "unknown"}`,
-      limit: 40,
-      windowMs: 60 * 60 * 1000,
-    });
+    const limiter = await checkRateLimits([
+      {
+        failureMode: "open",
+        key: `certification-identity:${session.managerId ?? session.email}`,
+        limit: 40,
+        windowMs: 60 * 60 * 1000,
+      },
+      {
+        failureMode: "open",
+        key: `certification-address:${requestContext.ipAddress ?? "unknown"}`,
+        limit: 200,
+        windowMs: 60 * 60 * 1000,
+      },
+    ]);
     if (!limiter.allowed) {
       const response = NextResponse.json(
         { error: "Certification rate limit reached. Try again later." },
         { status: 429 },
       );
-      response.headers.set("retry-after", String(Math.ceil((limiter.resetAt - Date.now()) / 1000)));
+      response.headers.set("retry-after", String(getRetryAfterSeconds(limiter)));
       return withRequestHeaders(response, requestContext);
     }
 

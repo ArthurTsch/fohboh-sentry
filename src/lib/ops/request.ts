@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { isIP } from "node:net";
 import { headers } from "next/headers";
 
 export type RequestContext = {
@@ -7,15 +8,18 @@ export type RequestContext = {
   userAgent: string | null;
 };
 
+function getTrustedClientIp(headerStore: Pick<Headers, "get">) {
+  if (process.env.VERCEL !== "1") return null;
+  const candidate = headerStore.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() || "";
+  return isIP(candidate) ? candidate : null;
+}
+
 export function getRequestContextFromRequest(request: Request): RequestContext {
   const requestId =
     request.headers.get("x-request-id")?.trim() ||
     request.headers.get("x-correlation-id")?.trim() ||
     randomUUID();
-  const ipAddress =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip")?.trim() ||
-    null;
+  const ipAddress = getTrustedClientIp(request.headers);
   const userAgent = request.headers.get("user-agent")?.trim() || null;
 
   return {
@@ -31,10 +35,7 @@ export async function getRequestContextFromHeaders(): Promise<RequestContext> {
     headerStore.get("x-request-id")?.trim() ||
     headerStore.get("x-correlation-id")?.trim() ||
     randomUUID();
-  const ipAddress =
-    headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    headerStore.get("x-real-ip")?.trim() ||
-    null;
+  const ipAddress = getTrustedClientIp(headerStore);
   const userAgent = headerStore.get("user-agent")?.trim() || null;
 
   return {

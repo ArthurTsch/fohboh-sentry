@@ -21,7 +21,7 @@ import {
 } from "@/lib/auth/session";
 import { writeAuditLog } from "@/lib/ops/audit";
 import { getRequestContextFromHeaders } from "@/lib/ops/request";
-import { checkRateLimit } from "@/lib/ops/rate-limit";
+import { checkRateLimits } from "@/lib/ops/rate-limit";
 
 async function requireAdminSession() {
   try {
@@ -36,11 +36,20 @@ export async function loginAdminAction(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
   try {
-    const limiter = checkRateLimit({
-      key: `superadmin-login:${requestContext.ipAddress ?? "unknown"}:${email.toLowerCase()}`,
-      limit: 8,
-      windowMs: 15 * 60 * 1000,
-    });
+    const limiter = await checkRateLimits([
+      {
+        failureMode: "closed",
+        key: `superadmin-login-account:${email.toLowerCase() || "unknown"}`,
+        limit: 8,
+        windowMs: 15 * 60 * 1000,
+      },
+      {
+        failureMode: "closed",
+        key: `superadmin-login-address:${requestContext.ipAddress ?? "unknown"}`,
+        limit: 40,
+        windowMs: 15 * 60 * 1000,
+      },
+    ]);
     if (!limiter.allowed) {
       redirect("/superadmin?error=rate-limit");
     }
