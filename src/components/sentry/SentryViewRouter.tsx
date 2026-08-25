@@ -56,7 +56,6 @@ export function SentryViewRouter({
   artifactIntakeState,
   caars,
   completed,
-  expandedLocations,
   faqOpen,
   faqQuery,
   filteredFaq,
@@ -74,11 +73,9 @@ export function SentryViewRouter({
   onRemoveUpload,
   onResetLocationUploads,
   onEnterSupportMode,
-  onExpandAll,
   onFilterChange,
   onOpenCaar,
   onOpenLocation,
-  onOpenDiy,
   onOpenOnboarding,
   onOpenSchemaEditor,
   onOpenUploads,
@@ -90,7 +87,6 @@ export function SentryViewRouter({
   onRunCertification,
   onSealWorkspace,
   onToggleChecklist,
-  onToggleLocation,
   onToggleQuestion,
   onViewChange,
   queue,
@@ -125,7 +121,6 @@ export function SentryViewRouter({
   artifactIntakeState: Record<string, IntakeState>;
   caars: CaarRecord[];
   completed: Record<string, boolean[]>;
-  expandedLocations: string[];
   faqOpen: string | null;
   faqQuery: string;
   filteredFaq: { answer: string; question: string; topic: string }[];
@@ -157,7 +152,6 @@ export function SentryViewRouter({
   ) => Promise<void>;
   onResetLocationUploads: (locationId: string) => Promise<void>;
   onEnterSupportMode: (accountId: string) => void;
-  onExpandAll: () => void;
   onFilterChange: (filter: "all" | "immutable" | "editable") => void;
   onOpenCaar: Dispatch<SetStateAction<CaarRecord | null>>;
   onOpenLocation: (locationId: string) => void;
@@ -166,14 +160,12 @@ export function SentryViewRouter({
   onOpenUploads: (locationId: string) => void;
   onOpenUser: Dispatch<SetStateAction<WgsUser | null>>;
   onInitializeWorkspace: (locationId: string, module: "M01" | "M02", vendor?: string) => void;
-  onOpenDiy: () => void;
   onSupportTicketCreated: () => void | Promise<void>;
   onQueryChange: Dispatch<SetStateAction<string>>;
   onResolveQueue: (ticketId: string) => void | Promise<void>;
   onRunCertification: (locationId: string) => void;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   onToggleChecklist: (stepId: string, itemIndex: number) => void;
-  onToggleLocation: (id: string) => void;
   onToggleQuestion: (question: string) => void;
   onViewChange: (view: ViewId) => void;
   queue: WgsQueueItem[];

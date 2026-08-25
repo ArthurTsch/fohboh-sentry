@@ -4,7 +4,6 @@ import prisma from "@/lib/prisma";
 import type {
   CaarEvidenceTrace,
   CaarFieldAudit,
-  CaarProvenanceKind,
   CaarRecord,
   CaarRuleCitationSummary,
   CaarScoreDeduction,
@@ -15,11 +14,6 @@ import {
   isInformationalRuleCitation,
 } from "@/lib/mge/citation-disposition";
 import { ruleAppliesToModule } from "@/lib/mge/engine";
-
-function parseCurrencyToCents(value: string) {
-  const numeric = Number(value.replace(/[^0-9.-]/g, "")) || 0;
-  return Math.round(numeric * 100);
-}
 
 function formatCentsToCurrency(cents: number) {
   return new Intl.NumberFormat("en-US", {
@@ -135,10 +129,6 @@ function referenceIdsMatch(left: string, right: string) {
     leftTrimmed.endsWith(rightTrimmed) ||
     rightTrimmed.endsWith(leftTrimmed)
   );
-}
-
-function referenceRowSupportsAmount(row: ReferenceRow, targetAmount: number) {
-  return resolveReferenceRowMatchedAmount(row, targetAmount) !== null;
 }
 
 function resolveReferenceRowMatchedAmount(row: ReferenceRow, targetAmount: number) {
@@ -1154,7 +1144,7 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+export async function POST() {
   try {
     await requireManagerSession();
     return NextResponse.json(

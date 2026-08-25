@@ -245,7 +245,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   );
   const [session, setSession] = useState<SessionState | null>(initialSession);
   const [activeViewOverride, setActiveViewOverride] = useState<ViewId | null>(null);
-  const [expandedLocations, setExpandedLocations] = useState<string[]>(["LOC-104"]);
   const [activeWorkspaceLocationId, setActiveWorkspaceLocationId] = useState<string | null>(null);
   const [selectedCaar, setSelectedCaar] = useState<CaarRecord | null>(null);
   const [logFilter, setLogFilter] = useState<"all" | "immutable" | "editable">("all");
@@ -1037,16 +1036,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     setActiveWorkspaceLocationId(locationId);
     startTransition(() => setActiveViewOverride("location"));
     showToast(`${moduleId} upload set saved for ${location.name}.`);
-  }
-
-  function toggleLocation(id: string) {
-    setExpandedLocations((current) =>
-      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
-    );
-  }
-
-  function handleExpandAll() {
-    setExpandedLocations(visibleLocations.map((location) => location.id));
   }
 
   async function handleAddLocation(draft: AddLocationDraft) {
@@ -2503,7 +2492,6 @@ function handleCompleteOnboarding(locationId: string) {
         artifactIntakeState={artifactIntakeState}
         caars={visibleCaars}
         completed={onboardingState}
-        expandedLocations={expandedLocations}
         faqOpen={faqOpen}
         faqQuery={faqQuery}
         filteredFaq={filteredFaq}
@@ -2524,10 +2512,8 @@ function handleCompleteOnboarding(locationId: string) {
           onRemoveUpload={handleRemoveSavedUpload}
           onResetLocationUploads={handleResetLocationUploads}
           onEnterSupportMode={handleEnterSupportMode}
-          onExpandAll={handleExpandAll}
           onFilterChange={setLogFilter}
           onOpenCaar={setSelectedCaar}
-          onOpenDiy={handleOpenDiy}
           onOpenLocation={handleOpenLocationWorkspace}
           onOpenOnboarding={handleOpenOnboarding}
           onOpenSchemaEditor={setEditingWorkspace}
@@ -2544,7 +2530,6 @@ function handleCompleteOnboarding(locationId: string) {
           onRunCertification={handleRunCertification}
           onSealWorkspace={handleSealWorkspace}
           onToggleChecklist={handleToggleChecklist}
-          onToggleLocation={toggleLocation}
           onToggleQuestion={(question) => setFaqOpen((current) => (current === question ? null : question))}
           onViewChange={handleViewChange}
           permissionRecords={permissionRecords}

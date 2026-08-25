@@ -252,15 +252,6 @@ type DeterministicRule = {
   version: string;
 };
 
-const MQ6_WEIGHTS: Record<Mq6DimensionName, number> = {
-  Auditability: 0.2,
-  "Cross-System Reconciliation": 0.25,
-  "Data Completeness": 0.1,
-  "Data Freshness": 0.1,
-  "Rule Integrity": 0.15,
-  "Source Authenticity": 0.2,
-};
-
 const TG_WEIGHTS: Record<TrustGateName, number> = {
   TG01: 8,
   TG02: 6,
@@ -1226,7 +1217,6 @@ const M02_RULES: DeterministicRule[] = [
       if (!statement || !pos || residualVariance <= 1) return null;
       const { statementOrderCount: statementOrders, posOrderCount: posOrders } =
         resolveComparableM02OrderCounts(statement, pos);
-      const duplicateOrderCount = numberValue(statement.duplicateOrderCount);
       const orderDelta = Math.max(0, Math.abs(statementOrders - posOrders));
       const actualCommission = computeActualM02Commission(statement);
       if (statementOrders <= 0 || posOrders <= 0 || orderDelta < 3 || actualCommission <= 0) return null;
@@ -3122,10 +3112,6 @@ function referenceIdsMatch(left: string, right: string) {
 
 function amountsMatch(left: number, right: number) {
   return Math.abs(numberValue(left) - numberValue(right)) <= 0.01;
-}
-
-function referenceRowSupportsAmount(row: ReferenceRow, targetAmount: number) {
-  return resolveReferenceRowMatchedAmount(row, targetAmount) !== null;
 }
 
 function resolveReferenceRowMatchedAmount(row: ReferenceRow, targetAmount: number) {

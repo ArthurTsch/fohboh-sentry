@@ -156,15 +156,6 @@ const DIMENSION_LABELS: Record<CaarDimension["name"], string> = {
   "Source Authenticity": "20%",
 };
 
-const DIMENSION_WEIGHTS: Record<CaarDimension["name"], number> = {
-  Auditability: 0.2,
-  "Cross-System Reconciliation": 0.25,
-  "Data Completeness": 0.1,
-  "Data Freshness": 0.1,
-  "Rule Integrity": 0.15,
-  "Source Authenticity": 0.2,
-};
-
 const MONTH_NAMES = [
   "January",
   "February",
