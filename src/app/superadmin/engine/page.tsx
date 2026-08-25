@@ -251,7 +251,7 @@ const workflowCards = [
       "PDF readiness requires upload and hash, plus parser-derived usability where the workflow needs text-based validation.",
       "Saved uploads are persisted and replace the previous artifact for the same document slot when re-uploaded.",
       "The bank statement is location-level. One physical PDF is stored, then separately parsed and linked for all configured module/provider evidence scopes.",
-      "PDF extraction reads all pages, reconstructs horizontal rows from coordinates, preserves explicit line endings, and excludes rotated scanner-control text from the reading layer.",
+      "PDF extraction reads all pages, reconstructs horizontal rows from coordinates, preserves explicit line endings, and excludes rotated scanner-control text from the reading layer. Toast M01 processor PDFs use the statement Summary block as the authoritative source for total processor fees and separately persist Interchange Fees for governed interchange-plus calculations.",
     ],
   },
   {

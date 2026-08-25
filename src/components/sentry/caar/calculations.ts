@@ -60,6 +60,7 @@ export function deriveM01Calculation(
     ?.sampleEvidence.find((row) => typeof row.expected_fee_amount === "number");
   if (!sample) return null;
   const number = (key: string) => typeof sample[key] === "number" ? sample[key] as number : 0;
+  const optionalNumber = (key: string) => typeof sample[key] === "number" ? sample[key] as number : null;
   const reconciliationSample = findReconciliationSample(ruleCitations);
   const reconciliationNumber = (key: string) =>
     typeof reconciliationSample?.[key] === "number" ? reconciliationSample[key] as number : null;
@@ -70,7 +71,7 @@ export function deriveM01Calculation(
     basis,
     certifiedRecoveryDisplay,
     expectedFees: number("expected_fee_amount"),
-    interchange: number("expected_interchange_component"),
+    interchange: optionalNumber("expected_interchange_component"),
     markup: number("expected_markup_component"),
     markupBps: number("contracted_markup_bps"),
     monthlyFee: number("expected_monthly_component"),

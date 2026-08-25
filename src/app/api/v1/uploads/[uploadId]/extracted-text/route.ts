@@ -4,12 +4,14 @@ import { requireManagerSession } from "@/lib/auth/session";
 import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
 import prisma from "@/lib/prisma";
 import { extractPdfText } from "@/lib/uploads/pdf";
+import { buildScopedUploadLookup } from "@/lib/uploads/scoped-upload-lookup";
 import { readUploadBlob } from "@/lib/uploads/storage";
 
 type ScopedRestaurant = {
   id: number;
   location_id: string;
   name: string;
+  normalized_location_id: number | null;
 };
 
 function getAuthErrorResponse(error: unknown) {
@@ -48,7 +50,7 @@ async function getScopedRestaurants(session: SessionState) {
     },
   });
 
-  let stateRows: Array<{ location_id: string; restaurant_id: number }> = [];
+  let stateRows: Array<{ account_id: string | null; location_id: string; restaurant_id: number }> = [];
 
   try {
     if (restaurants.length > 0) {
@@ -59,6 +61,7 @@ async function getScopedRestaurants(session: SessionState) {
           },
         },
         select: {
+          account_id: true,
           location_id: true,
           restaurant_id: true,
         },
@@ -79,15 +82,37 @@ async function getScopedRestaurants(session: SessionState) {
 
   const stateByRestaurantId = new Map(stateRows.map((row) => [row.restaurant_id, row]));
 
-  return restaurants.map<ScopedRestaurant>((restaurant) => ({
-    id: restaurant.id,
-    location_id:
-      stateByRestaurantId.get(restaurant.id)?.location_id?.trim() ||
+  const locationRows = stateRows.length > 0
+    ? await prisma.locations_v2.findMany({
+        where: {
+          OR: stateRows.flatMap((state) => state.account_id
+            ? [{ external_id: state.location_id, customers: { account_id: state.account_id } }]
+            : []),
+        },
+        select: { customers: { select: { account_id: true } }, external_id: true, id: true },
+      })
+    : [];
+  const normalizedByAccountAndExternalId = new Map(locationRows.map((location) => [
+    `${location.customers.account_id ?? ""}:${location.external_id}`,
+    location.id,
+  ]));
+
+  return restaurants.map<ScopedRestaurant>((restaurant) => {
+    const state = stateByRestaurantId.get(restaurant.id);
+    const accountId = state?.account_id ?? null;
+    const locationId = state?.location_id?.trim() ||
       restaurant.unit_id?.trim() ||
       restaurant.store_id?.trim() ||
-      `LOC-DB-${restaurant.id}`,
-    name: restaurant.name,
-  }));
+      `LOC-DB-${restaurant.id}`;
+    return {
+      id: restaurant.id,
+      location_id: locationId,
+      name: restaurant.name,
+      normalized_location_id: accountId
+        ? normalizedByAccountAndExternalId.get(`${accountId}:${locationId}`) ?? null
+        : null,
+    };
+  });
 }
 
 export async function GET(
@@ -104,20 +129,16 @@ export async function GET(
     }
 
     const restaurants = await getScopedRestaurants(session);
-    const restaurantIds = restaurants.map((restaurant) => restaurant.id);
+    const normalizedLocationIds = restaurants.flatMap((restaurant) =>
+      restaurant.normalized_location_id ? [restaurant.normalized_location_id] : [],
+    );
 
-    if (restaurantIds.length === 0) {
+    if (normalizedLocationIds.length === 0) {
       return NextResponse.json({ error: "Upload not found." }, { status: 404 });
     }
 
     const upload = await prisma.uploads_v2.findFirst({
-      where: {
-        id: parsedUploadId,
-        location_id: {
-          in: restaurantIds,
-        },
-        superseded_by: null,
-      },
+      where: buildScopedUploadLookup(parsedUploadId, normalizedLocationIds),
       select: {
         artifact_key: true,
         file_name: true,
@@ -136,7 +157,7 @@ export async function GET(
       return NextResponse.json({ error: "This viewer is available only for PDF uploads." }, { status: 400 });
     }
 
-    const restaurant = restaurants.find((entry) => entry.id === upload.location_id);
+    const restaurant = restaurants.find((entry) => entry.normalized_location_id === upload.location_id);
     const buffer = await readUploadBlob(upload.s3_key);
     const text = await extractPdfText(buffer);
 

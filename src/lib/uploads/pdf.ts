@@ -4,6 +4,7 @@ type PdfMetricExtraction = {
     depositAmount?: number;
     depositReferenceRows?: PdfReferenceRow[];
     feeAmount?: number;
+    interchangeFeeAmount?: number;
     orderCount?: number;
     payoutAmount?: number;
     transactionCount?: number;
@@ -485,8 +486,29 @@ function extractProcessorStatementMetrics(text: string): PdfMetricExtraction {
   const basisAmount = totalBlock?.basisAmount ?? 0;
   const payoutAmount = totalBlock?.payoutAmount ?? basisAmount;
   const transactionCount = totalBlock?.transactionCount ?? 0;
+  const interchangeFeeAmount = findSummaryAmount(lines, /^interchange fees?$/i);
+  const networkFeeAmount = findSummaryAmount(lines, /^network fees?$/i);
+  const processingFeeAmount = findSummaryAmount(lines, /^(?:toast )?processing fees?$/i);
+  const otherAdjustmentAmount = findSummaryAmount(lines, /^other adjustments?$/i);
+  const creditCardBalance = findSummaryAmount(lines, /^credit card balance$/i);
+  const hasCompleteSummaryFeeBreakdown = [
+    interchangeFeeAmount,
+    networkFeeAmount,
+    processingFeeAmount,
+    otherAdjustmentAmount,
+  ].every((amount) => amount !== undefined);
+  const summaryFeeTotal = hasCompleteSummaryFeeBreakdown
+    ? roundCurrency(
+        (interchangeFeeAmount ?? 0) +
+          (networkFeeAmount ?? 0) +
+          (processingFeeAmount ?? 0) +
+          (otherAdjustmentAmount ?? 0),
+      )
+    : 0;
   const feeAmount =
-    totalBlock?.feeAmount ??
+    creditCardBalance ||
+    summaryFeeTotal ||
+    totalBlock?.feeAmount ||
     (findAmountNearSequence(lines, ["Card Processing", "Fees"]) ||
       findAmountNearLabel(lines, /^fees$/i));
 
@@ -502,11 +524,41 @@ function extractProcessorStatementMetrics(text: string): PdfMetricExtraction {
     metrics: {
       basisAmount,
       feeAmount: feeAmount > 0 ? feeAmount : undefined,
+      interchangeFeeAmount,
       payoutAmount,
       transactionCount: transactionCount > 0 ? transactionCount : undefined,
     },
-    warnings: feeAmount > 0 ? [] : ["Processor fee total was not detected automatically from this PDF."],
+    warnings: [
+      ...(feeAmount > 0 ? [] : ["Processor fee total was not detected automatically from this PDF."]),
+      ...(interchangeFeeAmount !== undefined
+        ? []
+        : ["Interchange fee total was not detected automatically from this processor PDF."]),
+    ],
   };
+}
+
+function findSummaryAmount(lines: string[], labelPattern: RegExp): number | undefined {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const labelOnly = line.replace(/[-+]?\$?\s*\(?[\d,]+\.\d{2}\)?\s*$/, "").trim();
+    if (!labelPattern.test(labelOnly)) continue;
+
+    const inlineValues = extractSummaryCurrencyValuesFromLine(line);
+    if (inlineValues.length > 0) return inlineValues.at(-1) ?? 0;
+
+    for (let lookAhead = 1; lookAhead <= 2 && index + lookAhead < lines.length; lookAhead += 1) {
+      const values = extractSummaryCurrencyValuesFromLine(lines[index + lookAhead]);
+      if (values.length > 0) return values[0];
+    }
+  }
+  return undefined;
+}
+
+function extractSummaryCurrencyValuesFromLine(line: string) {
+  const matches = line.match(/[-+]?\(?\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})\)?|[-+]?\(?\$?\d+\.\d{2}\)?/g);
+  return (matches ?? [])
+    .map((value) => Math.abs(parseCurrency(value)))
+    .filter(Number.isFinite);
 }
 
 function findProcessorTotalBlock(lines: string[]) {

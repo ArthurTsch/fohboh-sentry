@@ -3879,7 +3879,10 @@ function buildM01FeeGapSample(metrics: Metrics, contract: Record<string, string>
     contracted_monthly_fee: monthlyFee,
     contracted_per_txn_fee: txnFee,
     expected_fee_amount: expectedTotal,
-    expected_interchange_component: numberValue(metrics.interchangeFeeAmount),
+    expected_interchange_component:
+      typeof metrics.interchangeFeeAmount === "number"
+        ? numberValue(metrics.interchangeFeeAmount)
+        : null,
     expected_markup_component: markupComponent,
     expected_monthly_component: monthlyFee,
     expected_txn_component: txnComponent,

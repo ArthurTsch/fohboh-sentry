@@ -23,6 +23,7 @@ type UploadCardState = {
 
 type PdfViewerState = {
   artifactKey: string;
+  error?: string;
   fileName: string;
   lineCount: number;
   loading: boolean;
@@ -259,6 +260,10 @@ export function UploadCenterView({
     } catch (error) {
       setPdfViewer({
         artifactKey,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to load extracted PDF text.",
         fileName,
         lineCount: 0,
         loading: false,
@@ -266,10 +271,7 @@ export function UploadCenterView({
         locationName: activeLocationName ?? "Unknown location",
         moduleId: activeModule,
         subtitle,
-        text:
-          error instanceof Error
-            ? `Unable to load extracted PDF text.\n\n${error.message}`
-            : "Unable to load extracted PDF text.",
+        text: "",
         title,
         uploadId,
       });
@@ -1412,8 +1414,8 @@ export function UploadCenterView({
 
             <div className="border-b border-[var(--border)] bg-[var(--surface)] px-6 py-4">
               <div className="flex flex-wrap items-center gap-3">
-                <Badge tone={pdfViewer.loading ? "info" : pdfViewer.text.trim() ? "success" : "warning"}>
-                  {pdfViewer.loading ? "Loading" : pdfViewer.text.trim() ? "Text Extracted" : "No Text Found"}
+                <Badge tone={pdfViewer.loading ? "info" : pdfViewer.error ? "danger" : pdfViewer.text.trim() ? "success" : "warning"}>
+                  {pdfViewer.loading ? "Loading" : pdfViewer.error ? "Extraction Error" : pdfViewer.text.trim() ? "Text Extracted" : "No Text Found"}
                 </Badge>
                 <span className="font-[family-name:var(--font-mono)] text-[10px] uppercase tracking-[0.16em] text-[var(--muted)]">
                   {pdfViewer.lineCount} lines
@@ -1431,6 +1433,10 @@ export function UploadCenterView({
               {pdfViewer.loading ? (
                 <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-6 text-sm text-[var(--muted)]">
                   Loading persisted extracted text for this PDF...
+                </div>
+              ) : pdfViewer.error ? (
+                <div className="rounded-2xl border border-[rgba(214,48,49,0.2)] bg-[rgba(214,48,49,0.04)] px-5 py-6 text-sm text-[var(--accent)]">
+                  Unable to load extracted PDF text. {pdfViewer.error}
                 </div>
               ) : pdfViewer.text.trim() ? (
                 <div className="min-w-max rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-5 py-5 font-[family-name:var(--font-mono)] text-[12px] leading-6 text-[var(--text)]">
