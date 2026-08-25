@@ -37,7 +37,7 @@ describe("CAAR score deduction evidence", () => {
           samples: [{ detail: "POS reconciliation remains below the release band.", tg04_score: 0 }],
         },
       },
-    ]);
+    ], "M02");
 
     expect(deductions).toHaveLength(1);
     expect(deductions[0]).toMatchObject({
@@ -50,5 +50,32 @@ describe("CAAR score deduction evidence", () => {
     expect(deductions[0].evidence[0]).toContain("POS-certified DSP order count 140");
     expect(deductions[0].evidence[0]).toContain("difference 12 orders (7.89%)");
     expect(deductions[0].evidence[0]).toContain("monetary values do not control");
+  });
+
+  it("describes missing M02 comparison inputs as coverage rather than an R123 mismatch", () => {
+    const deductions = buildScoreDeductions([
+      {
+        rule_id: "R136",
+        sample_evidence: {
+          samples: [{
+            trust_gate_breakdown: JSON.stringify([{ gate: "TG04", score: 0, weight_percent: 12 }]),
+          }],
+        },
+      },
+      {
+        rule_id: "R122",
+        sample_evidence: {
+          samples: [{
+            dsp_order_count: 0,
+            pos_certified_order_count: 82,
+            reconciliation_evaluable: false,
+          }],
+        },
+      },
+    ], "M02");
+
+    expect(deductions[0]).toMatchObject({ supported: true, ruleIds: ["R122"] });
+    expect(deductions[0].evidence[0]).toContain("evidence-coverage deduction");
+    expect(deductions[0].evidence[0]).toContain("not an R123 reconciliation mismatch");
   });
 });

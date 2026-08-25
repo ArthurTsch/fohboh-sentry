@@ -21,6 +21,32 @@ function artifact(
 }
 
 describe("M02 citation consistency", () => {
+  it("does not fire R123 when the DSP-to-POS comparison is not evaluable", () => {
+    const result = runDeterministicModuleEngine({
+      artifacts: [
+        artifact("m02-settlement", "CSV", { metrics: { basisAmount: 0, orderCount: 0 } }),
+        artifact("m02-pos", "CSV", { metrics: { basisAmount: 2_406.55, orderCount: 82 } }),
+        artifact("m02-agreement", "PDF"),
+        artifact("m02-bank", "PDF", { metrics: { depositAmount: 2_406.55 } }),
+        artifact("m02-contract", "Manual Entry", {
+          contractValues: { commission_base: "Subtotal before tax", rate_delivery: "25", rate_pickup: "7" },
+        }),
+      ],
+      cadence: "monthly_final",
+      certificationMonth: "2026-06",
+      evaluationDate: new Date("2026-06-30T12:00:00.000Z"),
+      moduleId: "M02",
+    });
+
+    expect(result.trustGates.TG04.scorePct).toBe(0);
+    expect(result.ruleCitations.find((citation) => citation.ruleId === "R122")?.sampleEvidence[0]).toMatchObject({
+      dsp_order_count: 0,
+      pos_certified_order_count: 82,
+      reconciliation_evaluable: false,
+    });
+    expect(result.ruleCitations.some((citation) => citation.ruleId === "R123")).toBe(false);
+  });
+
   it("passes TG04 when a delivery-only POS report matches unique DSP delivery orders", () => {
     const result = runDeterministicModuleEngine({
       artifacts: [

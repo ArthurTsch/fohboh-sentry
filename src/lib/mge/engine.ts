@@ -1442,6 +1442,23 @@ export function getRuleSetVersion(cadence: Cadence) {
   return cadence === "weekly_preliminary" ? "mge-v1.0.0-weekly-prelim" : RULE_VERSION;
 }
 
+export function ruleAppliesToModule(ruleId: string, moduleId: "M01" | "M02" | "M03") {
+  const canonicalMatch = /^R(\d{3})$/.exec(ruleId);
+  if (canonicalMatch) {
+    const ruleNumber = Number(canonicalMatch[1]);
+    if (ruleNumber >= 16 && ruleNumber <= 55) return moduleId === "M02";
+    if (ruleNumber >= 56 && ruleNumber <= 95) return moduleId === "M01";
+    if (ruleNumber >= 96 && ruleNumber <= 115) return moduleId === "M03";
+    if (ruleNumber >= 166 && ruleNumber <= 175) return false;
+    return true;
+  }
+
+  if (ruleId.startsWith("DSP-")) return moduleId === "M02";
+  if (ruleId.startsWith("MFR-")) return moduleId === "M01";
+  if (ruleId.startsWith("ROY-") || ruleId.startsWith("M03-")) return moduleId === "M03";
+  return true;
+}
+
 export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEngineResult {
   const statementToken =
     input.moduleId === "M01"
@@ -1529,7 +1546,7 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
     ...governanceRuleCitations,
     ...ingestionRuleCitations,
     ...trustGateRuleCitations,
-  ], recoveryValue);
+  ].filter((citation) => ruleAppliesToModule(citation.ruleId, context.moduleId)), recoveryValue);
   const { score, certificationZone } = computeTrustScoreFromTrustGates(trustGates, systemHealth);
   const findingClass = classifyFindingClass(ruleCitations, context);
   const findings = buildOperationalFindings(
@@ -2219,6 +2236,9 @@ function buildCanonicalTrustGateCitations({
       ? relativeDelta(dspOrderCount, posCertifiedOrderCount) * 100
       : null;
   const settlementTimingBasis = usesSettlementTimingBasis(context);
+  const reconciliationEvaluable = context.moduleId === "M02"
+    ? dspOrderCount > 0 && posCertifiedOrderCount > 0
+    : settlementTimingBasis || (processorBasis > 0 && posBasis > 0);
   const reconciliationBreakdown = resolveCrossSystemReconciliationBreakdown(context);
 
   const citations = [
@@ -2265,14 +2285,18 @@ function buildCanonicalTrustGateCitations({
         : `TG04 POS reconciliation resolved at ${trustGates.TG04.scorePct}.`,
       difference_amount: roundCurrency(reconciliationDifference),
       difference_percent: reconciliationDifferencePct === null ? null : roundCurrency(reconciliationDifferencePct),
-      dsp_order_count: roundInteger(dspOrderCount),
       gross_settled_batches: roundCurrency(posBasis),
       net_settled_batches: roundCurrency(numberValue(context.pos?.metrics?.payoutAmount)),
       pos_basis: roundCurrency(posBasis),
-      pos_certified_order_count: roundInteger(posCertifiedOrderCount),
-      order_count_difference: roundInteger(orderCountDifference),
-      order_count_difference_percent: orderCountDifferencePct === null ? null : roundCurrency(orderCountDifferencePct),
-      order_count_scope: comparableM02Orders.scope,
+      ...(context.moduleId === "M02"
+        ? {
+            dsp_order_count: roundInteger(dspOrderCount),
+            pos_certified_order_count: roundInteger(posCertifiedOrderCount),
+            order_count_difference: roundInteger(orderCountDifference),
+            order_count_difference_percent: orderCountDifferencePct === null ? null : roundCurrency(orderCountDifferencePct),
+            order_count_scope: comparableM02Orders.scope,
+          }
+        : {}),
       processor_basis: roundCurrency(processorBasis),
       processor_basis_label: "Gross card-processing volume grouped by fee-charge timing",
       settlement_basis_label: settlementTimingBasis
@@ -2289,15 +2313,19 @@ function buildCanonicalTrustGateCitations({
       payout_basis: roundCurrency(reconciliationBreakdown.payoutAmount),
       pos_score_contribution: reconciliationBreakdown.posContribution,
       reconciliation_total_score: reconciliationBreakdown.totalScore,
+      reconciliation_evaluable: reconciliationEvaluable,
     }),
-    buildNarrativeCitation("R123", {
-      detail:
-        trustGates.TG04.scorePct >= 85
-          ? "POS reconciliation cleared the release band."
-          : "POS reconciliation remains below the release band.",
-      reconciliation_score: trustGates.TG04.scorePct,
-      tg04_score: trustGates.TG04.scorePct,
-    }),
+    ...(reconciliationEvaluable
+      ? [buildNarrativeCitation("R123", {
+          detail:
+            trustGates.TG04.scorePct >= 85
+              ? "POS reconciliation cleared the release band."
+              : "POS reconciliation remains below the release band.",
+          reconciliation_evaluable: true,
+          reconciliation_score: trustGates.TG04.scorePct,
+          tg04_score: trustGates.TG04.scorePct,
+        })]
+      : []),
     buildNarrativeCitation("R124", {
       detail: duplicateDetected
         ? "Duplicate-absence control did not clear."

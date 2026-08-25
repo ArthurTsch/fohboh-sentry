@@ -349,7 +349,7 @@ const trustGates = [
   },
   {
     gate: "TG04",
-    detail: "Transaction-basis reconciliation. Compares source and POS on a like-for-like period and channel scope: up to 1% passes, 1-5% is partial, and above 5% fails. M02 delivery-only POS evidence is compared with delivery settlement basis while pickup remains fee-tested.",
+    detail: "Like-for-like reconciliation. M02 compares unique DSP orders with POS-certified DSP orders on the same month, provider, and channel scope: up to 1% passes, 1-5% is partial, and above 5% fails. R123 may fire only when both comparable counts exist; a missing side is evidence coverage, not a proven mismatch. Pickup remains included in fee testing when the POS report is delivery-only.",
   },
   {
     gate: "TG05",
@@ -445,6 +445,7 @@ const advancedEngineBlocks = [
       "Builds a module-scoped artifact bundle: statement, POS, agreement, bank, and sealed contract terms.",
       "Computes metrics from source evidence and reconstructs expected fee behavior from the sealed contract.",
       "Runs deterministic rules in sequence and reduces residual variance after each fired citation.",
+      "Applies the canonical module boundary before persistence so a recovery rule cannot leak into another module's CAAR.",
       "Outputs module recovery amount, MQ6 dimensions, trust gates, readiness state, and finding class.",
     ],
   },
@@ -509,7 +510,17 @@ const releaseRules = [
   "Per-module readiness currently requires score >= 85 plus strong completeness, authenticity, reconciliation, and rule-integrity conditions.",
   "CAAR readiness requires the selected module to be ready, overall trust score >= 85, TG11 PASS, and healthy system-health state.",
   "If both M01 and M02 are enabled, they are run separately and produce independent CAARs.",
+  "Canonical recovery applicability is enforced before persistence and again when a CAAR is rendered: R016-R055 are M02-only, R056-R095 are M01-only, and R096-R115 are M03-only.",
+  "R123 represents a measured reconciliation failure and is applicable only when both like-for-like inputs exist. Missing comparison evidence remains a TG04 coverage condition and does not become an R123 mismatch.",
   "Prior-period bank carryovers are informational notes; exact reference/amount matches with cross-month dates are timing warnings; missing references or amount mismatches remain blocking exceptions.",
+];
+
+const ruleApplicabilityRows = [
+  { scope: "Shared controls", rules: "R001-R015, R116-R165, R176-R198", detail: "Applied only when their own evidence and workflow prerequisites are satisfied." },
+  { scope: "M02 Delivery Fee Recovery", rules: "R016-R055", detail: "Eligible only for the selected delivery-provider certification and CAAR." },
+  { scope: "M01 Merchant Fee Recovery", rules: "R056-R095", detail: "Eligible only for the processor certification and CAAR." },
+  { scope: "M03 Royalty Recovery", rules: "R096-R115", detail: "Eligible only for an M03 certification and CAAR." },
+  { scope: "Cross-module analysis", rules: "R166-R175", detail: "Excluded from single-module production CAARs; reserved for a genuine multi-module analytical context." },
 ];
 
 const persistenceRows = [
@@ -1012,6 +1023,26 @@ function DeterministicEngineSection({
             <div className="mt-4 space-y-2 text-sm leading-7 text-[var(--muted)]">
               {releaseRules.map((item) => (
                 <div key={item}>- {item}</div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5">
+            <div className="text-lg font-semibold text-[var(--text)]">Rule Applicability by CAAR</div>
+            <div className="mt-2 text-sm leading-7 text-[var(--muted)]">
+              Applicability is enforced during certification and repeated when persisted CAARs are displayed. This changes which rules may attach to a CAAR; it does not change monetary or Trust Score formulas.
+            </div>
+            <div className="mt-4 space-y-3">
+              {ruleApplicabilityRows.map((row) => (
+                <div key={row.scope} className="rounded-2xl border border-[var(--border)] bg-white p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="font-semibold text-[var(--text)]">{row.scope}</div>
+                    <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--accent)]">
+                      {row.rules}
+                    </div>
+                  </div>
+                  <div className="mt-2 text-sm leading-7 text-[var(--muted)]">{row.detail}</div>
+                </div>
               ))}
             </div>
           </div>

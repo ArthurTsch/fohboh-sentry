@@ -14,6 +14,7 @@ import {
   getExplicitCitationDisposition,
   isInformationalRuleCitation,
 } from "@/lib/mge/citation-disposition";
+import { ruleAppliesToModule } from "@/lib/mge/engine";
 
 function parseCurrencyToCents(value: string) {
   const numeric = Number(value.replace(/[^0-9.-]/g, "")) || 0;
@@ -415,6 +416,26 @@ function isProblemRuleCitation(row: {
   return parseCitationSamples(row.sample_evidence).some(sampleSignalsProblem);
 }
 
+function reconciliationRuleIsEvaluable(
+  rows: Array<{ rule_id: string; sample_evidence: unknown }>,
+  moduleId: "M01" | "M02" | null,
+) {
+  const sample = rows
+    .filter((row) => row.rule_id === "R122")
+    .flatMap((row) => parseCitationSamples(row.sample_evidence))[0];
+  if (!sample) return false;
+  if (sample.reconciliation_evaluable === true) return true;
+  if (sample.reconciliation_evaluable === false) return false;
+  if (moduleId === "M02") {
+    return typeof sample.dsp_order_count === "number" && sample.dsp_order_count > 0 &&
+      typeof sample.pos_certified_order_count === "number" && sample.pos_certified_order_count > 0;
+  }
+  return sample.settlement_timing_context === true || (
+    typeof sample.processor_basis === "number" && sample.processor_basis > 0 &&
+    typeof sample.pos_basis === "number" && sample.pos_basis > 0
+  );
+}
+
 function getArtifactLabel(moduleId: "M01" | "M02", artifactKey: string) {
   const normalized = artifactKey.toLowerCase();
   if (normalized.endsWith("processor")) return "Processor Source Statement";
@@ -589,7 +610,7 @@ const TRUST_GATE_RULES: Record<string, string[]> = {
 export function buildScoreDeductions(rows: Array<{
   rule_id: string;
   sample_evidence: unknown;
-}>): CaarScoreDeduction[] {
+}>, moduleId: "M01" | "M02" | null = null): CaarScoreDeduction[] {
   const scoreRow = rows.find((row) => row.rule_id === "R136");
   const scoreSample = parseCitationSamples(scoreRow?.sample_evidence)[0];
   const rawBreakdown = typeof scoreSample?.trust_gate_breakdown === "string"
@@ -612,6 +633,18 @@ export function buildScoreDeductions(rows: Array<{
     const evidence = samples.flatMap((sample) => {
       if (
         entry.gate === "TG04" &&
+        moduleId === "M02" &&
+        (
+          sample.reconciliation_evaluable === false ||
+          (typeof sample.dsp_order_count === "number" && sample.dsp_order_count <= 0) ||
+          (typeof sample.pos_certified_order_count === "number" && sample.pos_certified_order_count <= 0)
+        )
+      ) {
+        return ["TG04 could not evaluate the DSP-to-POS order-count rule because one or both comparable order counts were unavailable. This is an evidence-coverage deduction, not an R123 reconciliation mismatch."];
+      }
+      if (
+        entry.gate === "TG04" &&
+        moduleId === "M02" &&
         typeof sample.dsp_order_count === "number" &&
         typeof sample.pos_certified_order_count === "number"
       ) {
@@ -654,6 +687,15 @@ export function buildScoreDeductions(rows: Array<{
     const hasRequiredEvidence = entry.gate === "TG04"
       ? samples.some((sample) =>
           (
+            moduleId === "M02" &&
+            (
+              sample.reconciliation_evaluable === false ||
+              (typeof sample.dsp_order_count === "number" && sample.dsp_order_count <= 0) ||
+              (typeof sample.pos_certified_order_count === "number" && sample.pos_certified_order_count <= 0)
+            )
+          ) ||
+          (
+            moduleId === "M02" &&
             typeof sample.dsp_order_count === "number" && sample.dsp_order_count > 0 &&
             typeof sample.pos_certified_order_count === "number" && sample.pos_certified_order_count > 0 &&
             typeof sample.order_count_difference === "number" &&
@@ -992,8 +1034,15 @@ export async function GET(request: Request) {
         const moduleId =
           persistedCaar?.module === "M01" || persistedCaar?.module === "M02" ? persistedCaar.module : null;
         const certRun = persistedCaar ? certRunById.get(persistedCaar.cert_run_id) ?? null : null;
-        const citations = certRun ? ruleCitationsByRun.get(certRun.id) ?? [] : [];
-        const scoreDeductions = buildScoreDeductions(citations);
+        const persistedCitations = certRun ? ruleCitationsByRun.get(certRun.id) ?? [] : [];
+        const moduleScopedCitations = moduleId
+          ? persistedCitations.filter((citation) => ruleAppliesToModule(citation.rule_id, moduleId))
+          : persistedCitations;
+        const reconciliationEvaluable = reconciliationRuleIsEvaluable(moduleScopedCitations, moduleId);
+        const citations = moduleScopedCitations.filter(
+          (citation) => citation.rule_id !== "R123" || reconciliationEvaluable,
+        );
+        const scoreDeductions = buildScoreDeductions(citations, moduleId);
         const scoreReducingRuleIds = new Set(scoreDeductions.flatMap((deduction) => deduction.ruleIds));
         const problemCitations = citations.filter(isProblemRuleCitation);
         const monetaryCitations = citations.filter(isMonetaryRuleCitation);
