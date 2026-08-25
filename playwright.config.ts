@@ -17,7 +17,7 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined
     : {
-        command: "pnpm dev --port 3100",
+        command: "pnpm dev:app --port 3100",
         env: {
           ...process.env,
           DATABASE_URL: testDatabaseUrl || process.env.DATABASE_URL || "",

@@ -23,7 +23,7 @@
     "verify:caar-scenarios": "tsx scripts/verify-caar-scenarios.ts",
     "verify": "pnpm lint && pnpm test && pnpm build",
     "verify:fixture-scenarios": "pnpm verify:caar-scenarios && pnpm verify:uber-eats-intake && pnpm verify:recovery-packs",
-    "verify:release": "pnpm verify && pnpm test:integration && pnpm test:e2e",
+    "verify:release": "node scripts/verify-release.mjs",
     "verify:uber-eats-intake": "tsx scripts/verify-uber-eats-intake.ts",
     "verify:recovery-packs": "tsx scripts/verify-recovery-packs.ts"
   },
