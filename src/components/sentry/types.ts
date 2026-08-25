@@ -280,6 +280,7 @@ export type IntakeState = {
     errorChargeAmount?: number;
     feeAmount?: number;
     interchangeFeeAmount?: number;
+    networkFeeAmount?: number;
     marketingFeeAmount?: number;
     monthlyMetrics?: Record<string, {
       basisAmount?: number;
@@ -295,14 +296,17 @@ export type IntakeState = {
     }>;
     memberOrderCount?: number;
     otherFeeAmount?: number;
+    otherAdjustmentAmount?: number;
     orderCount?: number;
     pickupOrderCount?: number;
     promoOrderCount?: number;
+    processorFeeAmount?: number;
     payoutAmount?: number;
     pickupBasisAmount?: number;
     pickupCommissionAmount?: number;
     refundCount?: number;
     serviceFeeAmount?: number;
+    statementTotalFeeAmount?: number;
     settlementLagDaysAvg?: number;
     taxRemittedAmount?: number;
     tipAmount?: number;

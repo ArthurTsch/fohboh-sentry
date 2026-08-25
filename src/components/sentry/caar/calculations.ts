@@ -61,6 +61,7 @@ export function deriveM01Calculation(
   if (!sample) return null;
   const number = (key: string) => typeof sample[key] === "number" ? sample[key] as number : 0;
   const optionalNumber = (key: string) => typeof sample[key] === "number" ? sample[key] as number : null;
+  const optionalText = (key: string) => typeof sample[key] === "string" ? sample[key] as string : null;
   const reconciliationSample = findReconciliationSample(ruleCitations);
   const reconciliationNumber = (key: string) =>
     typeof reconciliationSample?.[key] === "number" ? reconciliationSample[key] as number : null;
@@ -72,6 +73,12 @@ export function deriveM01Calculation(
     certifiedRecoveryDisplay,
     expectedFees: number("expected_fee_amount"),
     interchange: optionalNumber("expected_interchange_component"),
+    extractedInterchange: optionalNumber("extracted_interchange_fee_amount"),
+    networkFees: optionalNumber("extracted_network_fee_amount"),
+    otherAdjustments: optionalNumber("extracted_other_adjustment_amount"),
+    processorFees: optionalNumber("extracted_processor_fee_amount"),
+    statementTotalFees: optionalNumber("extracted_statement_total_fee_amount"),
+    feeComparisonScope: optionalText("fee_comparison_scope"),
     markup: number("expected_markup_component"),
     markupBps: number("contracted_markup_bps"),
     monthlyFee: number("expected_monthly_component"),

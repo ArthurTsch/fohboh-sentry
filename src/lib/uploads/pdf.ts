@@ -5,6 +5,10 @@ type PdfMetricExtraction = {
     depositReferenceRows?: PdfReferenceRow[];
     feeAmount?: number;
     interchangeFeeAmount?: number;
+    networkFeeAmount?: number;
+    otherAdjustmentAmount?: number;
+    processorFeeAmount?: number;
+    statementTotalFeeAmount?: number;
     orderCount?: number;
     payoutAmount?: number;
     transactionCount?: number;
@@ -525,7 +529,11 @@ function extractProcessorStatementMetrics(text: string): PdfMetricExtraction {
       basisAmount,
       feeAmount: feeAmount > 0 ? feeAmount : undefined,
       interchangeFeeAmount,
+      networkFeeAmount,
+      otherAdjustmentAmount,
       payoutAmount,
+      processorFeeAmount: processingFeeAmount,
+      statementTotalFeeAmount: creditCardBalance ?? (summaryFeeTotal > 0 ? summaryFeeTotal : undefined),
       transactionCount: transactionCount > 0 ? transactionCount : undefined,
     },
     warnings: [
@@ -533,6 +541,9 @@ function extractProcessorStatementMetrics(text: string): PdfMetricExtraction {
       ...(interchangeFeeAmount !== undefined
         ? []
         : ["Interchange fee total was not detected automatically from this processor PDF."]),
+      ...(processingFeeAmount !== undefined
+        ? []
+        : ["Processor-owned fee total was not detected separately from pass-through fees in this processor PDF."]),
     ],
   };
 }

@@ -33,6 +33,10 @@ type Metrics = {
   feeAmount?: number;
   interchangeFeeAmount?: number;
   interchangeMismatchAmount?: number;
+  networkFeeAmount?: number;
+  otherAdjustmentAmount?: number;
+  processorFeeAmount?: number;
+  statementTotalFeeAmount?: number;
   marketingFeeAmount?: number;
   monthlyMetrics?: Record<string, MonthlyMetrics>;
   mcCreditAmount?: number;
@@ -325,7 +329,7 @@ const M01_RULES: DeterministicRule[] = [
       const contract = context.contract;
       if (!statement || !contract || residualVariance <= 1) return null;
       const expectedTotal = computeExpectedM01Fees(statement, contract);
-      const actualFees = numberValue(statement.feeAmount);
+      const actualFees = resolveM01ComparableFee(statement);
       const markupVariance = Math.max(0, actualFees - expectedTotal);
       if (markupVariance <= 1) return null;
       const debitAmount = numberValue(statement.visaDebitAmount) + numberValue(statement.mcDebitAmount);
@@ -347,7 +351,7 @@ const M01_RULES: DeterministicRule[] = [
       const statement = context.statement?.metrics;
       const contract = context.contract;
       if (!statement || !contract) return null;
-      const actualFees = numberValue(statement.feeAmount);
+      const actualFees = resolveM01ComparableFee(statement);
       const expectedTotal = computeExpectedM01Fees(statement, contract);
       const unexplained = roundCurrency(actualFees - expectedTotal);
       if (unexplained <= 1 || residualVariance <= 1) return null;
@@ -372,10 +376,10 @@ const M01_RULES: DeterministicRule[] = [
       if (!statement || !contract) return null;
       const basisAmount = numberValue(statement.basisAmount);
       const markupBps = numberValue(contract.markup_bps);
-      const actualFees = numberValue(statement.feeAmount);
+      const actualFees = resolveM01ComparableFee(statement);
       const txnFee = numberValue(contract.txn_fee);
       const monthlyFee = numberValue(contract.monthly_fee);
-      const interchangeFees = numberValue(statement.interchangeFeeAmount);
+      const interchangeFees = resolveM01ComparableInterchange(statement);
       const transactionCount = Math.max(0, roundCurrency(numberValue(statement.transactionCount)));
       if (basisAmount <= 0 || markupBps <= 0 || actualFees <= 0 || residualVariance <= 1) return null;
       const observedRateBps =
@@ -408,7 +412,7 @@ const M01_RULES: DeterministicRule[] = [
       const statement = context.statement?.metrics;
       const contract = context.contract;
       if (!statement || !contract) return null;
-      const actualFees = numberValue(statement.feeAmount);
+      const actualFees = resolveM01ComparableFee(statement);
       const transactionCount = Math.max(0, roundCurrency(numberValue(statement.transactionCount)));
       const txnFee = numberValue(contract.txn_fee);
       if (actualFees <= 0 || transactionCount <= 0 || residualVariance <= 1) return null;
@@ -474,7 +478,7 @@ const M01_RULES: DeterministicRule[] = [
       const contract = context.contract;
       if (!statement || !contract || residualVariance <= 1) return null;
       const monthlyFee = numberValue(contract.monthly_fee);
-      const actualFees = numberValue(statement.feeAmount);
+      const actualFees = resolveM01ComparableFee(statement);
       if (monthlyFee <= 0 || actualFees <= monthlyFee) return null;
       const variance = Math.min(roundCurrency(Math.max(0, actualFees - monthlyFee) * 0.08), residualVariance);
       if (variance <= 1) return null;
@@ -576,7 +580,7 @@ const M01_RULES: DeterministicRule[] = [
       if (!statement || residualVariance <= 1) return null;
       const voidCount = numberValue(statement.voidCount);
       const transactionCount = Math.max(1, numberValue(statement.transactionCount));
-      const feeAmount = numberValue(statement.feeAmount);
+      const feeAmount = resolveM01ComparableFee(statement);
       if (voidCount <= 0 || feeAmount <= 0) return null;
       const avgFee = feeAmount / transactionCount;
       const variance = Math.min(roundCurrency(avgFee * voidCount), residualVariance);
@@ -595,7 +599,7 @@ const M01_RULES: DeterministicRule[] = [
       const statement = context.statement?.metrics;
       if (!statement || residualVariance <= 1) return null;
       const refundCount = numberValue(statement.refundCount);
-      const feeAmount = numberValue(statement.feeAmount);
+      const feeAmount = resolveM01ComparableFee(statement);
       const transactionCount = Math.max(1, numberValue(statement.transactionCount));
       if (refundCount <= 0 || feeAmount <= 0) return null;
       const avgFee = feeAmount / transactionCount;
@@ -804,10 +808,10 @@ const M01_RULES: DeterministicRule[] = [
       if (!statement || !contract || residualVariance <= 1) return null;
       const basisAmount = numberValue(statement.basisAmount);
       const markupBps = numberValue(contract.markup_bps);
-      const feeAmount = numberValue(statement.feeAmount);
+      const feeAmount = resolveM01ComparableFee(statement);
       const txnFee = numberValue(contract.txn_fee);
       const monthlyFee = numberValue(contract.monthly_fee);
-      const interchangeFees = numberValue(statement.interchangeFeeAmount);
+      const interchangeFees = resolveM01ComparableInterchange(statement);
       const transactionCount = Math.max(0, roundCurrency(numberValue(statement.transactionCount)));
       if (basisAmount <= 0 || markupBps <= 0 || feeAmount <= 0) return null;
       const observedRateBps =
@@ -1801,14 +1805,15 @@ function buildCanonicalGovernanceCitations({
   const systematicVariance = Math.abs(centsToDollars(varianceCents)) >= Math.max(50, recoveryValue * 0.2);
 
   if (context.moduleId === "M01") {
-    const mfrErrorRate = numberValue(context.statement?.metrics?.feeAmount) > 0
-      ? Math.abs(centsToDollars(varianceCents)) / numberValue(context.statement?.metrics?.feeAmount)
+    const processingFeesReviewed = resolveM01ComparableFee(context.statement?.metrics);
+    const mfrErrorRate = processingFeesReviewed > 0
+      ? Math.abs(centsToDollars(varianceCents)) / processingFeesReviewed
       : 0;
     if (mfrErrorRate > 0.03) {
       citations.push(buildNarrativeCitation("R087", {
         detail: "Certified MFR variance exceeds 3% of the processing fees reviewed.",
         error_rate_pct: roundCurrency(mfrErrorRate * 100),
-        processing_fees_reviewed: numberValue(context.statement?.metrics?.feeAmount),
+        processing_fees_reviewed: processingFeesReviewed,
         variance_cents: varianceCents,
       }));
     }
@@ -2411,7 +2416,7 @@ function computeReviewedFeeVolume(context: RuleContext) {
     return Math.max(
       numberValue(context.statement?.metrics?.basisAmount),
       numberValue(context.pos?.metrics?.basisAmount),
-      numberValue(context.statement?.metrics?.feeAmount),
+      resolveM01ComparableFee(context.statement?.metrics),
     );
   }
 
@@ -2953,7 +2958,9 @@ function resolveCrossSystemReconciliationBreakdown(context: RuleContext) {
   const bankGoverned = Boolean(context.bank?.uploaded && context.bank.hash);
   const statementBasis = resolveReconciliationStatementBasis(context);
   const posBasis = numberValue(context.pos?.metrics?.basisAmount);
-  const statementFees = numberValue(context.statement?.metrics?.feeAmount);
+  const statementFees = context.moduleId === "M01"
+    ? resolveM01ComparableFee(context.statement?.metrics)
+    : numberValue(context.statement?.metrics?.feeAmount);
   const matchedToastDeposits = context.moduleId === "M01" ? reconcileToastBankDeposits(context) : null;
   const bankDeposit = numberValue(matchedToastDeposits?.matchedDepositAmount ?? context.bank?.metrics?.depositAmount);
   const payoutAmount = numberValue(
@@ -3392,7 +3399,7 @@ function buildSupplementalM01CanonicalCitations(
   if (!statement || !contract) return citations;
 
   const vendor = resolveVendorName(context);
-  const actualFees = numberValue(statement.feeAmount);
+  const actualFees = resolveM01ComparableFee(statement);
   const basisAmount = numberValue(statement.basisAmount);
   const expectedFees = computeExpectedM01Fees(statement, contract);
   const posBasis = numberValue(context.pos?.metrics?.basisAmount);
@@ -3853,7 +3860,7 @@ function moduleRequiresBank(context: RuleContext) {
 
 function computeExpectedM01Fees(metrics: Metrics, contract: Record<string, string>) {
   const basisAmount = numberValue(metrics.basisAmount);
-  const interchangeFees = numberValue(metrics.interchangeFeeAmount);
+  const interchangeFees = resolveM01ComparableInterchange(metrics);
   const markupBps = numberValue(contract.markup_bps);
   const txnFee = numberValue(contract.txn_fee);
   const monthlyFee = numberValue(contract.monthly_fee);
@@ -3861,6 +3868,18 @@ function computeExpectedM01Fees(metrics: Metrics, contract: Record<string, strin
   return roundCurrency(
     interchangeFees + basisAmount * (markupBps / 10000) + (transactionCount * txnFee) + monthlyFee,
   );
+}
+
+function resolveM01ComparableFee(metrics?: Metrics) {
+  if (!metrics) return 0;
+  return typeof metrics.processorFeeAmount === "number"
+    ? numberValue(metrics.processorFeeAmount)
+    : numberValue(metrics.feeAmount);
+}
+
+function resolveM01ComparableInterchange(metrics?: Metrics) {
+  if (!metrics || typeof metrics.processorFeeAmount === "number") return 0;
+  return numberValue(metrics.interchangeFeeAmount);
 }
 
 function buildM01FeeGapSample(metrics: Metrics, contract: Record<string, string>, actualFees: number, expectedTotal: number, variance: number) {
@@ -3880,12 +3899,28 @@ function buildM01FeeGapSample(metrics: Metrics, contract: Record<string, string>
     contracted_per_txn_fee: txnFee,
     expected_fee_amount: expectedTotal,
     expected_interchange_component:
-      typeof metrics.interchangeFeeAmount === "number"
-        ? numberValue(metrics.interchangeFeeAmount)
-        : null,
+      typeof metrics.processorFeeAmount === "number"
+        ? 0
+        : typeof metrics.interchangeFeeAmount === "number"
+          ? numberValue(metrics.interchangeFeeAmount)
+          : null,
     expected_markup_component: markupComponent,
     expected_monthly_component: monthlyFee,
     expected_txn_component: txnComponent,
+    extracted_interchange_fee_amount:
+      typeof metrics.interchangeFeeAmount === "number" ? numberValue(metrics.interchangeFeeAmount) : null,
+    extracted_network_fee_amount:
+      typeof metrics.networkFeeAmount === "number" ? numberValue(metrics.networkFeeAmount) : null,
+    extracted_other_adjustment_amount:
+      typeof metrics.otherAdjustmentAmount === "number" ? numberValue(metrics.otherAdjustmentAmount) : null,
+    extracted_processor_fee_amount:
+      typeof metrics.processorFeeAmount === "number" ? numberValue(metrics.processorFeeAmount) : null,
+    extracted_statement_total_fee_amount:
+      typeof metrics.statementTotalFeeAmount === "number" ? numberValue(metrics.statementTotalFeeAmount) : null,
+    fee_comparison_scope:
+      typeof metrics.processorFeeAmount === "number"
+        ? "processor_fee_only"
+        : "legacy_statement_fee_total",
     transaction_count: transactionCount,
     unexplained_fee_delta: variance,
   };
@@ -3918,7 +3953,7 @@ function computeCardBrandFee(amount: number, ratePct: number, fixedCents: number
 
 function computeM01Recovery(metrics?: Metrics, contract?: Record<string, string> | null) {
   if (!metrics || !contract) return 0;
-  return Math.max(0, roundCurrency(numberValue(metrics.feeAmount) - computeExpectedM01Fees(metrics, contract)));
+  return Math.max(0, roundCurrency(resolveM01ComparableFee(metrics) - computeExpectedM01Fees(metrics, contract)));
 }
 
 function computeExpectedM02Rate(contract: Record<string, string>, statement?: Metrics) {

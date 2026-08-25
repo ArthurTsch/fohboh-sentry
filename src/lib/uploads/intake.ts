@@ -23,6 +23,7 @@ type UploadMetrics = {
   errorChargeAmount?: number;
   feeAmount?: number;
   interchangeFeeAmount?: number;
+  networkFeeAmount?: number;
   marketingFeeAmount?: number;
   monthlyMetrics?: Record<string, UploadMonthlyMetrics>;
   mcCreditAmount?: number;
@@ -31,6 +32,7 @@ type UploadMetrics = {
   mcDebitFeeAmount?: number;
   memberOrderCount?: number;
   otherFeeAmount?: number;
+  otherAdjustmentAmount?: number;
   orderCount?: number;
   payoutAmount?: number;
   payoutReferenceRows?: UploadReferenceRow[];
@@ -38,8 +40,10 @@ type UploadMetrics = {
   pickupCommissionAmount?: number;
   pickupOrderCount?: number;
   promoOrderCount?: number;
+  processorFeeAmount?: number;
   refundCount?: number;
   serviceFeeAmount?: number;
+  statementTotalFeeAmount?: number;
   settlementLagDaysAvg?: number;
   taxRemittedAmount?: number;
   tipAmount?: number;
@@ -304,6 +308,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     errorChargeAmount: 0,
     feeAmount: 0,
     interchangeFeeAmount: 0,
+    networkFeeAmount: 0,
     marketingFeeAmount: 0,
     monthlyMetrics: {},
     mcCreditAmount: 0,
@@ -312,6 +317,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     mcDebitFeeAmount: 0,
     memberOrderCount: 0,
     otherFeeAmount: 0,
+    otherAdjustmentAmount: 0,
     orderCount: 0,
     payoutAmount: 0,
     payoutReferenceRows: [],
@@ -319,8 +325,10 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     pickupCommissionAmount: 0,
     pickupOrderCount: 0,
     promoOrderCount: 0,
+    processorFeeAmount: 0,
     refundCount: 0,
     serviceFeeAmount: 0,
+    statementTotalFeeAmount: 0,
     settlementLagDaysAvg: 0,
     taxRemittedAmount: 0,
     tipAmount: 0,
@@ -779,16 +787,20 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
     "errorChargeAmount",
     "feeAmount",
     "interchangeFeeAmount",
+    "networkFeeAmount",
     "marketingFeeAmount",
     "mcCreditAmount",
     "mcCreditFeeAmount",
     "mcDebitAmount",
     "mcDebitFeeAmount",
     "otherFeeAmount",
+    "otherAdjustmentAmount",
     "payoutAmount",
     "pickupBasisAmount",
     "pickupCommissionAmount",
+    "processorFeeAmount",
     "serviceFeeAmount",
+    "statementTotalFeeAmount",
     "taxRemittedAmount",
     "tipAmount",
     "visaCreditAmount",

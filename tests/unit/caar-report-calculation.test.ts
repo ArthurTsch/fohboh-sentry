@@ -73,10 +73,30 @@ describe("CAAR calculation display", () => {
       ruleId: "R002",
       ruleVersion: "mge-v1.0.0",
       sampleEvidenceCount: 1,
-      sampleEvidence: [{ actual_fee_amount: 12.34, basis_amount: 500, expected_fee_amount: 10 }],
+      sampleEvidence: [{
+        actual_fee_amount: 12.34,
+        basis_amount: 500,
+        expected_fee_amount: 10,
+        extracted_interchange_fee_amount: 20,
+        extracted_network_fee_amount: 3,
+        extracted_other_adjustment_amount: 1,
+        extracted_processor_fee_amount: 12.34,
+        extracted_statement_total_fee_amount: 36.34,
+        fee_comparison_scope: "processor_fee_only",
+      }],
       varianceDisplay: "$2.34",
     }], "$2.34");
-    expect(result).toMatchObject({ actualFees: 12.34, certifiedRecoveryDisplay: "$2.34", expectedFees: 10 });
+    expect(result).toMatchObject({
+      actualFees: 12.34,
+      certifiedRecoveryDisplay: "$2.34",
+      expectedFees: 10,
+      extractedInterchange: 20,
+      feeComparisonScope: "processor_fee_only",
+      networkFees: 3,
+      otherAdjustments: 1,
+      processorFees: 12.34,
+      statementTotalFees: 36.34,
+    });
   });
 
   it("keeps only the latest citation for each stable rule/version identity", () => {

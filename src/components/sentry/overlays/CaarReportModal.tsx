@@ -416,8 +416,8 @@ export function CaarReportModal({
         {m01Calculation ? (
           <ReportCard
             eyebrow="Calculation & Source Data"
-            title="M01 processor fee calculation"
-            sub="This section separates values extracted from uploaded documents, governed pricing terms, and amounts calculated by Sentry."
+            title="M01 processor fee comparison"
+            sub="This section compares the processor-owned fee against governed pricing and shows pass-through statement fees separately for information."
           >
             <div className="mb-4 rounded-2xl border border-[var(--border)] bg-white p-4 text-sm leading-7 text-[var(--muted)]">
               <span className="font-semibold text-[var(--text)]">Uploaded evidence used:</span>{" "}
@@ -429,8 +429,11 @@ export function CaarReportModal({
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <ValueChip label="Processor basis" value={formatMoneyLike(m01Calculation.basis)} />
               <ValueChip label="POS basis" value={formatMoneyLike(m01Calculation.posBasis)} />
-              <ValueChip label="Actual fees" value={formatMoneyLike(m01Calculation.actualFees)} />
-              <ValueChip label="Interchange fees" value={formatMoneyLike(m01Calculation.interchange)} />
+              <ValueChip label="Toast processing fees — compared" value={formatMoneyLike(m01Calculation.actualFees)} />
+              <ValueChip label="Statement fee total — information" value={formatMoneyLike(m01Calculation.statementTotalFees)} />
+              <ValueChip label="Interchange fees — information" value={formatMoneyLike(m01Calculation.extractedInterchange)} />
+              <ValueChip label="Network fees — information" value={formatMoneyLike(m01Calculation.networkFees)} />
+              <ValueChip label="Other adjustments — information" value={formatMoneyLike(m01Calculation.otherAdjustments)} />
             </div>
             <div className="mt-4 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
               Governed pricing inputs and calculated result
@@ -441,9 +444,13 @@ export function CaarReportModal({
               <br />Contract monthly fee: {formatMoneyLike(m01Calculation.monthlyFee)}
             </div>
             <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
-              Interchange {formatMoneyLike(m01Calculation.interchange)} + markup {formatMoneyLike(m01Calculation.markup)} + transaction charges {formatMoneyLike(m01Calculation.transactionFees)} + monthly fee {formatMoneyLike(m01Calculation.monthlyFee)} = <strong>{formatMoneyLike(m01Calculation.expectedFees)}</strong>
+              {m01Calculation.feeComparisonScope === "processor_fee_only" ? (
+                <>Markup {formatMoneyLike(m01Calculation.markup)} + transaction charges {formatMoneyLike(m01Calculation.transactionFees)} + monthly fee {formatMoneyLike(m01Calculation.monthlyFee)} = <strong>{formatMoneyLike(m01Calculation.expectedFees)}</strong></>
+              ) : (
+                <>Interchange {formatMoneyLike(m01Calculation.interchange)} + markup {formatMoneyLike(m01Calculation.markup)} + transaction charges {formatMoneyLike(m01Calculation.transactionFees)} + monthly fee {formatMoneyLike(m01Calculation.monthlyFee)} = <strong>{formatMoneyLike(m01Calculation.expectedFees)}</strong></>
+              )}
               <br />
-              Actual fees: {formatMoneyLike(m01Calculation.actualFees)} · Expected fees: {formatMoneyLike(m01Calculation.expectedFees)}
+              Compared processor fees: {formatMoneyLike(m01Calculation.actualFees)} · Expected processor fees: {formatMoneyLike(m01Calculation.expectedFees)}
               <br /><strong>Persisted certified recovery: {m01Calculation.certifiedRecoveryDisplay}</strong>
             </div>
             <ReconciliationBreakdown calculation={m01Calculation} />
@@ -1760,7 +1767,7 @@ function buildRuleCalculation(
       "Variance_attributed = min(Delta, residual_variance_pool)",
       "",
       "Operands",
-      `F_obs (observed processor fee total from statement) = ${formatMoneyLike(sample.actual_fee_amount)}`,
+      `F_obs (observed processor-owned fee used for comparison) = ${formatMoneyLike(sample.actual_fee_amount)}`,
       `F_exp (expected governed fee total from sealed pricing terms) = ${formatMoneyLike(sample.expected_fee_amount)}`,
       `Delta stored on citation row as unexplained_fee_delta = ${formatMoneyLike(sample.unexplained_fee_delta)}`,
       `Variance_attributed = ${varianceDisplay}`,
@@ -1810,7 +1817,7 @@ function buildRuleCalculation(
       "Variance_attributed = min(Δ, residual_variance_pool)",
       "",
       "Operands",
-      `F_obs (observed processor fee total from statement) = ${formatMoneyLike(sample.actual_fee_amount)}`,
+      `F_obs (observed processor-owned fee used for comparison) = ${formatMoneyLike(sample.actual_fee_amount)}`,
       `F_exp (expected governed fee total from sealed pricing terms) = ${formatMoneyLike(sample.expected_fee_amount)}`,
       `Δ stored on citation row as unexplained_fee_delta = ${formatMoneyLike(sample.unexplained_fee_delta)}`,
       `Variance_attributed = ${varianceDisplay}`,
@@ -2023,7 +2030,7 @@ function buildRuleEvidence(
   ) {
     lines.push(
       "For this fee-gap rule specifically:",
-      "- actual_fee_amount comes from the processor statement fee total parsed into engine metrics.",
+      "- actual_fee_amount is the processor-owned fee used for the governed comparison; pass-through interchange, network fees, adjustments, and the statement total are persisted separately when the statement exposes them.",
       "- expected_fee_amount is computed from sealed contract terms applied to governed source metrics.",
       "- unexplained_fee_delta is the residual positive gap after expected fees are subtracted from observed fees.",
     );

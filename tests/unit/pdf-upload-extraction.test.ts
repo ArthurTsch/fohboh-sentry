@@ -20,6 +20,10 @@ Total 4419 $128,175.34 $12.98 $3,139.00
       basisAmount: 128175.34,
       feeAmount: 3158.98,
       interchangeFeeAmount: 2019.92,
+      networkFeeAmount: 275.96,
+      otherAdjustmentAmount: 7.72,
+      processorFeeAmount: 855.38,
+      statementTotalFeeAmount: 3158.98,
       transactionCount: 4419,
     });
   });
@@ -46,6 +50,9 @@ Total 4419 $128,175.34 $12.98 $3,139.00
     expect(result.metrics?.interchangeFeeAmount).toBeUndefined();
     expect(result.warnings).toContain(
       "Interchange fee total was not detected automatically from this processor PDF.",
+    );
+    expect(result.warnings).toContain(
+      "Processor-owned fee total was not detected separately from pass-through fees in this processor PDF.",
     );
   });
 

@@ -155,3 +155,53 @@ describe("M02 citation consistency", () => {
     expect(result.ruleCitations.some((citation) => citation.disposition === "blocking")).toBe(false);
   });
 });
+
+describe("M01 Toast fee comparison", () => {
+  it("compares governed processor pricing only with Toast Processing Fees", () => {
+    const result = runDeterministicModuleEngine({
+      artifacts: [
+        artifact("m01-processor", "PDF", {
+          metrics: {
+            basisAmount: 128_175.34,
+            feeAmount: 3_158.98,
+            interchangeFeeAmount: 2_019.92,
+            networkFeeAmount: 275.96,
+            otherAdjustmentAmount: 7.72,
+            payoutAmount: 3_139,
+            processorFeeAmount: 855.38,
+            statementTotalFeeAmount: 3_158.98,
+            transactionCount: 4_419,
+          },
+        }),
+        artifact("m01-pos", "CSV", { metrics: { basisAmount: 128_175.34 } }),
+        artifact("m01-agreement", "PDF"),
+        artifact("m01-bank", "PDF", { metrics: { depositAmount: 3_139 } }),
+        artifact("m01-contract", "Manual Entry", {
+          contractValues: { markup_bps: "55", monthly_fee: "0", txn_fee: "0.05" },
+        }),
+      ],
+      cadence: "monthly_final",
+      certificationMonth: "2026-06",
+      evaluationDate: new Date("2026-06-30T12:00:00.000Z"),
+      moduleId: "M01",
+    });
+
+    const sample = result.ruleCitations
+      .find((citation) => citation.ruleId === "R002")
+      ?.sampleEvidence[0];
+
+    expect(result.recoveryValue).toBe(0);
+    expect(sample).toMatchObject({
+      actual_fee_amount: 855.38,
+      expected_fee_amount: 925.91,
+      expected_interchange_component: 0,
+      extracted_interchange_fee_amount: 2_019.92,
+      extracted_network_fee_amount: 275.96,
+      extracted_other_adjustment_amount: 7.72,
+      extracted_processor_fee_amount: 855.38,
+      extracted_statement_total_fee_amount: 3_158.98,
+      fee_comparison_scope: "processor_fee_only",
+      unexplained_fee_delta: 0,
+    });
+  });
+});
