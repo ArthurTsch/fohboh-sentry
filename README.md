@@ -119,6 +119,10 @@ Open:
 | `SUPPORT_FROM_EMAIL` | Optional | Verified sender for support email |
 | `RESEND_API_KEY` | Optional | Enables support-ticket email through Resend |
 | `VERCEL` | Set automatically by Vercel | Enables trust of Vercel's platform-controlled client-IP header |
+| `NEXT_PUBLIC_SITE_URL` | Required for non-Vercel production | Canonical public origin, for example `https://sentry.example.com`; used by canonical, Open Graph, robots, and sitemap metadata |
+| `VERCEL_PROJECT_PRODUCTION_URL` | Set automatically by Vercel | Canonical-host fallback when `NEXT_PUBLIC_SITE_URL` is not configured |
+
+Public indexing is enabled only for a production deployment with a non-local canonical origin. Local and preview deployments return a deny-all robots policy. The sitemap contains only the public root; authenticated, API, admin, and superadmin surfaces are excluded and explicitly marked no-index where they render HTML.
 
 Production startup rejects session creation when neither `SENTRY_SESSION_SECRET` nor `AUTH_SECRET` is configured. Use a long, unique secret stored in the hosting provider's secret manager.
 

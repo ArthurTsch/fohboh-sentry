@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, JetBrains_Mono, Outfit } from "next/font/google";
+import { getPublicMetadata } from "@/lib/seo";
 import "./globals.css";
 
 const display = Outfit({
@@ -17,10 +18,7 @@ const mono = JetBrains_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "FohBoh | Sentry",
-  description: "FohBoh Sentry portal",
-};
+export const metadata: Metadata = getPublicMetadata();
 
 export default function RootLayout({
   children,
