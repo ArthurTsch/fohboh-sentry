@@ -155,10 +155,10 @@ const m01Artifacts = [
   },
   {
     doc: "Bank Statement",
-    format: "PDF",
-    source: "Operating account bank statement",
+    format: "Prosperity Bank machine-readable PDF (prosperity-bank-statement-v1)",
+    source: "Prosperity Bank operating-account statement",
     purpose:
-      "Monthly-final deposit reconciliation evidence tying processor payouts to the actual bank deposit trail. The physical PDF is location-shared: one upload is parsed per configured provider and linked into each governed evidence set.",
+      "Monthly-final deposit reconciliation evidence tying processor payouts to the actual bank deposit trail. The physical PDF is location-shared and linked into each governed evidence set. Other bank layouts require a separately versioned parser before they can be selected.",
   },
   {
     doc: "Proof Zone Sample",
@@ -173,7 +173,7 @@ const m02Artifacts = [
   {
     doc: "DSP Settlement Export",
     format: "CSV",
-    source: "DoorDash / Uber Eats / Grubhub / other DSP portal",
+    source: "DoorDash or Uber Eats portal (Grubhub and Slice are not yet supported)",
     purpose:
       "Primary M02 source-of-truth settlement evidence. Parsed by certification month into total, delivery, and pickup basis; actual commission; order counts; payout, tax, promotion, and marketing metrics. Native DoorDash Final order status and Uber Eats Dining Mode fields govern the delivery/pickup classification.",
   },
@@ -193,10 +193,10 @@ const m02Artifacts = [
   },
   {
     doc: "Bank Deposit Evidence",
-    format: "PDF",
-    source: "Operating account bank statement",
+    format: "Prosperity Bank machine-readable PDF (prosperity-bank-statement-v1)",
+    source: "Prosperity Bank operating-account statement",
     purpose:
-      "Monthly-final payout reconciliation evidence tying marketplace settlement payout to actual bank deposit behavior. It reuses the location-level shared bank PDF and provider-specific parsed metrics rather than requiring another upload.",
+      "Monthly-final payout reconciliation evidence tying marketplace settlement payout to actual bank deposit behavior. It reuses the location-level Prosperity Bank PDF and provider-specific parsed metrics rather than requiring another upload. Other bank layouts require their own versioned parser.",
   },
 ];
 

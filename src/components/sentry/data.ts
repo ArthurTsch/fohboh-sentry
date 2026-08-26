@@ -1135,6 +1135,7 @@ export const wgsUsers: WgsUser[] = [
 export const emptyAddLocationDraft: AddLocationDraft = {
   name: "",
   address: "",
+  bankProviderKey: "prosperity",
   locId: "",
   posSystem: "Toast",
   m01: true,

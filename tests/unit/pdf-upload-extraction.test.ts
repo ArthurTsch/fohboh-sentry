@@ -3,6 +3,15 @@ import { describe, expect, it } from "vitest";
 import { extractPdfMetrics } from "@/lib/uploads/pdf";
 
 describe("processor PDF metric extraction", () => {
+  it("rejects bank layouts that are not explicitly supported", () => {
+    const result = extractPdfMetrics("m01-bank", "Deposits and additions 1,234.56", null, "other-bank");
+
+    expect(result.metrics).toBeUndefined();
+    expect(result.warnings).toContain(
+      "This bank PDF format is not supported. The current parser accepts Prosperity Bank statements only.",
+    );
+  });
+
   it("uses the Toast Summary block for total and interchange fees", () => {
     const result = extractPdfMetrics("m01-processor", `
 Summary

@@ -133,10 +133,12 @@ export function SentryViewRouter({
   onApprove: (approvalId: string) => void | Promise<void>;
   onCompleteUploadSet: (locationId: string, moduleId: "M01" | "M02") => void;
   onManageUploadSources: (locationId: string, next: {
+    bankProviderKey: string;
     m01Enabled: boolean;
     m01Vendors: string[];
     m02Enabled: boolean;
     m02Vendors: string[];
+    posSystem: string;
   }) => void;
   onDirectUpload: (
     moduleId: "M01" | "M02",

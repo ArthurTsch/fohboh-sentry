@@ -943,8 +943,8 @@ export function UploadCenterView({
                           ? focusedCardRef
                           : undefined
                       }
-                      title="4 | Bank Statement"
-                      subtitle="Matching-period deposit statement for payout reconciliation"
+                      title={`4 | ${activeSourceConfig?.bankProvider.name ?? "Prosperity Bank"} Statement`}
+                      subtitle="Matching-period Prosperity Bank statement for payout reconciliation"
                       primaryLabel="Upload PDF"
                       onPrimary={() => {
                         if (!bankArtifactKey) return;
@@ -984,8 +984,8 @@ export function UploadCenterView({
                               void handleViewExtractedText({
                                 artifactKey: bankArtifactKey,
                                 fileName: bankIntake.fileName ?? "",
-                                subtitle: "Matching-period deposit statement for payout reconciliation",
-                                title: "4 | Bank Statement",
+                                subtitle: "Matching-period Prosperity Bank statement for payout reconciliation",
+                                title: "4 | Prosperity Bank Statement",
                                 uploadId: bankIntake.uploadId!,
                               })
                           : undefined
@@ -1230,7 +1230,7 @@ export function UploadCenterView({
                           ? focusedCardRef
                           : undefined
                       }
-                      title="4 | Bank Statement"
+                      title={`4 | ${activeSourceConfig?.bankProvider.name ?? "Prosperity Bank"} Statement`}
                       subtitle="Shared location statement · automatically linked across modules and providers"
                       primaryLabel="Upload PDF"
                       onPrimary={() => {
@@ -1272,7 +1272,7 @@ export function UploadCenterView({
                                 artifactKey: bankArtifactKey,
                                 fileName: bankIntake.fileName ?? "",
                                 subtitle: "Shared location statement used across configured evidence sets",
-                                title: "4 | Bank Statement",
+                                title: "4 | Prosperity Bank Statement",
                                 uploadId: bankIntake.uploadId!,
                               })
                           : undefined

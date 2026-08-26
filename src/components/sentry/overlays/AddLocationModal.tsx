@@ -2,8 +2,11 @@ import { useMemo, useState } from "react";
 import type { AddLocationDraft } from "../types";
 import { HelpTip } from "../ui/primitives";
 import { AccessibleDialog } from "../ui/AccessibleDialog";
+import { getBankCatalog } from "../bank-catalog";
+import { getVendorCatalog } from "../vendor-catalog";
 
-const dspOptions = ["DoorDash", "Uber Eats", "Grubhub", "Slice"];
+const dspOptions = getVendorCatalog("M02").filter((vendor) => ["doordash", "ubereats", "grubhub", "slice"].includes(vendor.key));
+const bankOptions = getBankCatalog();
 const processorOptions = ["Heartland", "Toast", "Square", "Worldpay", "Chase Paymentech", "Other"];
 const posOptions = ["Toast", "Square", "Heartland", "Worldpay", "Chase Paymentech", "Other"];
 const stepHelp: {
@@ -18,7 +21,7 @@ const stepHelp: {
     sections: [
       {
         label: "What It Is",
-        text: "Basic information about the new location: name, address, POS system, and the active processor and DSP sources.",
+        text: "Basic identifying information about the new restaurant location.",
       },
       {
         label: "What It Does",
@@ -26,7 +29,7 @@ const stepHelp: {
       },
       {
         label: "Why It Matters",
-        text: "The location name entered here will appear on all future CAARs and in the Activity Log. The saved processor and DSP selections become the only active sources for this location until explicitly changed.",
+        text: "The location name entered here will appear on all future CAARs and in the Activity Log.",
       },
     ],
     title: "Add Location / Step 1",
@@ -37,7 +40,7 @@ const stepHelp: {
     sections: [
       {
         label: "What It Is",
-        text: "Select which Sentry modules to activate for this location.",
+        text: "Select which Sentry modules to activate, then configure only the POS, processor, DSP, and bank sources relevant to those modules.",
       },
       {
         label: "What It Does",
@@ -104,7 +107,12 @@ export function AddLocationModal({
 
   function next() {
     if (step === 1 && !draft.name.trim()) return;
-    if (step === 2 && !draft.m01 && !draft.m02) return;
+    if (step === 2) {
+      if (!draft.m01 && !draft.m02) return;
+      if (!draft.posSystem.trim() || !draft.bankProviderKey.trim()) return;
+      if (draft.m01 && !draft.processor.trim()) return;
+      if (draft.m02 && draft.dsps.length === 0) return;
+    }
     if (step === 3) {
       onSubmit(draft);
       return;
@@ -196,8 +204,8 @@ export function AddLocationModal({
                   placeholder="e.g. 3400 W. Airport Freeway, Irving TX 75062"
                 />
               </label>
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="grid gap-2">
+              <div className="grid gap-4">
+                <label className="grid gap-2 md:max-w-[calc(50%-0.5rem)]">
                   <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
                     Internal Location ID (Optional)
                   </span>
@@ -208,67 +216,6 @@ export function AddLocationModal({
                     placeholder="e.g. NTXDAL-004"
                   />
                 </label>
-                <label className="grid gap-2">
-                  <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
-                    POS System
-                  </span>
-                  <select
-                    value={draft.posSystem}
-                    onChange={(event) => setDraft((current) => ({ ...current, posSystem: event.target.value }))}
-                    className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm outline-none"
-                  >
-                    {posOptions.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="grid gap-2">
-                  <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
-                    Card Processor
-                  </span>
-                  <select
-                    value={draft.processor}
-                    onChange={(event) => setDraft((current) => ({ ...current, processor: event.target.value }))}
-                    className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-sm outline-none"
-                  >
-                    {processorOptions.map((option) => (
-                      <option key={option}>{option}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="grid gap-2">
-                  <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.28em] text-[var(--muted)]">
-                    DSP Platforms
-                  </span>
-                  <div className="flex flex-wrap gap-2">
-                    {dspOptions.map((dsp) => {
-                      const selected = draft.dsps.includes(dsp);
-                      return (
-                        <button
-                          key={dsp}
-                          type="button"
-                          onClick={() =>
-                            setDraft((current) => ({
-                              ...current,
-                              dsps: current.dsps.includes(dsp)
-                                ? current.dsps.filter((item) => item !== dsp)
-                                : [...current.dsps, dsp],
-                            }))
-                          }
-                          className={`rounded-full border px-3 py-2 text-sm ${
-                            selected
-                              ? "border-[var(--accent)] bg-[rgba(214,48,49,0.04)] text-[var(--accent)]"
-                              : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]"
-                          }`}
-                        >
-                          {dsp}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
               <div className="rounded-[10px] border border-[rgba(212,131,10,0.5)] border-l-4 border-l-[#ff9800] bg-[#2A1500] px-4 py-4">
                 <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">
@@ -311,17 +258,63 @@ export function AddLocationModal({
                   </div>
                 </button>
               </div>
+              {(draft.m01 || draft.m02) ? (
+                <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                  <div className="font-semibold">Shared location sources</div>
+                  <div className="mt-1 text-sm text-[var(--muted)]">Used by every enabled certification module.</div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label className="grid content-start gap-2">
+                      <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">POS system</span>
+                      <select value={draft.posSystem} onChange={(event) => setDraft((current) => ({ ...current, posSystem: event.target.value }))} className="rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm">
+                        {posOptions.map((option) => <option key={option}>{option}</option>)}
+                      </select>
+                    </label>
+                    <label className="grid content-start gap-2">
+                      <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">Bank</span>
+                      <select value={draft.bankProviderKey} onChange={(event) => setDraft((current) => ({ ...current, bankProviderKey: event.target.value }))} className="rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm">
+                        {bankOptions.map((bank) => <option key={bank.key} value={bank.key}>{bank.name}</option>)}
+                      </select>
+                      <span className="text-xs text-[var(--muted)]">Currently supported PDF format: Prosperity Bank statements only.</span>
+                    </label>
+                  </div>
+                </section>
+              ) : null}
+              {draft.m01 ? (
+                <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                  <div className="font-semibold">M01 sources</div>
+                  <label className="mt-4 grid gap-2 md:max-w-[calc(50%-0.5rem)]">
+                    <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">Card processor</span>
+                    <select value={draft.processor} onChange={(event) => setDraft((current) => ({ ...current, processor: event.target.value }))} className="rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm">
+                      {processorOptions.map((option) => <option key={option}>{option}</option>)}
+                    </select>
+                  </label>
+                </section>
+              ) : null}
+              {draft.m02 ? (
+                <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                  <div className="font-semibold">M02 delivery platforms</div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {dspOptions.map((dsp) => {
+                      const selected = draft.dsps.includes(dsp.name);
+                      const disabled = dsp.supported === false;
+                      return (
+                        <button key={dsp.key} type="button" disabled={disabled} title={disabled ? `${dsp.name} format is not supported yet.` : undefined} onClick={() => setDraft((current) => ({ ...current, dsps: selected ? current.dsps.filter((item) => item !== dsp.name) : [...current.dsps, dsp.name] }))} className={`rounded-full border px-3 py-2 text-sm ${disabled ? "cursor-not-allowed border-[var(--border)] bg-gray-100 text-gray-400" : selected ? "border-[var(--accent)] bg-[rgba(214,48,49,0.04)] text-[var(--accent)]" : "border-[var(--border)] bg-white text-[var(--muted)]"}`}>
+                          {dsp.name}{disabled ? " — Coming later" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
                 <div className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
                   Saved Active Sources
                 </div>
                 <div className="mt-3 text-sm leading-7 text-[var(--muted)]">
-                  Processor: <span className="font-semibold text-[var(--text)]">{draft.processor}</span>
-                  {" · "}
-                  DSPs:{" "}
-                  <span className="font-semibold text-[var(--text)]">
-                    {draft.dsps.join(", ") || "None"}
-                  </span>
+                  POS: <span className="font-semibold text-[var(--text)]">{draft.posSystem}</span>{" / "}
+                  Bank: <span className="font-semibold text-[var(--text)]">{bankOptions.find((bank) => bank.key === draft.bankProviderKey)?.name}</span>
+                  {draft.m01 ? <>{" / "}Processor: <span className="font-semibold text-[var(--text)]">{draft.processor}</span></> : null}
+                  {draft.m02 ? <>{" / "}DSPs: <span className="font-semibold text-[var(--text)]">{draft.dsps.join(", ")}</span></> : null}
                 </div>
                 <div className="mt-2 text-sm leading-7 text-[var(--muted)]">
                   These source selections are defined in Location Details and will be used by Upload Data, DIY Access, and onboarding. Change them there or later through Manage Sources.
@@ -335,7 +328,9 @@ export function AddLocationModal({
               <div className="rounded-2xl border border-[rgba(0,200,83,0.2)] bg-[rgba(0,200,83,0.05)] p-4">
                 <div className="font-semibold text-[var(--success)]">{draft.name || "New location"} ready to onboard</div>
                 <div className="mt-1 text-sm text-[var(--muted)]">
-                  POS: {draft.posSystem} · Processor: {draft.processor} · DSPs: {draft.dsps.join(", ") || "None"}
+                  POS: {draft.posSystem} / Bank: {bankOptions.find((bank) => bank.key === draft.bankProviderKey)?.name}
+                  {draft.m01 ? ` / Processor: ${draft.processor}` : ""}
+                  {draft.m02 ? ` / DSPs: ${draft.dsps.join(", ")}` : ""}
                 </div>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">

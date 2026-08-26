@@ -493,10 +493,17 @@ export async function POST(request: Request) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const bankProviderKey = artifactKey.includes("bank")
+      ? String(formData.get("bankProviderKey") ?? "prosperity").trim().toLowerCase()
+      : null;
+    if (artifactKey.includes("bank") && bankProviderKey !== "prosperity") {
+      return withRequestHeaders(NextResponse.json({ error: "Only Prosperity Bank statement PDFs are supported." }, { status: 400 }), requestContext);
+    }
     const validatedTargets = await Promise.all(uploadTargets.map(async (target) => ({
       ...target,
       validation: await validateUploadArtifact({
         artifactKey: target.artifactKey,
+        bankProviderKey,
         buffer,
         contentType: file.type,
         fileName: file.name,

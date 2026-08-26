@@ -3,13 +3,16 @@
 import { useMemo, useState } from "react";
 import type { LocationSourceConfig } from "../types";
 import { getVendorCatalog } from "../vendor-catalog";
+import { getBankCatalog } from "../bank-catalog";
 import { AccessibleDialog } from "../ui/AccessibleDialog";
 
 type DraftState = {
+  bankProviderKey: string;
   m01Enabled: boolean;
   m01Vendors: string[];
   m02Enabled: boolean;
   m02Vendors: string[];
+  posSystem: string;
 };
 
 export function LocationSourceSettingsModal({
@@ -24,16 +27,19 @@ export function LocationSourceSettingsModal({
   onSave: (next: DraftState) => void | Promise<void>;
 }) {
   const [draft, setDraft] = useState<DraftState>({
+    bankProviderKey: initialConfig.bankProvider.key,
     m01Enabled: initialConfig.m01Enabled,
     m01Vendors: initialConfig.m01Vendors.map((vendor) => vendor.key),
     m02Enabled: initialConfig.m02Enabled,
     m02Vendors: initialConfig.m02Vendors.map((vendor) => vendor.key),
+    posSystem: initialConfig.posSystem ?? "",
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const m01Catalog = useMemo(() => getVendorCatalog("M01"), []);
   const m02Catalog = useMemo(() => getVendorCatalog("M02"), []);
+  const bankCatalog = useMemo(() => getBankCatalog(), []);
 
   function toggleVendor(moduleId: "M01" | "M02", vendorKey: string) {
     setError(null);
@@ -61,6 +67,10 @@ export function LocationSourceSettingsModal({
     }
     if (!draft.m01Enabled && !draft.m02Enabled) {
       setError("At least one certification module must remain enabled.");
+      return;
+    }
+    if (!draft.posSystem.trim()) {
+      setError("Select a POS system before saving.");
       return;
     }
 
@@ -97,6 +107,14 @@ export function LocationSourceSettingsModal({
         </div>
 
         <div className="grid gap-6 p-6 lg:grid-cols-2">
+          <section className="rounded-2xl border border-[var(--border)] p-5 lg:col-span-2">
+            <div className="font-semibold text-[var(--text)]">Shared location sources</div>
+            <div className="mt-1 text-sm text-[var(--muted)]">Used by every enabled module.</div>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <label className="grid content-start gap-2 text-sm"><span>POS system</span><input value={draft.posSystem} onChange={(event) => setDraft((current) => ({ ...current, posSystem: event.target.value }))} className="rounded-xl border border-[var(--border)] px-4 py-3" /></label>
+              <label className="grid content-start gap-2 text-sm"><span>Bank</span><select value={draft.bankProviderKey} onChange={(event) => setDraft((current) => ({ ...current, bankProviderKey: event.target.value }))} className="rounded-xl border border-[var(--border)] px-4 py-3">{bankCatalog.map((bank) => <option key={bank.key} value={bank.key}>{bank.name}</option>)}</select><span className="text-xs text-[var(--muted)]">Only the Prosperity Bank PDF format is supported today.</span></label>
+            </div>
+          </section>
           <section className="rounded-2xl border border-[var(--border)] p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -158,19 +176,21 @@ export function LocationSourceSettingsModal({
             <div className="mt-4 flex flex-wrap gap-2">
               {m02Catalog.map((vendor) => {
                 const selected = draft.m02Vendors.includes(vendor.key);
+                const unsupported = vendor.supported === false;
                 return (
                   <button
                     key={vendor.key}
                     type="button"
-                    disabled={!draft.m02Enabled}
+                    disabled={!draft.m02Enabled || unsupported}
+                    title={unsupported ? `${vendor.name} format is not supported yet.` : undefined}
                     onClick={() => toggleVendor("M02", vendor.key)}
                     className={`rounded-full border px-3 py-2 text-sm transition ${
                       selected
                         ? "border-[var(--accent)] bg-[rgba(214,48,49,0.05)] text-[var(--accent)]"
                         : "border-[var(--border)] bg-[var(--surface)] text-[var(--muted)]"
-                    } ${!draft.m02Enabled ? "cursor-not-allowed opacity-50" : "hover:border-[var(--text)] hover:text-[var(--text)]"}`}
+                    } ${!draft.m02Enabled || unsupported ? "cursor-not-allowed opacity-50" : "hover:border-[var(--text)] hover:text-[var(--text)]"}`}
                   >
-                    {vendor.name}
+                    {vendor.name}{unsupported ? " — Coming later" : ""}
                   </button>
                 );
               })}

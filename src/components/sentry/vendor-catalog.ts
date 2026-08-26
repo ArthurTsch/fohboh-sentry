@@ -5,6 +5,7 @@ export type VendorCatalogEntry = {
   key: string;
   name: string;
   schema?: string;
+  supported?: boolean;
 };
 
 const M01_VENDORS: VendorCatalogEntry[] = [
@@ -19,8 +20,8 @@ const M01_VENDORS: VendorCatalogEntry[] = [
 const M02_VENDORS: VendorCatalogEntry[] = [
   { key: "doordash", name: "DoorDash", schema: "v1.0", base: "order_subtotal" },
   { key: "ubereats", name: "Uber Eats", schema: "v1.0", base: "platform_gross_sales" },
-  { key: "grubhub", name: "Grubhub", schema: "v1.0", base: "restaurant_food_sales" },
-  { key: "slice", name: "Slice", schema: "v1.0", base: "order_subtotal" },
+  { key: "grubhub", name: "Grubhub", supported: false },
+  { key: "slice", name: "Slice", supported: false },
   { key: "other", name: "Other" },
 ];
 
@@ -67,4 +68,9 @@ export function resolveVendorSelections(moduleId: VendorModuleId, values: string
   }
 
   return [...unique.values()];
+}
+
+export function isVendorSupported(moduleId: VendorModuleId, value: string) {
+  const vendor = resolveVendorCatalogEntry(moduleId, value);
+  return Boolean(vendor && vendor.supported !== false);
 }

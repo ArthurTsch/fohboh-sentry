@@ -62,7 +62,8 @@ import type {
   WgsQueueItem,
   WgsUser,
 } from "./types";
-import { resolveVendorKey, resolveVendorSelections } from "./vendor-catalog";
+import { isVendorSupported, resolveVendorKey, resolveVendorSelections } from "./vendor-catalog";
+import { DEFAULT_BANK_KEY, resolveBankCatalogEntry } from "./bank-catalog";
 import { LandingPage } from "./views/LandingPage";
 import { readApiJson } from "./api/client";
 
@@ -845,8 +846,10 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
 
   function createWgsOnboardingProgress(): WgsOnboardingProgress {
     return {
+      bankProviderKey: DEFAULT_BANK_KEY,
       checks: {},
       completed: false,
+      posSystem: "",
       selectedVendors: { m01: [], m02: [] },
       stepIndex: 0,
       uploads: {},
@@ -883,10 +886,15 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     const activeLabels = new Set(location.modules.map((module) => module.label));
 
     return {
+      bankProvider: (() => {
+        const bank = resolveBankCatalogEntry(progress?.bankProviderKey);
+        return { key: bank?.key ?? DEFAULT_BANK_KEY, name: bank?.name ?? "Prosperity Bank" };
+      })(),
       m01Enabled: activeLabels.has("M01"),
       m01Vendors: resolveVendorSelections("M01", progress?.selectedVendors.m01 ?? []),
       m02Enabled: activeLabels.has("M02"),
-      m02Vendors: resolveVendorSelections("M02", progress?.selectedVendors.m02 ?? []),
+      m02Vendors: resolveVendorSelections("M02", progress?.selectedVendors.m02 ?? []).filter((vendor) => isVendorSupported("M02", vendor.key)),
+      posSystem: progress?.posSystem?.trim() || null,
     };
   }
 
@@ -1057,6 +1065,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         creatorEmail: effectiveSession?.email ?? null,
         locationName: draft.name,
         managerId: effectiveSession?.managerId ?? null,
+        posSystem: draft.posSystem,
         sentryState: {
           completed: false,
           governanceStatus: "uninitialized",
@@ -1081,6 +1090,8 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
           onboardingChecklist: onboardingState,
           onboardingProgress: {
             ...createWgsOnboardingProgress(),
+            bankProviderKey: draft.bankProviderKey,
+            posSystem: draft.posSystem,
             selectedVendors: {
               m01: draft.m01 && draft.processor ? [resolveVendorKey("M01", draft.processor)] : [],
               m02: draft.m02 ? draft.dsps.map((dsp) => resolveVendorKey("M02", dsp)) : [],
@@ -1185,6 +1196,9 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     formData.set("file", file);
     formData.set("locationId", target.locationId);
     formData.set("moduleId", target.moduleId);
+    if (target.artifact.key.includes("bank")) {
+      formData.set("bankProviderKey", getLocationSourceConfig(target.locationId)?.bankProvider.key ?? DEFAULT_BANK_KEY);
+    }
     if (vendor?.key ?? target.vendorKey) {
       formData.set("vendorKey", vendor?.key ?? target.vendorKey ?? "");
     }
@@ -1964,10 +1978,12 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
   }
 
   async function handleManageUploadSources(locationId: string, next: {
+    bankProviderKey: string;
     m01Enabled: boolean;
     m01Vendors: string[];
     m02Enabled: boolean;
     m02Vendors: string[];
+    posSystem: string;
   }) {
     const targetLocation = runtimeLocationState.find((location) => location.id === locationId);
     if (!targetLocation) {
@@ -1982,10 +1998,17 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     if (!next.m01Enabled && !next.m02Enabled) {
       throw new Error("At least one certification module must remain enabled.");
     }
+    if (!next.posSystem.trim()) throw new Error("Select a POS system before saving.");
+    if (!resolveBankCatalogEntry(next.bankProviderKey)) throw new Error("Select a supported bank before saving.");
+    if (next.m02Vendors.some((vendor) => !isVendorSupported("M02", vendor))) {
+      throw new Error("Grubhub and Slice cannot be selected until their evidence formats are supported.");
+    }
 
     const currentProgress = wgsOnboardingState[targetLocation.id] ?? createWgsOnboardingProgress();
     const nextProgress: WgsOnboardingProgress = {
       ...currentProgress,
+      bankProviderKey: next.bankProviderKey,
+      posSystem: next.posSystem,
       selectedVendors: {
         m01: next.m01Enabled ? next.m01Vendors : [],
         m02: next.m02Enabled ? next.m02Vendors : [],
@@ -2906,11 +2929,13 @@ function parseOnboardingProgress(value: unknown): WgsOnboardingProgress | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Partial<WgsOnboardingProgress>;
   return {
+    bankProviderKey: typeof raw.bankProviderKey === "string" ? raw.bankProviderKey : DEFAULT_BANK_KEY,
     checks:
       raw.checks && typeof raw.checks === "object"
         ? raw.checks
         : {},
     completed: Boolean(raw.completed),
+    posSystem: typeof raw.posSystem === "string" ? raw.posSystem : "",
     selectedVendors: {
       m01: Array.isArray(raw.selectedVendors?.m01) ? raw.selectedVendors.m01 : [],
       m02: Array.isArray(raw.selectedVendors?.m02) ? raw.selectedVendors.m02 : [],

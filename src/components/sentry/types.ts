@@ -396,12 +396,14 @@ export type WgsOnboardingUpload = {
 };
 
 export type WgsOnboardingProgress = {
+  bankProviderKey: string;
   checks: Record<string, boolean[]>;
   completed: boolean;
   selectedVendors: {
     m01: string[];
     m02: string[];
   };
+  posSystem: string;
   stepIndex: number;
   uploads: Record<string, WgsOnboardingUpload>;
 };
@@ -490,6 +492,7 @@ export type WgsAccount = {
 export type AddLocationDraft = {
   name: string;
   address: string;
+  bankProviderKey: string;
   locId: string;
   posSystem: string;
   m01: boolean;
@@ -610,10 +613,12 @@ export type LocationWorkflowState = {
 };
 
 export type LocationSourceConfig = {
+  bankProvider: { key: string; name: string };
   m01Enabled: boolean;
   m01Vendors: { key: string; name: string }[];
   m02Enabled: boolean;
   m02Vendors: { key: string; name: string }[];
+  posSystem: string | null;
 };
 
 export type SupportModeState = {

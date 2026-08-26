@@ -6,7 +6,8 @@ import { getRequestContextFromRequest, withRequestHeaders } from "@/lib/ops/requ
 import { checkRateLimits, getRetryAfterSeconds } from "@/lib/ops/rate-limit";
 import prisma from "@/lib/prisma";
 import { buildGeneratedUnitId } from "@/lib/restaurants/ids";
-import { resolveVendorKey } from "@/components/sentry/vendor-catalog";
+import { isVendorSupported, resolveVendorKey } from "@/components/sentry/vendor-catalog";
+import { resolveBankCatalogEntry } from "@/components/sentry/bank-catalog";
 import { getScopedRestaurantWhere, getTeamAccountId } from "@/lib/auth/team-access";
 import { ensureNormalizedLocation } from "@/lib/restaurants/normalized-location";
 
@@ -200,6 +201,7 @@ export async function POST(request: Request) {
       creatorEmail?: string;
       locationName?: string;
       managerId?: number | null;
+      posSystem?: string;
       sentryState?: {
         completed?: boolean;
         ium?: string;
@@ -276,6 +278,16 @@ export async function POST(request: Request) {
       typeof onboardingProgressRecord.selectedVendors === "object"
         ? (onboardingProgressRecord.selectedVendors as Record<string, unknown>)
         : null;
+    const selectedM02Vendors = normalizeStringArray(selectedVendors?.m02);
+    if (selectedM02Vendors.some((vendor) => !isVendorSupported("M02", vendor))) {
+      return NextResponse.json({ error: "Grubhub and Slice formats are not supported yet." }, { status: 400 });
+    }
+    const bankProviderKey = typeof onboardingProgressRecord?.bankProviderKey === "string"
+      ? onboardingProgressRecord.bankProviderKey
+      : undefined;
+    if (!resolveBankCatalogEntry(bankProviderKey)) {
+      return NextResponse.json({ error: "The selected bank format is not supported." }, { status: 400 });
+    }
     const hasExplicitSelectedVendors =
       Boolean(selectedVendors) &&
       (normalizeStringArray(selectedVendors?.m01).length > 0 ||
@@ -302,9 +314,9 @@ export async function POST(request: Request) {
             m01: normalizeStringArray(accessRequest.processors).map((value) =>
               resolveVendorKey("M01", value),
             ),
-            m02: normalizeStringArray(accessRequest.dsps).map((value) =>
-              resolveVendorKey("M02", value),
-            ),
+            m02: normalizeStringArray(accessRequest.dsps)
+              .map((value) => resolveVendorKey("M02", value))
+              .filter((value) => isVendorSupported("M02", value)),
           },
         };
       }
@@ -386,6 +398,7 @@ export async function POST(request: Request) {
       address: restaurant.location,
       externalId: locationId,
       name: restaurant.name,
+      posSystem: body.posSystem,
     });
 
     await writeAuditLog({

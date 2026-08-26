@@ -92,6 +92,7 @@ type UploadReferenceRow = {
 };
 
 export type PersistedUploadValidation = {
+  bankProviderKey?: string;
   detectedFormatKey?: string;
   detectedFormatName?: string;
   expectedColumns?: number;
@@ -117,6 +118,7 @@ export type PersistedUploadValidation = {
 
 export async function validateUploadArtifact({
   artifactKey,
+  bankProviderKey,
   buffer,
   contentType,
   expectedHeadersOverride,
@@ -125,6 +127,7 @@ export async function validateUploadArtifact({
   vendorName,
 }: {
   artifactKey: string;
+  bankProviderKey?: string | null;
   buffer: Buffer;
   contentType: string;
   expectedHeadersOverride?: string[] | null;
@@ -145,12 +148,13 @@ export async function validateUploadArtifact({
     const extractedPdf = validPdf ? await extractPdfDocument(buffer) : null;
     const pageCount = extractedPdf?.pageCount ?? estimatePdfPageCount(buffer);
     const pdfText = extractedPdf?.text ?? "";
-    const pdfExtraction = validPdf ? extractPdfMetrics(artifactKey, pdfText, vendorKey) : { warnings: [] };
+    const pdfExtraction = validPdf ? extractPdfMetrics(artifactKey, pdfText, vendorKey, bankProviderKey) : { warnings: [] };
     const metrics = pdfExtraction.metrics;
     const fields = validPdf && resolvePdfFieldReadiness(artifactKey, metrics);
     const parseWarnings = pdfExtraction.warnings.length > 0 ? pdfExtraction.warnings : undefined;
 
     return {
+      bankProviderKey: artifactKey.includes("bank") ? bankProviderKey ?? "prosperity" : undefined,
       fields,
       fileName,
       hash: true,

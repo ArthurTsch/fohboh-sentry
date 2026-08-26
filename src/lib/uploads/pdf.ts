@@ -218,6 +218,7 @@ export function extractPdfMetrics(
   artifactKey: string,
   text: string,
   vendorKey?: string | null,
+  bankProviderKey?: string | null,
 ): PdfMetricExtraction {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -229,6 +230,9 @@ export function extractPdfMetrics(
   }
 
   if (artifactKey.includes("bank")) {
+    if ((bankProviderKey ?? "prosperity").trim().toLowerCase() !== "prosperity") {
+      return { warnings: ["This bank PDF format is not supported. The current parser accepts Prosperity Bank statements only."] };
+    }
     return extractBankMetrics(artifactKey, trimmed, vendorKey);
   }
 

@@ -52,10 +52,12 @@ export function LocationWorkspaceView({
   onEditWorkspace: (workspace: SchemaWorkspace) => void;
   onInitializeWorkspace: (locationId: string, module: "M01" | "M02", vendor?: string) => void;
   onManageSources: (next: {
+    bankProviderKey: string;
     m01Enabled: boolean;
     m01Vendors: string[];
     m02Enabled: boolean;
     m02Vendors: string[];
+    posSystem: string;
   }) => void | Promise<void>;
   onSealWorkspace: (workspace: SchemaWorkspace) => void | Promise<void>;
   role: Role;
@@ -537,7 +539,9 @@ export function LocationWorkspaceView({
               ) : null}
             </div>
             {locationSourceConfig ? (
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <SourceSummaryCard enabled label="POS System" sources={[locationSourceConfig.posSystem ?? "Not configured"]} />
+                <SourceSummaryCard enabled label="Bank" sources={[locationSourceConfig.bankProvider.name]} />
                 <SourceSummaryCard
                   enabled={locationSourceConfig.m01Enabled}
                   label="M01 Card Processor"
