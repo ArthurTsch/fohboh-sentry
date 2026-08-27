@@ -173,7 +173,7 @@ describe("M01 Toast fee comparison", () => {
             transactionCount: 4_419,
           },
         }),
-        artifact("m01-pos", "CSV", { metrics: { basisAmount: 128_175.34 } }),
+        artifact("m01-pos", "CSV", { metrics: { basisAmount: 128_175.34, transactionCount: 4_419 } }),
         artifact("m01-agreement", "PDF"),
         artifact("m01-bank", "PDF", { metrics: { depositAmount: 3_139 } }),
         artifact("m01-contract", "Manual Entry", {
@@ -203,5 +203,88 @@ describe("M01 Toast fee comparison", () => {
       fee_comparison_scope: "processor_fee_only",
       unexplained_fee_delta: 0,
     });
+  });
+
+  it("uses June activity from the two monthly payout exports for the governed fee formula", () => {
+    const result = runDeterministicModuleEngine({
+      artifacts: [
+        artifact("m01-processor", "PDF", { metrics: { basisAmount: 128_175.34, processorFeeAmount: 855.38 } }),
+        artifact("m01-pos", "CSV", {
+          detectedFormatKey: "toast-payouts-csv",
+          metrics: {
+            basisAmount: 115_340.43,
+            payoutAmount: 115_327.45,
+            transactionCount: 3_997,
+          },
+        }),
+        artifact("m01-agreement", "PDF"),
+        artifact("m01-bank", "PDF", { metrics: { depositAmount: 115_327.45 } }),
+        artifact("m01-contract", "Manual Entry", {
+          contractValues: { markup_bps: "55", monthly_fee: "0", txn_fee: "0.05" },
+        }),
+      ],
+      cadence: "monthly_final",
+      certificationMonth: "2026-06",
+      evaluationDate: new Date("2026-07-31T12:00:00.000Z"),
+      moduleId: "M01",
+    });
+
+    const sample = result.ruleCitations.find((citation) => citation.ruleId === "R002")?.sampleEvidence[0];
+    expect(sample).toMatchObject({
+      actual_fee_amount: 855.38,
+      basis_amount: 115_340.43,
+      expected_fee_amount: 834.22,
+      expected_markup_component: 634.37,
+      expected_txn_component: 199.85,
+      transaction_count: 3_997,
+      unexplained_fee_delta: 21.16,
+    });
+    expect(result.recoveryValue).toBe(21.16);
+    expect(result.ruleCitations.find((citation) => citation.ruleId === "R122")?.sampleEvidence[0]).toMatchObject({
+      difference_amount: 0,
+      difference_percent: 0,
+      pos_basis: 115_340.43,
+      processor_basis: 115_340.43,
+      settlement_timing_context: true,
+      statement_processing_volume: 128_175.34,
+    });
+  });
+
+  it("excludes May activity from a June pre-certification and keeps the result provisional", () => {
+    const result = runDeterministicModuleEngine({
+      artifacts: [
+        artifact("m01-processor", "PDF", { metrics: { processorFeeAmount: 855.38 } }),
+        artifact("m01-pos", "CSV", {
+          metrics: {
+            monthlyMetrics: {
+              "2026-05": { basisAmount: 10_909.46, payoutAmount: 10_909.46, transactionCount: 350 },
+              "2026-06": { basisAmount: 109_690.24, payoutAmount: 109_677.26, transactionCount: 3_797 },
+            },
+          },
+        }),
+        artifact("m01-agreement", "PDF"),
+        artifact("m01-bank", "PDF", { metrics: { depositAmount: 109_677.26 } }),
+        artifact("m01-contract", "Manual Entry", {
+          contractValues: { markup_bps: "55", monthly_fee: "0", txn_fee: "0.05" },
+        }),
+      ],
+      cadence: "monthly_preliminary",
+      certificationMonth: "2026-06",
+      evaluationDate: new Date("2026-06-30T12:00:00.000Z"),
+      moduleId: "M01",
+    });
+
+    const sample = result.ruleCitations.find((citation) => citation.ruleId === "R002")?.sampleEvidence[0];
+    expect(sample).toMatchObject({
+      actual_fee_amount: 855.38,
+      basis_amount: 109_690.24,
+      expected_fee_amount: 793.15,
+      expected_markup_component: 603.3,
+      expected_txn_component: 189.85,
+      transaction_count: 3_797,
+      unexplained_fee_delta: 62.23,
+    });
+    expect(result.recoveryValue).toBe(62.23);
+    expect(result.ready).toBe(false);
   });
 });

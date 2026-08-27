@@ -185,7 +185,7 @@ function deriveReconciliationExceptions({
   const settlementTimingWarning = moduleId === "M01" &&
     typeof posValidation?.detectedFormatKey === "string" &&
     posValidation.detectedFormatKey.includes("payout")
-    ? [`The file in the POS slot was detected as ${String(posValidation.detectedFormatName ?? "a payout export")}. Its gross settled-batch total is grouped by settlement date, while the processor card-volume total is grouped by fee-charge timing. Their difference is timing context, not a POS discrepancy or proven loss.`]
+    ? [`Document "${posUpload.file_name}" in the POS slot was detected as ${String(posValidation.detectedFormatName ?? "a payout export")}. Its gross settled-batch total is grouped by settlement date, while the processor card-volume total is grouped by fee-charge timing. Their difference is timing context, not a POS discrepancy or proven loss.`]
     : [];
   const posMetrics = parseUploadMetrics(posUpload.validation_summary);
   const bankMetrics = parseUploadMetrics(bankUpload.validation_summary);
@@ -214,7 +214,7 @@ function deriveReconciliationExceptions({
 
     if (matchingDepositIndexes.length === 0) {
       exceptions.push(
-        `${moduleId} payout ID ${payoutRef} for ${formatAmount(payoutAmount)} is missing in bank statement evidence.`,
+        `${moduleId} payout ID ${payoutRef} for ${formatAmount(payoutAmount)} was extracted from "${posUpload.file_name}" and was not found in bank statement "${bankUpload.file_name}".`,
       );
       continue;
     }
@@ -229,7 +229,7 @@ function deriveReconciliationExceptions({
       const depositMonth = getReferenceMonth(getDepositSettlementDate(exactAmountMatch.depositRow));
       if (payoutMonth && depositMonth && payoutMonth !== depositMonth) {
         warnings.push(
-          `${moduleId} payout ID ${payoutRef} is dated ${formatReferenceMonth(payoutMonth)} in the payout export but ${formatReferenceMonth(depositMonth)} in the bank description. The reference and amount match, so this is treated as a timing warning rather than a reconciliation error.`,
+          `${moduleId} payout ID ${payoutRef} is dated ${formatReferenceMonth(payoutMonth)} in "${posUpload.file_name}" but ${formatReferenceMonth(depositMonth)} in bank statement "${bankUpload.file_name}". The reference and amount match, so this is treated as a timing warning rather than a reconciliation error.`,
         );
       }
       continue;
@@ -248,7 +248,7 @@ function deriveReconciliationExceptions({
     const firstMismatch = matchingDepositIndexes[0];
     usedDepositIndexes.add(firstMismatch.index);
     exceptions.push(
-      `${moduleId} payout ID ${payoutRef} amount mismatch: payout export shows ${formatAmount(payoutAmount)} but bank statement shows ${formatAmount(firstMismatch.depositRow.amount ?? 0)}.`,
+      `${moduleId} payout ID ${payoutRef} amount mismatch: "${posUpload.file_name}" shows ${formatAmount(payoutAmount)} but bank statement "${bankUpload.file_name}" shows ${formatAmount(firstMismatch.depositRow.amount ?? 0)}.`,
     );
   }
 
@@ -261,11 +261,11 @@ function deriveReconciliationExceptions({
     const targetMonth = getCertificationPeriodMonth(certificationPeriod);
     if (depositMonth && targetMonth && depositMonth < targetMonth) {
       notes.push(
-        `${moduleId} deposit ID ${depositRef} for ${formatAmount(depositAmount)} is a ${formatReferenceMonth(depositMonth)} payout posted in the ${certificationPeriod} bank statement. It is retained as prior-period carryover context and does not block certification.`,
+        `${moduleId} deposit ID ${depositRef} for ${formatAmount(depositAmount)} in bank statement "${bankUpload.file_name}" is a ${formatReferenceMonth(depositMonth)} payout posted in the ${certificationPeriod} statement. It is retained as prior-period carryover context and does not block certification.`,
       );
     } else {
       exceptions.push(
-        `${moduleId} deposit ID ${depositRef} for ${formatAmount(depositAmount)} appears in bank statement evidence but not in the payout export.`,
+        `${moduleId} deposit ID ${depositRef} for ${formatAmount(depositAmount)} appears in bank statement "${bankUpload.file_name}" but not in payout export "${posUpload.file_name}".`,
       );
     }
   });
@@ -659,10 +659,13 @@ export function buildScoreDeductions(rows: Array<{
           : Math.abs(sample.processor_basis - sample.pos_basis);
         const percent = typeof sample.difference_percent === "number" ? sample.difference_percent : null;
         if (sample.settlement_timing_context === true) {
+          const statementVolume = typeof sample.statement_processing_volume === "number"
+            ? ` Broad Toast statement processing volume was $${sample.statement_processing_volume.toLocaleString("en-US", { minimumFractionDigits: 2 })}; it is retained as timing context and is not represented as the strict certification-month basis.`
+            : "";
           const net = typeof sample.net_settled_batches === "number"
             ? `; net settled batches $${sample.net_settled_batches.toLocaleString("en-US", { minimumFractionDigits: 2 })}`
             : "";
-          return [`Gross card-processing volume $${sample.processor_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}; gross settled batches $${sample.pos_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}${net}; timing-basis difference $${difference.toLocaleString("en-US", { minimumFractionDigits: 2 })}${percent === null ? "" : ` (${percent.toFixed(2)}%)`}. This is timing context, not a proven loss.`];
+          return [`Strict certification-month activity basis $${sample.processor_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}; filtered payout basis $${sample.pos_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}${net}; difference $${difference.toLocaleString("en-US", { minimumFractionDigits: 2 })}${percent === null ? "" : ` (${percent.toFixed(2)}%)`}.${statementVolume}`];
         }
         return [`Processor basis $${sample.processor_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}; POS basis $${sample.pos_basis.toLocaleString("en-US", { minimumFractionDigits: 2 })}; difference $${difference.toLocaleString("en-US", { minimumFractionDigits: 2 })}${percent === null ? "" : ` (${percent.toFixed(2)}%)`}.`];
       }

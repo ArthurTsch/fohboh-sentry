@@ -245,6 +245,7 @@ export type UploadArtifact = {
 export type IntakeStepKey = "uploaded" | "hash" | "schema" | "fields";
 
 export type IntakeState = {
+  evidenceMonth?: string;
   detectedFormatKey?: string;
   detectedFormatName?: string;
   uploadId?: number;
@@ -283,12 +284,14 @@ export type IntakeState = {
     networkFeeAmount?: number;
     marketingFeeAmount?: number;
     monthlyMetrics?: Record<string, {
+      adjustmentAmount?: number;
       basisAmount?: number;
       deliveryBasisAmount?: number;
       deliveryCommissionAmount?: number;
       deliveryOrderCount?: number;
       feeAmount?: number;
       orderCount?: number;
+      payoutAmount?: number;
       pickupBasisAmount?: number;
       pickupCommissionAmount?: number;
       pickupOrderCount?: number;
@@ -302,6 +305,14 @@ export type IntakeState = {
     promoOrderCount?: number;
     processorFeeAmount?: number;
     payoutAmount?: number;
+    payoutReferenceRows?: Array<{
+      activityMonth?: string;
+      amount: number;
+      externalRefId: string;
+      rowNumber?: number;
+      settledDate?: string;
+      type?: string;
+    }>;
     pickupBasisAmount?: number;
     pickupCommissionAmount?: number;
     refundCount?: number;
@@ -328,6 +339,7 @@ export type UploadReceipt = {
   detectedFormatKey?: string;
   detectedFormatName?: string;
   expectedColumns?: number;
+  evidenceMonth?: string;
   fileName: string;
   hashValue?: string;
   locationId: string;

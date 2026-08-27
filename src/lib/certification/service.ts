@@ -72,6 +72,49 @@ type PersistedUploadValidation = {
   vendorName?: string;
 };
 
+function addCalendarMonth(month: string, offset: number) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const date = new Date(Date.UTC(year, monthNumber - 1 + offset, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function mergeM01PayoutValidations(validations: PersistedUploadValidation[]) {
+  const monthlyMetrics: NonNullable<NonNullable<IntakeState["metrics"]>["monthlyMetrics"]> = {};
+  const payoutRows = new Map<string, NonNullable<NonNullable<IntakeState["metrics"]>["payoutReferenceRows"]>[number]>();
+  let basisAmount = 0;
+  let payoutAmount = 0;
+  let transactionCount = 0;
+
+  for (const validation of validations) {
+    const metrics = validation.metrics;
+    basisAmount += metrics?.basisAmount ?? 0;
+    payoutAmount += metrics?.payoutAmount ?? 0;
+    transactionCount += metrics?.transactionCount ?? 0;
+    for (const [month, values] of Object.entries(metrics?.monthlyMetrics ?? {})) {
+      const current = monthlyMetrics[month] ?? {};
+      monthlyMetrics[month] = Object.fromEntries(
+        new Set([...Object.keys(current), ...Object.keys(values)]).values().map((key) => [
+          key,
+          Number(current[key as keyof typeof current] ?? 0) + Number(values[key as keyof typeof values] ?? 0),
+        ]),
+      );
+    }
+    for (const row of metrics?.payoutReferenceRows ?? []) {
+      payoutRows.set(`${row.externalRefId}:${row.activityMonth ?? ""}`, row);
+    }
+  }
+
+  return {
+    metrics: {
+      basisAmount,
+      monthlyMetrics,
+      payoutAmount,
+      payoutReferenceRows: [...payoutRows.values()],
+      transactionCount,
+    } satisfies IntakeState["metrics"],
+  };
+}
+
 type CertificationExecutionResult = {
   certification: CertificationResult;
   generatedCaarId: number;
@@ -308,7 +351,7 @@ function deriveSystemHealthState({
   schemaRows,
   uploadRows,
 }: {
-  cadence: "monthly_final" | "weekly_preliminary";
+  cadence: "monthly_final" | "monthly_preliminary";
   certification: CertificationResult;
   contractRows: Array<{ id: number; module: string; sealed_at: Date | null; sha256: string }>;
   evaluationDate: Date;
@@ -369,7 +412,7 @@ function deriveSystemHealthState({
     status: parserStale ? "WARN" : "PASS",
   });
 
-  const ruleVersionMatch = certification.ruleSetVersion === (cadence === "weekly_preliminary" ? "mge-v1.0.0-weekly" : "mge-v1.0.0");
+  const ruleVersionMatch = certification.ruleSetVersion === (cadence === "monthly_preliminary" ? "mge-v1.0.0-monthly-prelim" : "mge-v1.0.0");
   events.push({
     detail: ruleVersionMatch
       ? `Certification executed against the locked governed rule set ${certification.ruleSetVersion}.`
@@ -647,7 +690,7 @@ export async function executePersistedCertification({
   session,
   vendorKey,
 }: {
-  cadence?: "monthly_final" | "weekly_preliminary";
+  cadence?: "monthly_final" | "monthly_preliminary";
   certificationMonth: string;
   locationId: string;
   modules?: Array<"M01" | "M02" | "M03">;
@@ -685,6 +728,8 @@ export async function executePersistedCertification({
       orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
       select: {
         artifact_key: true,
+        evidence_month: true,
+        file_name: true,
         id: true,
         location_id: true,
         module: true,
@@ -800,9 +845,26 @@ export async function executePersistedCertification({
     !certificationVendor ||
     (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "") ===
       certificationVendor.replace(/[^a-z0-9]/g, "");
-  const scopedUploadRows = uploadRows.filter(
-    (row) => row.module !== "M02" || vendorMatches(row.vendor),
-  );
+  const followingMonth = addCalendarMonth(certificationMonth, 1);
+  const scopedUploadRows = uploadRows.filter((row) => {
+    if (row.module === "M02" && !vendorMatches(row.vendor)) return false;
+    if (row.artifact_key.includes("agreement")) return true;
+    if (row.module === "M01" && row.artifact_key.startsWith("m01-pos")) {
+      return row.evidence_month === certificationMonth || row.evidence_month === followingMonth;
+    }
+    return row.evidence_month === certificationMonth;
+  });
+  if (requestedModules[0] === "M01" && cadence === "monthly_final") {
+    const payoutMonths = new Set(scopedUploadRows
+      .filter((row) => row.module === "M01" && row.artifact_key.startsWith("m01-pos"))
+      .map((row) => row.evidence_month));
+    const missingMonths = [certificationMonth, followingMonth].filter((month) => !payoutMonths.has(month));
+    if (missingMonths.length > 0) {
+      throw new Error(
+        `M01 final certification for ${certificationMonth} requires payout exports uploaded for ${certificationMonth} and ${followingMonth}. Missing: ${missingMonths.join(", ")}. Run a pre-certification until the next-month payout file is available.`,
+      );
+    }
+  }
   const scopedSchemaRows = schemaRows.filter(
     (row) => row.module !== "M02" || vendorMatches(row.vendor),
   );
@@ -817,7 +879,10 @@ export async function executePersistedCertification({
   });
 
   const artifactIntakeState: Record<string, IntakeState> = {};
-  for (const upload of uploadRows) {
+  const m01PayoutUploads = scopedUploadRows.filter(
+    (upload) => upload.module === "M01" && upload.artifact_key.startsWith("m01-pos"),
+  );
+  for (const upload of scopedUploadRows.filter((row) => !m01PayoutUploads.includes(row))) {
     const validation =
       upload.validation_summary && typeof upload.validation_summary === "object"
         ? (upload.validation_summary as unknown as PersistedUploadValidation)
@@ -855,7 +920,39 @@ export async function executePersistedCertification({
       vendorKey: validation.vendorKey ?? upload.vendor ?? undefined,
       vendorName: validation.vendorName ?? upload.vendor ?? undefined,
       pageCount: validation.pageCount,
+      evidenceMonth: upload.evidence_month ?? undefined,
     } as IntakeState;
+  }
+  if (m01PayoutUploads.length > 0) {
+    const first = m01PayoutUploads[0];
+    const validations = m01PayoutUploads
+      .map((upload) => upload.validation_summary && typeof upload.validation_summary === "object"
+        ? upload.validation_summary as unknown as PersistedUploadValidation
+        : null)
+      .filter((validation): validation is PersistedUploadValidation => Boolean(validation));
+    const merged = mergeM01PayoutValidations(validations);
+    const detectedPayout = validations.find((validation) =>
+      validation.detectedFormatKey?.toLowerCase().includes("payout"),
+    ) ?? validations[0];
+    artifactIntakeState[getArtifactStateKey(
+      restaurant.accountId,
+      restaurant.locationId,
+      "M01",
+      first.artifact_key,
+      first.vendor,
+    )] = {
+      detectedFormatKey: detectedPayout?.detectedFormatKey,
+      detectedFormatName: detectedPayout?.detectedFormatName,
+      evidenceMonth: `${certificationMonth}+${followingMonth}`,
+      fields: validations.every((validation) => Boolean(validation.fields)),
+      fileName: m01PayoutUploads.map((upload) => `${upload.evidence_month}: ${upload.file_name}`).join("; "),
+      hash: validations.every((validation) => Boolean(validation.hash ?? validation.hashValue)),
+      metrics: merged.metrics,
+      schema: validations.every((validation) => Boolean(validation.schema)),
+      uploaded: true,
+      vendorKey: first.vendor ?? undefined,
+      vendorName: first.vendor ?? undefined,
+    };
   }
 
   const artifactContractState: Record<string, Record<string, string>> = {};
@@ -893,7 +990,7 @@ export async function executePersistedCertification({
   const vendorToken = certificationVendor
     ? `-${certificationVendor.replace(/[^0-9a-z]/gi, "").toUpperCase()}`
     : "";
-  const cadenceToken = cadence === "weekly_preliminary" ? "-WEEKLY" : "";
+  const cadenceToken = cadence === "monthly_preliminary" ? "-PRELIMINARY" : "";
   const caarExternalId =
     `CAAR-${periodToken}-${restaurant.locationId.replace(/[^0-9A-Za-z]/g, "")}-${requestedModules[0]}${vendorToken}${cadenceToken}`;
   const historicalSnapshots = buildHistoricalSnapshots(historicalRunsRaw, historicalCitations);
@@ -920,7 +1017,7 @@ export async function executePersistedCertification({
           ? restaurant.status
           : "Onboarding",
     } satisfies LocationRecord,
-    period: cadence === "weekly_preliminary" ? `${period} (Weekly Preliminary)` : period,
+    period: cadence === "monthly_preliminary" ? `${period} (Monthly Preliminary)` : period,
     recordId: caarExternalId,
     runAt: evaluationDate,
     scopeModules: requestedModules,
@@ -977,7 +1074,7 @@ export async function executePersistedCertification({
           ? restaurant.status
           : "Onboarding",
     } satisfies LocationRecord,
-    period: cadence === "weekly_preliminary" ? `${period} (Weekly Preliminary)` : period,
+    period: cadence === "monthly_preliminary" ? `${period} (Monthly Preliminary)` : period,
     recordId: caarExternalId,
     runAt: evaluationDate,
     scopeModules: requestedModules,
@@ -1097,8 +1194,8 @@ export async function executePersistedCertification({
           completed_at: new Date(),
           contract_config_id: contract.id,
           error_message:
-            cadence === "weekly_preliminary"
-              ? `Weekly preliminary run. ${assessment.findings.join(" ")}`
+            cadence === "monthly_preliminary"
+              ? `Monthly preliminary run. ${assessment.findings.join(" ")}`
               : assessment.ready
                 ? null
                 : assessment.findings.join(" "),
@@ -1110,7 +1207,7 @@ export async function executePersistedCertification({
           schema_registry_ids: toJsonValue(moduleSchemaIds),
           started_at: new Date(),
           status:
-            cadence === "weekly_preliminary"
+            cadence === "monthly_preliminary"
               ? "completed"
               : assessment.ready
                 ? "completed"

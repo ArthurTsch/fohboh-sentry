@@ -114,7 +114,7 @@ export type WorkflowGovernanceSummary = {
 export type CertificationResult = {
   assessments: ModuleAssessment[];
   amountValue: number;
-  cadence: "monthly_final" | "weekly_preliminary";
+  cadence: "monthly_final" | "monthly_preliminary";
   crossModule: CrossModuleSummary;
   loopB: LoopBResult;
   overallSystemHealth: SystemHealthResult;
@@ -215,7 +215,7 @@ export function buildCertificationResult({
 }: {
   artifactContractState: ContractState;
   artifactIntakeState: Record<string, IntakeState>;
-  cadence?: "monthly_final" | "weekly_preliminary";
+  cadence?: "monthly_final" | "monthly_preliminary";
   history?: HistoricalCertificationSnapshot[];
   location: LocationRecord;
   period?: string;
@@ -346,8 +346,8 @@ export function buildCertificationResult({
   );
   const evidenceNote = ready
     ? "Evidence package is fully authenticated, governed, and certification-ready."
-    : cadence === "weekly_preliminary"
-      ? "Weekly preliminary run completed. Final bank-reconciliation evidence is deferred until the monthly final."
+    : cadence === "monthly_preliminary"
+      ? "Monthly preliminary run completed. Following-month and final bank-reconciliation evidence remain deferred."
       : "Evidence package still has unresolved authenticity, completeness, or reconciliation gaps.";
   upsertEvidenceModule(updatedModules, evidenceScore, evidenceNote);
   const workflow = buildWorkflowGovernanceSummary({
@@ -403,7 +403,7 @@ function buildOverallCanonicalRuleCitations({
   workflow,
 }: {
   activeModules: ModuleAssessment[];
-  cadence: "monthly_final" | "weekly_preliminary";
+  cadence: "monthly_final" | "monthly_preliminary";
   crossModule: CrossModuleSummary;
   loopB: LoopBResult;
   overallSystemHealth: SystemHealthResult;
@@ -1001,7 +1001,7 @@ function assessModule({
   accountId: string;
   artifactContractState: ContractState;
   artifactIntakeState: Record<string, IntakeState>;
-  cadence: "monthly_final" | "weekly_preliminary";
+  cadence: "monthly_final" | "monthly_preliminary";
   certificationMonth: string;
   evaluationDate: Date;
   locationId: string;
@@ -1153,7 +1153,7 @@ function resolveContractValues(
 function buildNarrative(
   locationName: string,
   modules: ModuleAssessment[],
-  cadence: "monthly_final" | "weekly_preliminary",
+  cadence: "monthly_final" | "monthly_preliminary",
   trustScore: number,
   ready: boolean,
 ) {
@@ -1167,8 +1167,8 @@ function buildNarrative(
   if (ready) {
     return `${locationName} completed the certification pipeline successfully. ${moduleSummary}. The evidence package is sufficient for certified release at Trust Score ${trustScore}.`;
   }
-  if (cadence === "weekly_preliminary") {
-    return `${locationName} completed a weekly preliminary certification. ${moduleSummary}. Bank-reconciliation proof is deferred until the monthly final cadence, so this output remains preliminary by design.`;
+  if (cadence === "monthly_preliminary") {
+    return `${locationName} completed a monthly preliminary certification. ${moduleSummary}. Following-month evidence and final bank-reconciliation proof remain deferred, so this output is preliminary by design.`;
   }
   return `${locationName} completed deterministic certification analysis but remains below the final release threshold. ${moduleSummary}. Remediation is still required before external delivery.`;
 }
@@ -1176,7 +1176,7 @@ function buildNarrative(
 function buildOverallFindings(
   locationName: string,
   modules: ModuleAssessment[],
-  cadence: "monthly_final" | "weekly_preliminary",
+  cadence: "monthly_final" | "monthly_preliminary",
   ready: boolean,
   amountValue: number,
 ) {
@@ -1190,9 +1190,9 @@ function buildOverallFindings(
     findings.unshift(
       `Certification run cleared all deterministic evidence and reconciliation gates for ${locationName}.`,
     );
-  } else if (cadence === "weekly_preliminary") {
+  } else if (cadence === "monthly_preliminary") {
     findings.unshift(
-      `Weekly preliminary certification for ${locationName} completed without the final bank-statement gate. This output is intended for early detection, not final external release.`,
+      `Monthly preliminary certification for ${locationName} completed without the final bank-statement gate. This output is intended for early detection, not final external release.`,
     );
   } else {
     findings.unshift(
@@ -1204,7 +1204,7 @@ function buildOverallFindings(
 
 function buildCertificationSteps(
   modules: ModuleAssessment[],
-  cadence: "monthly_final" | "weekly_preliminary",
+  cadence: "monthly_final" | "monthly_preliminary",
   ready: boolean,
 ): CertificationStep[] {
   const completeness = round(
@@ -1234,16 +1234,16 @@ function buildCertificationSteps(
     },
     {
       detail:
-        cadence === "weekly_preliminary"
+        cadence === "monthly_preliminary"
           ? `${reconciliation}% reconciliation confidence across source and POS evidence. Final bank tie-out is deferred.`
           : `${reconciliation}% reconciliation confidence across source, POS, and bank evidence.`,
-      done: reconciliation >= (cadence === "weekly_preliminary" ? 66 : 85),
+      done: reconciliation >= (cadence === "monthly_preliminary" ? 66 : 85),
       label: "Execute Loop A",
     },
     {
       detail: ready
         ? "Release threshold met and CAAR was generated."
-        : cadence === "weekly_preliminary"
+        : cadence === "monthly_preliminary"
           ? "Preliminary run completed. Monthly Final is still required for certified release."
           : "Run completed, but release remains blocked until missing controls are resolved.",
       done: ready,
@@ -1476,7 +1476,7 @@ function buildLoopBResult({
   history,
   trustScore,
 }: {
-  cadence: "monthly_final" | "weekly_preliminary";
+  cadence: "monthly_final" | "monthly_preliminary";
   currentPeriod: string;
   currentModules: ModuleAssessment[];
   history: HistoricalCertificationSnapshot[];

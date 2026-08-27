@@ -145,6 +145,7 @@ export function SentryViewRouter({
     artifactKey: string,
     file: File,
     vendor?: { key: string; name: string },
+    evidenceMonth?: string,
   ) => Promise<UploadReceipt | null>;
   onGoToTeamAccess: () => void;
   onRemoveUpload: (

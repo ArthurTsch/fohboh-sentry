@@ -248,6 +248,7 @@ model uploads_v2 {
   uploaded_at         DateTime?             @default(now()) @db.Timestamptz(6)
   superseded_by       Int?
   artifact_key        String                @db.VarChar(100)
+  evidence_month      String?               @db.Char(7)
   validation_summary  Json?
   contract_configs_v2 contract_configs_v2[]
   schema_registry_v2  schema_registry_v2[]
@@ -258,6 +259,7 @@ model uploads_v2 {
 
   @@index([location_id, module], map: "idx_uploads_v2_location_module")
   @@index([location_id, module, artifact_key], map: "idx_uploads_v2_location_module_artifact")
+  @@index([location_id, module, artifact_key, evidence_month], map: "idx_uploads_v2_monthly_artifact")
   @@index([sha256], map: "idx_uploads_v2_sha256")
   @@map("uploads_v2")
 }

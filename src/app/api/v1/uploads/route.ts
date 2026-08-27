@@ -203,6 +203,7 @@ function buildUploadResponse({
   artifactKey,
   accountId,
   id,
+  evidenceMonth,
   locationId,
   locationName,
   moduleId,
@@ -211,6 +212,7 @@ function buildUploadResponse({
   artifactKey: string;
   accountId: string | null;
   id: number;
+  evidenceMonth?: string | null;
   locationId: string;
   locationName: string;
   moduleId: "M01" | "M02";
@@ -222,6 +224,7 @@ function buildUploadResponse({
     detectedFormatKey: validation.detectedFormatKey,
     detectedFormatName: validation.detectedFormatName,
     expectedColumns: validation.expectedColumns,
+    evidenceMonth: evidenceMonth ?? undefined,
     fields: validation.fields,
     fileName: validation.fileName,
     hashValue: validation.hashValue.slice(0, 12),
@@ -266,9 +269,10 @@ export async function GET() {
         },
         superseded_by: null,
       },
-      orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
+      orderBy: [{ uploaded_at: "asc" }, { id: "asc" }],
       select: {
         artifact_key: true,
+        evidence_month: true,
         file_name: true,
         id: true,
         location_id: true,
@@ -293,6 +297,7 @@ export async function GET() {
             artifactKey: upload.artifact_key,
             accountId: restaurant.account_id,
             id: upload.id,
+            evidenceMonth: upload.evidence_month,
             locationId: restaurant.location_id,
             locationName: restaurant.name,
             moduleId: upload.module as "M01" | "M02",
@@ -388,6 +393,8 @@ export async function POST(request: Request) {
     const locationId = String(formData.get("locationId") ?? "").trim();
     const moduleId = String(formData.get("moduleId") ?? "").trim() as "M01" | "M02";
     const artifactKey = String(formData.get("artifactKey") ?? "").trim();
+    const requestedEvidenceMonth = String(formData.get("evidenceMonth") ?? "").trim();
+    const evidenceMonth = artifactKey.includes("agreement") ? null : requestedEvidenceMonth;
     const vendorKey = String(formData.get("vendorKey") ?? "").trim() || null;
     const vendorName = String(formData.get("vendorName") ?? "").trim() || null;
 
@@ -445,6 +452,12 @@ export async function POST(request: Request) {
       return withRequestHeaders(NextResponse.json(
         { error: "Upload target could not be resolved for this location." },
         { status: 404 },
+      ), requestContext);
+    }
+    if (!artifactKey.includes("agreement") && !/^\d{4}-(0[1-9]|1[0-2])$/.test(evidenceMonth ?? "")) {
+      return withRequestHeaders(NextResponse.json(
+        { error: "Select the reporting month represented by this evidence file." },
+        { status: 400 },
       ), requestContext);
     }
     if (!restaurant.account_id) {
@@ -531,6 +544,7 @@ export async function POST(request: Request) {
         const existing = await tx.uploads_v2.findFirst({
           where: {
             artifact_key: target.artifactKey,
+            evidence_month: evidenceMonth,
             location_id: normalizedLocationId,
             module: target.moduleId,
             superseded_by: null,
@@ -543,6 +557,7 @@ export async function POST(request: Request) {
           data: {
             artifact_key: target.artifactKey,
             byte_count: BigInt(buffer.byteLength),
+            evidence_month: evidenceMonth,
             file_name: file.name,
             file_purpose: getArtifactPurpose(target.artifactKey),
             location_id: normalizedLocationId,
@@ -575,6 +590,7 @@ export async function POST(request: Request) {
         locationId: normalizedLocationId,
         metadata: {
           artifactKey,
+          evidenceMonth,
           evidenceLinks: validatedTargets.length,
           fileName: file.name,
           moduleId,
@@ -598,6 +614,7 @@ export async function POST(request: Request) {
       artifactKey: target.artifactKey,
       id: created[index].id,
       accountId: restaurant.account_id,
+      evidenceMonth,
       locationId: restaurant.location_id,
       locationName: restaurant.name,
       moduleId: target.moduleId,

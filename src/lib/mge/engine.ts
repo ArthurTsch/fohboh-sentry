@@ -11,7 +11,7 @@ import {
 } from "./values";
 
 type ModuleId = "M01" | "M02" | "M03";
-type Cadence = "monthly_final" | "weekly_preliminary";
+type Cadence = "monthly_final" | "monthly_preliminary";
 
 type Metrics = {
   adjustmentAmount?: number;
@@ -328,7 +328,8 @@ const M01_RULES: DeterministicRule[] = [
       const statement = context.statement?.metrics;
       const contract = context.contract;
       if (!statement || !contract || residualVariance <= 1) return null;
-      const expectedTotal = computeExpectedM01Fees(statement, contract);
+      const feeMetrics = resolveM01FeeCalculationMetrics(context);
+      const expectedTotal = computeExpectedM01Fees(feeMetrics, contract);
       const actualFees = resolveM01ComparableFee(statement);
       const markupVariance = Math.max(0, actualFees - expectedTotal);
       if (markupVariance <= 1) return null;
@@ -352,7 +353,8 @@ const M01_RULES: DeterministicRule[] = [
       const contract = context.contract;
       if (!statement || !contract) return null;
       const actualFees = resolveM01ComparableFee(statement);
-      const expectedTotal = computeExpectedM01Fees(statement, contract);
+      const feeMetrics = resolveM01FeeCalculationMetrics(context);
+      const expectedTotal = computeExpectedM01Fees(feeMetrics, contract);
       const unexplained = roundCurrency(actualFees - expectedTotal);
       if (unexplained <= 1 || residualVariance <= 1) return null;
       const variance = Math.min(unexplained, residualVariance);
@@ -361,7 +363,7 @@ const M01_RULES: DeterministicRule[] = [
         firedCount: 1,
         ruleId: "MFR-BIL-15",
         ruleVersion: RULE_VERSION,
-        sampleEvidence: [buildM01FeeGapSample(statement, contract, actualFees, expectedTotal, variance)],
+        sampleEvidence: [buildM01FeeGapSample({ ...statement, ...feeMetrics }, contract, actualFees, expectedTotal, variance)],
         varianceCents: dollarsToCents(variance),
       };
     },
@@ -1433,7 +1435,7 @@ const M03_RULES: DeterministicRule[] = [
 ];
 
 export function getRuleSetVersion(cadence: Cadence) {
-  return cadence === "weekly_preliminary" ? "mge-v1.0.0-weekly-prelim" : RULE_VERSION;
+  return cadence === "monthly_preliminary" ? "mge-v1.0.0-monthly-prelim" : RULE_VERSION;
 }
 
 export function ruleAppliesToModule(ruleId: string, moduleId: "M01" | "M02" | "M03") {
@@ -1507,7 +1509,7 @@ export function runDeterministicModuleEngine(input: ModuleEngineInput): ModuleEn
 
   const recoveryValue = roundCurrency(
     input.moduleId === "M01"
-      ? computeM01Recovery(statement?.metrics, contract)
+      ? computeM01Recovery(statement?.metrics, pos?.metrics, contract)
       : input.moduleId === "M02"
         ? computeM02Recovery(statement?.metrics, pos?.metrics, contract)
         : computeM03Recovery(statement?.metrics, pos?.metrics, contract),
@@ -1664,17 +1666,17 @@ export function scopeArtifactToCertificationMonth(
     });
     return scoped;
   };
-  const m02PayoutRowsHaveActivityMonth =
-    artifact.key === "m02-settlement" &&
+  const payoutRowsHaveActivityMonth =
+    (artifact.key === "m01-pos" || artifact.key === "m02-settlement") &&
     Boolean(metrics.payoutReferenceRows?.some((row) => row.activityMonth));
   const retainLegacyM02PayoutRows =
     artifact.key === "m02-settlement" &&
-    !m02PayoutRowsHaveActivityMonth &&
+    !payoutRowsHaveActivityMonth &&
     detectedMonths.size === 1 &&
     detectedMonths.has(certificationMonth);
   const payoutReferenceRows = retainLegacyM02PayoutRows
     ? metrics.payoutReferenceRows
-    : scopeReferenceRows(metrics.payoutReferenceRows, m02PayoutRowsHaveActivityMonth);
+    : scopeReferenceRows(metrics.payoutReferenceRows, payoutRowsHaveActivityMonth);
   const depositReferenceRows = scopeReferenceRows(metrics.depositReferenceRows);
 
   if (metrics.payoutReferenceRows?.length) {
@@ -1683,7 +1685,7 @@ export function scopeArtifactToCertificationMonth(
       ...metrics,
       payoutReferenceRows,
       payoutAmount: amount,
-      ...(artifact.key.includes("pos") || artifact.key.includes("payout")
+      ...((artifact.key.includes("payout") || (artifact.key === "m01-pos" && !payoutRowsHaveActivityMonth))
         ? { basisAmount: amount, depositAmount: amount }
         : {}),
     };
@@ -1796,7 +1798,7 @@ function buildCanonicalGovernanceCitations({
   const hasStatement = Boolean(context.statement?.uploaded && context.statement.hash);
   const hasPos = Boolean(context.pos?.uploaded && context.pos.hash);
   const hasAgreement = Boolean(context.agreement?.uploaded && context.agreement.hash);
-  const hasBank = context.cadence === "weekly_preliminary"
+  const hasBank = context.cadence === "monthly_preliminary"
     ? true
     : Boolean(context.bank?.uploaded && context.bank.hash);
   const periodComplete = hasStatement && hasPos && hasAgreement && hasBank;
@@ -2170,7 +2172,7 @@ function buildCanonicalIngestionCitations(context: RuleContext) {
     }),
     buildNarrativeCitation("R015", {
       detail:
-        statement?.uploaded && pos?.uploaded && agreement?.uploaded && (context.cadence === "weekly_preliminary" || bank?.uploaded)
+        statement?.uploaded && pos?.uploaded && agreement?.uploaded && (context.cadence === "monthly_preliminary" || bank?.uploaded)
           ? "Normalization completed and the full active package advanced into deterministic certification."
           : "Normalization is not yet complete because one or more governed artifacts are still missing.",
       agreement_uploaded: Boolean(agreement?.uploaded),
@@ -2213,8 +2215,10 @@ function buildCanonicalTrustGateCitations({
     "R091",
   ]);
   const narrativeReady = trustGates.TG08.scorePct >= 100 && trustGates.TG09.scorePct >= 100;
-  const processorBasis = resolveReconciliationStatementBasis(context);
+  const statementProcessingVolume = resolveReconciliationStatementBasis(context);
   const posBasis = numberValue(context.pos?.metrics?.basisAmount);
+  const settlementTimingBasis = usesSettlementTimingBasis(context);
+  const processorBasis = settlementTimingBasis && posBasis > 0 ? posBasis : statementProcessingVolume;
   const reconciliationDifference = Math.abs(processorBasis - posBasis);
   const reconciliationDifferencePct = processorBasis > 0
     ? (reconciliationDifference / processorBasis) * 100
@@ -2230,7 +2234,6 @@ function buildCanonicalTrustGateCitations({
     dspOrderCount > 0 && posCertifiedOrderCount > 0
       ? relativeDelta(dspOrderCount, posCertifiedOrderCount) * 100
       : null;
-  const settlementTimingBasis = usesSettlementTimingBasis(context);
   const reconciliationEvaluable = context.moduleId === "M02"
     ? dspOrderCount > 0 && posCertifiedOrderCount > 0
     : settlementTimingBasis || (processorBasis > 0 && posBasis > 0);
@@ -2293,7 +2296,11 @@ function buildCanonicalTrustGateCitations({
           }
         : {}),
       processor_basis: roundCurrency(processorBasis),
-      processor_basis_label: "Gross card-processing volume grouped by fee-charge timing",
+      processor_basis_label: settlementTimingBasis
+        ? "Strict certification-month activity basis"
+        : "Processor source basis",
+      statement_processing_volume: roundCurrency(statementProcessingVolume),
+      statement_processing_volume_label: "Broad Toast statement processing volume retained as timing context",
       settlement_basis_label: settlementTimingBasis
         ? "Gross settled batches grouped by settlement date"
         : "Independent POS transaction basis",
@@ -2504,7 +2511,7 @@ function computeTrustGateScores({
   const statementPresent = Boolean(context.statement?.uploaded);
   const posPresent = Boolean(context.pos?.uploaded);
   const agreementPresent = Boolean(context.agreement?.uploaded);
-  const bankPresent = cadence === "weekly_preliminary" ? true : Boolean(context.bank?.uploaded);
+  const bankPresent = cadence === "monthly_preliminary" ? true : Boolean(context.bank?.uploaded);
   const coreSourcePackagePresent = statementPresent && posPresent && agreementPresent;
   const coreStructuredPackageReady =
     artifactSatisfiesCompleteness(context, context.statement ?? null) &&
@@ -2514,7 +2521,7 @@ function computeTrustGateScores({
   const allRequiredArtifactsGoverned =
     artifactSatisfiesCompleteness(context, context.statement ?? null) &&
     artifactSatisfiesCompleteness(context, context.pos ?? null) &&
-    (cadence === "weekly_preliminary" || artifactSatisfiesCompleteness(context, context.bank ?? null)) &&
+    (cadence === "monthly_preliminary" || artifactSatisfiesCompleteness(context, context.bank ?? null)) &&
     Boolean(agreementPresent && context.agreement?.hash) &&
     Boolean(context.contract && contractFieldCount(context.contract) >= 3);
   const periodCoverageFailed = [context.statement, context.pos, context.bank].some(
@@ -2612,7 +2619,7 @@ function computeTrustGateScores({
     "TG06",
     periodCoverageFailed
       ? 0
-      : cadence === "weekly_preliminary"
+      : cadence === "monthly_preliminary"
       ? Math.max(75, dimensions["Data Freshness"])
       : allRequiredArtifactsGoverned
         ? 100
@@ -2623,8 +2630,8 @@ function computeTrustGateScores({
             : 40,
     periodCoverageFailed
       ? "One or more evidence files contain no dated rows for the active certification month. Out-of-period and undated rows were excluded."
-      : cadence === "weekly_preliminary"
-      ? "Weekly preliminary coverage is accepted without the final bank evidence gate."
+      : cadence === "monthly_preliminary"
+      ? "Monthly preliminary coverage is accepted without the final bank evidence gate."
       : allRequiredArtifactsGoverned
         ? "All required monthly-final artifacts, including governed bank evidence, cover the active period."
         : allRequiredArtifactsPresent
@@ -2842,7 +2849,7 @@ function scoreDataCompleteness(context: RuleContext): Mq6Score {
   const posComplete = context.pos ? artifactSatisfiesCompleteness(context, context.pos) : false;
   const bankRequired = moduleRequiresBank(context);
   const bankComplete =
-    !bankRequired || context.cadence === "weekly_preliminary"
+    !bankRequired || context.cadence === "monthly_preliminary"
       ? true
       : context.bank
         ? artifactSatisfiesCompleteness(context, context.bank)
@@ -2927,8 +2934,8 @@ function scoreSourceAuthenticity(context: RuleContext): Mq6Score {
         ? "bank statement verified"
         : "bank statement missing or unverified"
       : bankEvidence
-        ? "weekly preliminary source evidence verified"
-        : "weekly preliminary source evidence incomplete",
+        ? "monthly preliminary source evidence verified"
+        : "monthly preliminary source evidence incomplete",
   ];
 
   return scoreDetail(score, detailParts.join("; "));
@@ -3012,9 +3019,9 @@ function resolveCrossSystemReconciliationBreakdown(context: RuleContext) {
   if (!bankRequired) {
     bankContribution = 50;
     detailParts.push("No governed bank tie-out is required for the active royalty module.");
-  } else if (context.cadence === "weekly_preliminary") {
+  } else if (context.cadence === "monthly_preliminary") {
     bankContribution = 50;
-    detailParts.push("Monthly bank tie-out deferred by weekly preliminary cadence.");
+    detailParts.push("Monthly bank tie-out deferred by monthly preliminary cadence.");
   } else if (statementGoverned && bankGoverned && bankDeposit > 0 && payoutAmount > 0) {
     const delta = relativeDelta(bankDeposit, payoutAmount);
     if (delta <= 0.05) {
@@ -3283,11 +3290,12 @@ function evaluateVolumeTierRule(
   const statement = context.statement?.metrics;
   const contract = context.contract;
   if (!statement || !contract || residualVariance <= 1) return null;
-  const basisAmount = numberValue(statement.basisAmount);
+  const feeMetrics = resolveM01FeeCalculationMetrics(context);
+  const basisAmount = numberValue(feeMetrics.basisAmount);
   const actualFees = numberValue(statement.feeAmount);
   const pricingModel = String(contract.pricing_model ?? contract.contract_type ?? "").toLowerCase();
   if (basisAmount <= 0 || actualFees <= 0 || !pricingModel.includes("tier")) return null;
-  const expectedTotal = computeExpectedM01Fees(statement, contract);
+  const expectedTotal = computeExpectedM01Fees(feeMetrics, contract);
   const excess = actualFees - expectedTotal;
   if (excess <= basisAmount * basisThresholdPct) return null;
   const variance = Math.min(roundCurrency(excess * residualShare), residualVariance);
@@ -3400,8 +3408,9 @@ function buildSupplementalM01CanonicalCitations(
 
   const vendor = resolveVendorName(context);
   const actualFees = resolveM01ComparableFee(statement);
-  const basisAmount = numberValue(statement.basisAmount);
-  const expectedFees = computeExpectedM01Fees(statement, contract);
+  const feeMetrics = resolveM01FeeCalculationMetrics(context);
+  const basisAmount = numberValue(feeMetrics.basisAmount);
+  const expectedFees = computeExpectedM01Fees(feeMetrics, contract);
   const posBasis = numberValue(context.pos?.metrics?.basisAmount);
   const debitVolume = numberValue(statement.visaDebitAmount) + numberValue(statement.mcDebitAmount);
   const duplicateTxnCount = numberValue(statement.duplicateTransactionCount);
@@ -3420,7 +3429,7 @@ function buildSupplementalM01CanonicalCitations(
   if (basisAmount > 0 && actualFees > 0) {
     citations.push(buildNarrativeCitation("R002", {
       ...buildM01FeeGapSample(
-        statement,
+        { ...statement, ...feeMetrics },
         contract,
         actualFees,
         expectedFees,
@@ -3844,7 +3853,7 @@ function artifactSatisfiesCompleteness(
   if (artifact.type === "CSV") {
     return artifact.uploaded && artifact.hash && artifact.schema && artifact.fields;
   }
-  if (artifact.key.includes("bank") && context.cadence === "weekly_preliminary") {
+  if (artifact.key.includes("bank") && context.cadence === "monthly_preliminary") {
     return true;
   }
   return artifact.uploaded && artifact.hash;
@@ -3868,6 +3877,18 @@ function computeExpectedM01Fees(metrics: Metrics, contract: Record<string, strin
   return roundCurrency(
     interchangeFees + basisAmount * (markupBps / 10000) + (transactionCount * txnFee) + monthlyFee,
   );
+}
+
+function resolveM01FeeCalculationMetrics(context: RuleContext): Metrics {
+  const statement = context.statement?.metrics ?? {};
+  const payout = context.pos?.metrics;
+  if (!payout) return statement;
+  return {
+    ...statement,
+    basisAmount: numberValue(payout.basisAmount),
+    payoutAmount: numberValue(payout.payoutAmount),
+    transactionCount: numberValue(payout.transactionCount),
+  };
 }
 
 function resolveM01ComparableFee(metrics?: Metrics) {
@@ -3951,9 +3972,17 @@ function computeCardBrandFee(amount: number, ratePct: number, fixedCents: number
   return roundCurrency(amount * (ratePct / 100) + (fixedCents / 100));
 }
 
-function computeM01Recovery(metrics?: Metrics, contract?: Record<string, string> | null) {
-  if (!metrics || !contract) return 0;
-  return Math.max(0, roundCurrency(resolveM01ComparableFee(metrics) - computeExpectedM01Fees(metrics, contract)));
+function computeM01Recovery(statement?: Metrics, payout?: Metrics, contract?: Record<string, string> | null) {
+  if (!statement || !contract) return 0;
+  const feeMetrics: Metrics = payout
+    ? {
+        ...statement,
+        basisAmount: numberValue(payout.basisAmount),
+        payoutAmount: numberValue(payout.payoutAmount),
+        transactionCount: numberValue(payout.transactionCount),
+      }
+    : statement;
+  return Math.max(0, roundCurrency(resolveM01ComparableFee(statement) - computeExpectedM01Fees(feeMetrics, contract)));
 }
 
 function computeExpectedM02Rate(contract: Record<string, string>, statement?: Metrics) {

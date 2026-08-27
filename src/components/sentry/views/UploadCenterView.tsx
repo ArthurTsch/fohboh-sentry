@@ -117,6 +117,7 @@ export function UploadCenterView({
     artifactKey: string,
     file: File,
     vendor?: { key: string; name: string },
+    evidenceMonth?: string,
   ) => Promise<UploadReceipt | null>;
   onOpenLocationDashboard: (locationId: string) => void;
   onRemoveUpload: (
@@ -130,6 +131,7 @@ export function UploadCenterView({
   uploadFeedback: UploadReceipt | null;
 }) {
   const [activeModule, setActiveModule] = useState<"M01" | "M02">("M01");
+  const [evidenceMonth, setEvidenceMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [cardState, setCardState] = useState<Record<string, UploadCardState>>({});
   const [pendingUpload, setPendingUpload] = useState<{
     moduleId: "M01" | "M02";
@@ -370,8 +372,8 @@ export function UploadCenterView({
 
       for (const vendor of vendors) {
         requiredArtifactKeys.forEach((artifactKey, index) => {
-          const stateKey = `${uploadModule.accountId}:${activeLocationId}:${moduleId}:${artifactKey}:${vendor.key}`;
-          const intake = intakeState[stateKey];
+          const baseStateKey = `${uploadModule.accountId}:${activeLocationId}:${moduleId}:${artifactKey}:${vendor.key}`;
+          const intake = intakeState[artifactKey.includes("agreement") ? baseStateKey : `${baseStateKey}:${evidenceMonth}`];
           summaryRows.push({
             key: `${moduleId}:${vendor.key}:${artifactKey}`,
             label: `${moduleId} | ${vendor.name} | ${artifactLabels[index]}`,
@@ -390,7 +392,7 @@ export function UploadCenterView({
       totalCount: summaryRows.length,
       uploadedCount,
     };
-  }, [activeLocationId, activeModule, activeSourceConfig, intakeState, modules]);
+  }, [activeLocationId, activeModule, activeSourceConfig, evidenceMonth, intakeState, modules]);
   const activeModuleVaultLocked =
     visibleVendors.length > 0 &&
     visibleVendors.every((vendor) => !isVaultSealedForProvider(activeModule, vendor));
@@ -430,7 +432,7 @@ export function UploadCenterView({
     }));
 
     try {
-      const receipt = await onDirectUpload(target.moduleId, target.artifactKey, file, target.vendor);
+      const receipt = await onDirectUpload(target.moduleId, target.artifactKey, file, target.vendor, evidenceMonth);
 
       if (!receipt) {
         setCardState((current) => ({
@@ -472,7 +474,7 @@ export function UploadCenterView({
         locationName={activeLocationName ?? "No location selected"}
         moduleId={activeModule}
         providerName={activeVendorNameHint}
-        period="Current evidence period"
+        period={`Evidence month ${formatEvidenceMonth(evidenceMonth)}`}
       />
       <div className="rounded-[24px] border border-[var(--border)] bg-white shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
       <input
@@ -523,6 +525,19 @@ export function UploadCenterView({
             </ActionNotice>
           </div>
         ) : null}
+      </div>
+      <div className="border-b border-[var(--border)] bg-[var(--surface)] px-5 py-4">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">Evidence month</div>
+            <div className="mt-1 text-sm text-[var(--muted)]">Choose the month shown by the source report before uploading. Monthly files are kept separately.</div>
+          </div>
+          <label className="grid gap-2">
+            <span className="sr-only">Evidence month</span>
+            <input type="month" value={evidenceMonth} onChange={(event) => setEvidenceMonth(event.target.value)} className="rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm font-semibold" />
+          </label>
+        </div>
+        {activeModule === "M01" ? <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">A final M01 certification uses the selected certification month plus the following month’s payout export. Example: June final requires June and July payout files, but only rows with June sales-period dates are calculated.</div> : null}
       </div>
 
       <div className="border-b border-[var(--border)] bg-[var(--surface)] px-5 py-4">
@@ -678,10 +693,11 @@ export function UploadCenterView({
             ? cardState[getCardKey(activeModule, bankArtifactKey, vendor.key)]
             : undefined;
           const intakeFor = (artifactKey: string) => {
-            const stateKey = activeUploadModule && activeLocationId
+            const baseStateKey = activeUploadModule && activeLocationId
               ? `${activeUploadModule.accountId}:${activeLocationId}:${activeModule}:${artifactKey}:${vendor.key}`
               : "";
-            return stateKey
+            const stateKey = artifactKey.includes("agreement") ? baseStateKey : `${baseStateKey}:${evidenceMonth}`;
+            return baseStateKey
               ? intakeState[stateKey] ?? { uploaded: false, hash: false, schema: false, fields: false }
               : { uploaded: false, hash: false, schema: false, fields: false };
           };
@@ -1886,6 +1902,13 @@ function downloadTemplate(vendorKey: string, module: "M01" | "M02", vendorName: 
 
 function normalizeProviderIdentity(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function formatEvidenceMonth(value: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(value);
+  if (!match) return value;
+  return new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC", year: "numeric" })
+    .format(new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1)));
 }
 
 function formatBytes(bytes: number) {

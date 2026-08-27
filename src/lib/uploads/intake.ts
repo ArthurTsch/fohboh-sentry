@@ -363,12 +363,14 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       return index >= 0 ? parseNumber(row[index]) : 0;
     };
     const readAbs = (...names: string[]) => Math.abs(read(...names));
-    const rowMonthKey = artifactKey === "m02-pos" || artifactKey === "m02-settlement"
+    const rowMonthKey = artifactKey === "m01-pos" || artifactKey === "m02-pos" || artifactKey === "m02-settlement"
       ? readMonthKey(
           row,
           valueFor(
             "business_day",
             "business day",
+            "sales_period_start",
+            "sales period start",
             "date",
             "business_date",
             "order_date",
@@ -400,7 +402,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "subtotal",
     );
     metrics.basisAmount += rowBasisAmount;
-    if (artifactKey === "m02-pos" && rowMonthKey) {
+    if ((artifactKey === "m01-pos" || artifactKey === "m02-pos") && rowMonthKey) {
         const bucket = monthlyMetrics[rowMonthKey] ?? {
           adjustmentAmount: 0,
           basisAmount: 0,
@@ -537,7 +539,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       "net total",
     );
     metrics.payoutAmount += payoutAmount;
-    if (artifactKey === "m02-settlement" && rowMonthKey) {
+    if ((artifactKey === "m01-pos" || artifactKey === "m02-settlement") && rowMonthKey) {
       const bucket = monthlyMetrics[rowMonthKey];
       bucket.adjustmentAmount += adjustmentAmount;
       bucket.deliveryFeeAmount += deliveryFeeAmount;
@@ -582,7 +584,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
       payoutAmount !== 0
     ) {
       metrics.payoutReferenceRows.push({
-        ...(artifactKey === "m02-settlement" && rowMonthKey
+        ...((artifactKey === "m01-pos" || artifactKey === "m02-settlement") && rowMonthKey
           ? { activityMonth: rowMonthKey }
           : {}),
         amount: roundTo2(payoutAmount),
@@ -740,7 +742,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
   metrics.orderCount =
     round(sumColumn(headers, rows, ["order_count", "menu_item_count", "order count"])) || rows.length;
 
-  if ((artifactKey === "m02-pos" || artifactKey === "m02-settlement") && Object.keys(monthlyMetrics).length > 0) {
+  if ((artifactKey === "m01-pos" || artifactKey === "m02-pos" || artifactKey === "m02-settlement") && Object.keys(monthlyMetrics).length > 0) {
     metrics.monthlyMetrics = Object.fromEntries(
       Object.entries(monthlyMetrics).map(([month, bucket]) => [month, {
         adjustmentAmount: roundTo2(bucket.adjustmentAmount),
@@ -920,7 +922,7 @@ function readMonthKey(row: string[], index: number) {
     return month >= 1 && month <= 12 ? `${yearFirst[1]}-${String(month).padStart(2, "0")}` : null;
   }
 
-  const monthFirst = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})/);
+  const monthFirst = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})/);
   if (monthFirst) {
     const month = Number(monthFirst[1]);
     const year = monthFirst[3].length === 2 ? 2000 + Number(monthFirst[3]) : Number(monthFirst[3]);

@@ -144,7 +144,7 @@ const m01Artifacts = [
     format: "CSV",
     source: "Restaurant POS / operating system",
     purpose:
-      "Restaurant-side comparison file used for cross-system reconciliation against the processor statement. The governed workspace now supports a sealed POS source-schema step where a representative sample export is uploaded, headers are extracted or entered manually, and the validated header set is sealed for recurring upload validation.",
+      "Toast payout export used for M01 fee basis, transaction count, and cross-system reconciliation. Uploads are stored by reporting month. A monthly-final certification combines the target-month and following-month payout exports, then includes only rows whose Sales period start belongs to the certification month. Payments supplies the pricing basis, # Txns supplies the transaction count, and Payout remains available for bank reconciliation. A pre-certification may run before following-month evidence arrives but cannot clear final release.",
   },
   {
     doc: "Signed Merchant Agreement",
@@ -357,7 +357,7 @@ const trustGates = [
   },
   {
     gate: "TG06",
-    detail: "Period coverage gate. Monthly final requires all governed artifacts, including bank evidence; weekly preliminary may proceed without the final bank gate.",
+    detail: "Period coverage gate. Monthly final requires all governed artifacts, including bank evidence; monthly preliminary may proceed without the final bank gate.",
   },
   {
     gate: "TG07",
@@ -503,7 +503,7 @@ const systemHealthRules: RuleGroup[] = [
 ];
 
 const releaseRules = [
-  "Certification can run weekly preliminary or monthly final.",
+  "Certification can run monthly preliminary or monthly final.",
   "Every request must include an explicit non-future certification month; the current date is never silently treated as the CAAR period.",
   "Each production run certifies exactly one module. M02 certifies exactly one selected delivery provider.",
   "Only monthly final can pass the complete Certified CAAR release gate.",

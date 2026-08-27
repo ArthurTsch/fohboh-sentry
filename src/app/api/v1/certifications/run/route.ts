@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     }
 
     const body = (await request.json()) as {
-      cadence?: "monthly_final" | "weekly_preliminary" | null;
+      cadence?: "monthly_final" | "monthly_preliminary" | "weekly_preliminary" | null;
       certificationMonth?: string | null;
       locationId?: string | null;
       modules?: Array<"M01" | "M02" | "M03"> | null;
@@ -67,7 +67,9 @@ export async function POST(request: Request) {
     };
     const locationId = body.locationId?.trim() ?? "";
     const cadence =
-      body.cadence === "weekly_preliminary" ? "weekly_preliminary" : "monthly_final";
+      body.cadence === "monthly_preliminary" || body.cadence === "weekly_preliminary"
+        ? "monthly_preliminary"
+        : "monthly_final";
     const certificationMonth = body.certificationMonth?.trim() ?? "";
     const modules = Array.isArray(body.modules)
       ? [

@@ -83,6 +83,7 @@ test("authenticated critical workflow smoke", async ({ page }) => {
   const upload = await page.request.post("/api/v1/uploads", {
     multipart: {
       artifactKey: "m02-pos",
+      evidenceMonth: "2026-06",
       file: {
         buffer: Buffer.from("channel,pos_net_sales,commission_variance\nUber Eats,100.00,0.00\n"),
         mimeType: "text/csv",

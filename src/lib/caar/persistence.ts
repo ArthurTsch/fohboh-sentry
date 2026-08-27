@@ -363,12 +363,12 @@ function buildCanonicalPayload({
       },
       {
         assessment:
-          certification.cadence === "weekly_preliminary"
+          certification.cadence === "monthly_preliminary"
             ? "Final bank tie-out intentionally deferred for preliminary cadence."
             : "Bank reconciliation is required for monthly final release.",
         control: "Bank Reconciliation Gate",
         status:
-          certification.cadence === "weekly_preliminary"
+          certification.cadence === "monthly_preliminary"
             ? "REVIEWED"
             : certification.ready
               ? "PROVEN"

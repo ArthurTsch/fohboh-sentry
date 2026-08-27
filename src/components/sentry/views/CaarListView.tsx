@@ -157,6 +157,7 @@ export function CaarListView({
           ) : null}
           {visibleRecords.map((record, index) => {
             const courtReady = record.status === "Certified";
+            const preliminary = isPreliminaryCaar(record);
             const sealHash = buildSealHash(record.id);
             const periodKey = getCaarPeriodKey(record.period);
             const previousPeriodKey = index > 0 ? getCaarPeriodKey(visibleRecords[index - 1].period) : null;
@@ -168,8 +169,11 @@ export function CaarListView({
                     {getCaarPeriodLabel(periodKey)}
                   </div>
                 ) : null}
-                <div className="grid gap-3 border-t border-[var(--border)] px-5 py-4 lg:grid-cols-[140px_160px_120px_1fr_110px_140px_150px]">
-                <span className="font-[family-name:var(--font-mono)] text-[12px] text-[var(--info)]">{record.id}</span>
+                <div className={`grid gap-3 border-t border-[var(--border)] px-5 py-4 lg:grid-cols-[140px_160px_120px_1fr_110px_140px_150px] ${preliminary ? "bg-blue-50/80" : "bg-white"}`}>
+                <span className="font-[family-name:var(--font-mono)] text-[12px] text-[var(--info)]">
+                  {record.id}
+                  {preliminary ? <span className="mt-2 inline-flex rounded-full bg-blue-100 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-blue-800">Monthly Preliminary</span> : null}
+                </span>
                 <span className="text-[12px] text-[var(--text)]">{record.locationName}</span>
                 <span>
                   <span
@@ -219,6 +223,11 @@ export function CaarListView({
       </SectionCard>
     </div>
   );
+}
+
+function isPreliminaryCaar(record: CaarRecord) {
+  const period = record.period.toLowerCase();
+  return period.includes("monthly preliminary") || period.includes("weekly preliminary") || record.id.toUpperCase().endsWith("-PRELIMINARY") || record.id.toUpperCase().endsWith("-WEEKLY");
 }
 
 function HeaderWithTip({

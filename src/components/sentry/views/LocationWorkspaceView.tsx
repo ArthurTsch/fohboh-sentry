@@ -692,6 +692,7 @@ export function LocationWorkspaceView({
               {visibleLocationCaars.map((record, index) => {
                 const periodKey = getCaarPeriodKey(record.period);
                 const previousPeriodKey = index > 0 ? getCaarPeriodKey(visibleLocationCaars[index - 1].period) : null;
+                const preliminary = isPreliminaryCaar(record);
                 return (
                 <div key={`${record.locationId}:${record.id}`}>
                   {periodKey !== previousPeriodKey ? (
@@ -703,11 +704,12 @@ export function LocationWorkspaceView({
                   key={`${record.locationId}:${record.id}`}
                   type="button"
                   onClick={() => onOpenCaar(record)}
-                  className="grid w-full gap-3 border-t border-[var(--border)] bg-[var(--surface)] p-5 text-left transition hover:bg-white md:grid-cols-[1.4fr_0.8fr_0.8fr_0.7fr]"
+                  className={`grid w-full gap-3 border-t border-[var(--border)] p-5 text-left transition md:grid-cols-[1.4fr_0.8fr_0.8fr_0.7fr] ${preliminary ? "bg-blue-50/80 hover:bg-blue-100/80" : "bg-[var(--surface)] hover:bg-white"}`}
                 >
                   <div>
                     <div className="font-semibold text-[var(--text)]">{record.id}</div>
                     <div className="mt-1 text-sm text-[var(--muted)]">{record.period}</div>
+                    {preliminary ? <span className="mt-2 inline-flex rounded-full bg-blue-100 px-2 py-1 font-[family-name:var(--font-mono)] text-[9px] font-bold uppercase tracking-[0.12em] text-blue-800">Monthly Preliminary</span> : null}
                   </div>
                   <div>
                     <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -868,6 +870,11 @@ export function LocationWorkspaceView({
       ) : null}
     </div>
   );
+}
+
+function isPreliminaryCaar(record: CaarRecord) {
+  const period = record.period.toLowerCase();
+  return period.includes("monthly preliminary") || period.includes("weekly preliminary") || record.id.toUpperCase().endsWith("-PRELIMINARY") || record.id.toUpperCase().endsWith("-WEEKLY");
 }
 
 function WorkspaceTab({

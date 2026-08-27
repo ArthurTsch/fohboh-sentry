@@ -21,6 +21,7 @@ export function CertificationCadenceModal({
   locationId,
   locations,
   locationName,
+  getMonthlyFinalBlockers,
   onChangeLocation,
   onChangeModules,
   onChangeVendor,
@@ -34,11 +35,12 @@ export function CertificationCadenceModal({
   locationId: string;
   locations?: { id: string; name: string }[];
   locationName: string;
+  getMonthlyFinalBlockers: (certificationMonth: string, moduleId: "M01" | "M02" | undefined, vendorKey?: string) => string[];
   onChangeLocation?: (locationId: string) => void;
   onChangeModules?: (modules: Array<"M01" | "M02">) => void;
   onChangeVendor?: (vendorKey: string) => void;
   onClose: () => void;
-  onSubmit: (cadence: "monthly_final" | "weekly_preliminary", certificationMonth: string) => void | Promise<void>;
+  onSubmit: (cadence: "monthly_final" | "monthly_preliminary", certificationMonth: string) => void | Promise<void>;
   selectedModules: Array<"M01" | "M02">;
   selectedVendorKey?: string;
   selectableModules: Array<{
@@ -55,6 +57,10 @@ export function CertificationCadenceModal({
   const canSubmit = validMonth && selectedModules.length === 1 && (!requiresVendor || Boolean(selectedVendorKey));
   const selectedModule = selectableModules.find((module) => module.moduleId === selectedModules[0]);
   const selectedVendor = selectableVendors.find((vendor) => vendor.key === selectedVendorKey);
+  const monthlyFinalBlockers = validMonth
+    ? getMonthlyFinalBlockers(certificationMonth, selectedModules[0], selectedVendorKey)
+    : ["Select a valid certification month."];
+  const canSubmitFinal = canSubmit && monthlyFinalBlockers.length === 0;
   return (
     <AccessibleDialog onClose={onClose} aria-labelledby="certification-preflight-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="max-h-[94vh] w-full max-w-2xl overflow-y-auto rounded-[28px] border border-[var(--border)] bg-white shadow-[0_24px_80px_rgba(0,0,0,0.24)]">
@@ -246,25 +252,25 @@ export function CertificationCadenceModal({
           <button
             type="button"
             disabled={!canSubmit}
-            onClick={() => onSubmit("weekly_preliminary", certificationMonth)}
+            onClick={() => onSubmit("monthly_preliminary", certificationMonth)}
             className="rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-5 text-left transition hover:border-[var(--text)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
-              Weekly Preliminary
+              Monthly Preliminary
             </div>
             <div className="mt-3 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
-              Early detection
+              Run before next-month evidence arrives
             </div>
             <div className="mt-3 text-sm leading-7 text-[var(--muted)]">
-              Runs the current evidence package without the final bank-reconciliation gate. Use this after weekly DSP or processor exports land.
+              Uses the evidence currently available and clearly marks the CAAR as preliminary. For M01, use this while the following month’s payout export is still unavailable.
             </div>
           </button>
 
           <button
             type="button"
-            disabled={!canSubmit}
+            disabled={!canSubmitFinal}
             onClick={() => onSubmit("monthly_final", certificationMonth)}
-            className="rounded-[24px] border border-[rgba(214,48,49,0.24)] bg-[rgba(214,48,49,0.04)] p-5 text-left transition hover:border-[var(--accent)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-[24px] border border-[rgba(214,48,49,0.24)] bg-[rgba(214,48,49,0.04)] p-5 text-left transition hover:border-[var(--accent)] hover:bg-white disabled:cursor-not-allowed disabled:border-[var(--border)] disabled:bg-[var(--surface)] disabled:opacity-50"
           >
             <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--accent)]">
               Monthly Final
@@ -273,7 +279,9 @@ export function CertificationCadenceModal({
               Certified CAAR path
             </div>
             <div className="mt-3 text-sm leading-7 text-[var(--muted)]">
-              Requires the full evidence package, including the matching bank statement. This is the only cadence that can clear final CAAR release.
+              {monthlyFinalBlockers.length > 0
+                ? `Unavailable: ${monthlyFinalBlockers.join(" ")}`
+                : "The complete month-specific evidence package is uploaded. This path can clear final CAAR release."}
             </div>
           </button>
         </div>

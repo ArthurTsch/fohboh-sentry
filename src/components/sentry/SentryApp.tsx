@@ -79,7 +79,7 @@ type ActiveArtifactState = {
 };
 
 type ActiveCertificationState = {
-  cadence: "monthly_final" | "weekly_preliminary";
+  cadence: "monthly_final" | "monthly_preliminary";
   caarId: string;
   locationId: string;
   locationName: string;
@@ -89,7 +89,7 @@ type ActiveCertificationState = {
 };
 
 type CertificationProgressState = {
-  cadence: "monthly_final" | "weekly_preliminary";
+  cadence: "monthly_final" | "monthly_preliminary";
   certificationMonth: string;
   locationName: string;
   moduleId: "M01" | "M02";
@@ -184,6 +184,7 @@ type PersistedUploadRecord = {
   detectedFormatKey?: string;
   detectedFormatName?: string;
   expectedColumns?: number;
+  evidenceMonth?: string | null;
   fields: boolean;
   fileName: string;
   hashValue?: string;
@@ -210,7 +211,7 @@ type PersistedUploadRecord = {
 
 type PersistedCertificationResponse = {
   certification?: {
-    cadence?: "monthly_final" | "weekly_preliminary";
+    cadence?: "monthly_final" | "monthly_preliminary";
     ready: boolean;
     record: CaarRecord;
     status: "Certified" | "At Risk" | "Onboarding";
@@ -554,10 +555,17 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
       upload.artifactKey,
       upload.vendorKey,
     );
+    const monthlyScopedKey = getArtifactStateKey(
+      accountId,
+      upload.locationId,
+      upload.moduleId,
+      upload.artifactKey,
+      upload.vendorKey,
+      upload.evidenceMonth ?? undefined,
+    );
 
-    setArtifactIntakeState((state) => ({
-      ...state,
-      [locationScopedKey]: {
+    const intake: IntakeState = {
+        evidenceMonth: upload.evidenceMonth ?? undefined,
         detectedFormatKey: upload.detectedFormatKey,
         detectedFormatName: upload.detectedFormatName,
         uploadId: upload.id,
@@ -579,7 +587,12 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         parseWarnings: upload.parseWarnings,
         unmatchedHeaders: upload.unmatchedHeaders,
         updatedAt: upload.updatedAt,
-      },
+    };
+
+    setArtifactIntakeState((state) => ({
+      ...state,
+      [locationScopedKey]: intake,
+      [monthlyScopedKey]: intake,
     }));
 
     setUploadState((current) =>
@@ -616,6 +629,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         detectedFormatKey: upload.detectedFormatKey,
         detectedFormatName: upload.detectedFormatName,
         expectedColumns: upload.expectedColumns,
+        evidenceMonth: upload.evidenceMonth ?? undefined,
         fileName: upload.fileName,
         hashValue: upload.hashValue,
         locationId: upload.locationId,
@@ -904,8 +918,61 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     moduleId: "M01" | "M02" | "M03",
     artifactKey: string,
     vendorKey?: string,
+    evidenceMonth?: string,
   ) {
-    return `${accountId}:${locationId}:${moduleId}:${artifactKey}:${vendorKey ?? "global"}`;
+    return `${accountId}:${locationId}:${moduleId}:${artifactKey}:${vendorKey ?? "global"}${evidenceMonth ? `:${evidenceMonth}` : ""}`;
+  }
+
+  function getMonthlyFinalBlockers(
+    locationId: string,
+    certificationMonth: string,
+    moduleId: "M01" | "M02" | undefined,
+    vendorKey?: string,
+  ) {
+    if (!moduleId) return ["Select a module."];
+    const location = runtimeLocationState.find((item) => item.id === locationId);
+    if (!location) return ["The selected location could not be found."];
+    if (moduleId === "M02" && !vendorKey) return ["Select a delivery platform."];
+    const uploadModule =
+      resolveModuleTemplate(uploadState, location.accountId, moduleId) ??
+      resolveModuleTemplate(uploadModules, location.accountId, moduleId);
+    if (!uploadModule) return [`${moduleId} evidence configuration is unavailable.`];
+
+    const [year, month] = certificationMonth.split("-").map(Number);
+    const followingDate = new Date(Date.UTC(year, month, 1));
+    const followingMonth = `${followingDate.getUTCFullYear()}-${String(followingDate.getUTCMonth() + 1).padStart(2, "0")}`;
+    const monthLabel = (value: string) => {
+      const [labelYear, labelMonth] = value.split("-").map(Number);
+      return new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC", year: "numeric" }).format(
+        new Date(Date.UTC(labelYear, labelMonth - 1, 1)),
+      );
+    };
+    const missing: string[] = [];
+
+    for (const artifact of uploadModule.artifacts.filter((item) => item.type !== "Manual Entry")) {
+      const scopedVendor = moduleId === "M02" ? vendorKey : undefined;
+      const requiredMonths = artifact.key.includes("agreement")
+        ? [undefined]
+        : moduleId === "M01" && artifact.key.startsWith("m01-pos")
+          ? [certificationMonth, followingMonth]
+          : [certificationMonth];
+      for (const evidenceMonth of requiredMonths) {
+        const prefix = `${location.accountId}:${locationId}:${moduleId}:${artifact.key}:`;
+        const state = Object.entries(artifactIntakeState)
+          .filter(([key, value]) =>
+            key.startsWith(prefix) &&
+            value.uploaded &&
+            (!scopedVendor || value.vendorKey === scopedVendor) &&
+            (evidenceMonth ? value.evidenceMonth === evidenceMonth : !value.evidenceMonth),
+          )
+          .map(([, value]) => value)
+          .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))[0];
+        if (!state?.uploaded) {
+          missing.push(`${artifact.label}${evidenceMonth ? ` for ${monthLabel(evidenceMonth)}` : ""} is missing.`);
+        }
+      }
+    }
+    return missing;
   }
 
   function handleLogin(nextSession: SessionState) {
@@ -1190,12 +1257,14 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     target: ActiveArtifactState,
     file: File,
     vendor?: { key: string; name: string },
+    evidenceMonth = new Date().toISOString().slice(0, 7),
   ): Promise<UploadReceipt> {
     const formData = new FormData();
     formData.set("artifactKey", target.artifact.key);
     formData.set("file", file);
     formData.set("locationId", target.locationId);
     formData.set("moduleId", target.moduleId);
+    if (!target.artifact.key.includes("agreement")) formData.set("evidenceMonth", evidenceMonth);
     if (target.artifact.key.includes("bank")) {
       formData.set("bankProviderKey", getLocationSourceConfig(target.locationId)?.bankProvider.key ?? DEFAULT_BANK_KEY);
     }
@@ -1505,6 +1574,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     artifactKey: string,
     file: File,
     vendor?: { key: string; name: string },
+    evidenceMonth?: string,
   ): Promise<UploadReceipt | null> {
     const targetLocation = activeUploadLocation ?? visibleLocations[0];
     if (!targetLocation) return null;
@@ -1540,7 +1610,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     setActiveArtifact(target);
     setArtifactUploadProgress({ fileName: file.name });
     try {
-      return await processArtifactFileUpload(target, file, vendor);
+      return await processArtifactFileUpload(target, file, vendor, evidenceMonth);
     } finally {
       setArtifactUploadProgress(null);
     }
@@ -2255,7 +2325,7 @@ function handleCompleteOnboarding(locationId: string) {
   }
 
   async function executeRunCertification(
-    cadence: "monthly_final" | "weekly_preliminary",
+    cadence: "monthly_final" | "monthly_preliminary",
     certificationMonth: string,
   ) {
     const request = pendingCertificationRequest;
@@ -2371,7 +2441,7 @@ function handleCompleteOnboarding(locationId: string) {
       setCertificationProgress((current) => current ? { ...current, phase: "refreshing" } : current);
       await Promise.all([syncAssignedRestaurants(), syncAssignedCaars(), syncAuditLogs()]);
       showToast(
-        cadence === "weekly_preliminary"
+        cadence === "monthly_preliminary"
           ? `${certification.record.id} preliminary certification saved.`
           : `${certification.record.id} certified and saved.`,
       );
@@ -2687,6 +2757,14 @@ function handleCompleteOnboarding(locationId: string) {
 
       {pendingCertificationRequest ? (
         <CertificationCadenceModal
+          getMonthlyFinalBlockers={(certificationMonth, moduleId, vendorKey) =>
+            getMonthlyFinalBlockers(
+              pendingCertificationRequest.locationId,
+              certificationMonth,
+              moduleId,
+              vendorKey,
+            )
+          }
           locationId={pendingCertificationRequest.locationId}
           locations={pendingCertificationRequest.locations}
           locationName={pendingCertificationRequest.locationName}

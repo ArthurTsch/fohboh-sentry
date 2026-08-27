@@ -15,7 +15,7 @@ export function CertificationRunModal({
   steps,
   trustScore,
 }: {
-  cadence: "monthly_final" | "weekly_preliminary";
+  cadence: "monthly_final" | "monthly_preliminary";
   locationName: string;
   onClose: () => void;
   openCaar: () => void;
@@ -34,8 +34,8 @@ export function CertificationRunModal({
             {locationName}
           </div>
           <div className="mt-1 text-sm text-[var(--muted)]">
-            {cadence === "weekly_preliminary"
-              ? "Weekly Preliminary -> Semantic Truths -> Deterministic Law -> Loop A"
+            {cadence === "monthly_preliminary"
+              ? "Monthly Preliminary -> Semantic Truths -> Deterministic Law -> Loop A"
               : "Monthly Final -> Semantic Truths -> Deterministic Law -> Loop A -> Certify & Lock"}
           </div>
         </div>
@@ -67,7 +67,7 @@ export function CertificationRunModal({
             <div className="text-sm text-[var(--muted)]">
               {ready
                 ? "CAAR release threshold met. Claim-pack generation is available."
-                : cadence === "weekly_preliminary"
+                : cadence === "monthly_preliminary"
                   ? "Preliminary certification completed. Monthly Final is still required for certified release."
                   : "Evidence or reconciliation gates still block certified release."}
             </div>

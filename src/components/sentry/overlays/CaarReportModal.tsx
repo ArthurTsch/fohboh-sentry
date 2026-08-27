@@ -44,6 +44,16 @@ type Mq6Row = {
   whyMatters: string;
 };
 
+function deriveM01EvidenceWindow(period: string) {
+  const match = /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i.exec(period.trim());
+  if (!match) return null;
+  const source = new Date(`${match[1]} 1, ${match[2]} 00:00:00 UTC`);
+  if (Number.isNaN(source.getTime())) return null;
+  const following = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth() + 1, 1));
+  const format = (value: Date) => new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC", year: "numeric" }).format(value);
+  return { certificationLabel: format(source), followingLabel: format(following) };
+}
+
 export function CaarReportModal({
   artifactIntakeState,
   onClose,
@@ -94,7 +104,7 @@ export function CaarReportModal({
   const consequentialScoreDeductions = scoreDeductions.filter((row) => row.consequential);
   const primaryPointsLost = primaryScoreDeductions.reduce((sum, row) => sum + row.pointsLost, 0);
   const consequentialPointsLost = consequentialScoreDeductions.reduce((sum, row) => sum + row.pointsLost, 0);
-  const pointsToEligibility = Math.max(0, 85 - (record.trustScore + consequentialPointsLost));
+  const pointsToEligibility = Math.max(0, 85 - record.trustScore);
   const hasPersistedTraceability =
     Boolean(traceability?.certRunId) &&
     (Boolean(traceability?.ruleSetVersion) ||
@@ -168,9 +178,9 @@ export function CaarReportModal({
     status: row.sha256 ? "Hashed" : "Missing",
   }));
   const mq6 = deriveMq6(record);
-  const weeklyPreliminary = isWeeklyPreliminaryRecord(record, ruleSetVersion);
-  const preliminaryTrustScore = weeklyPreliminary ? computeDimensionCompositeScore(record) : null;
-  const finalReleaseScore = weeklyPreliminary ? record.trustScore : null;
+  const monthlyPreliminary = isPreliminaryRecord(record, ruleSetVersion);
+  const preliminaryTrustScore = monthlyPreliminary ? computeDimensionCompositeScore(record) : null;
+  const finalReleaseScore = monthlyPreliminary ? record.trustScore : null;
   const headlineScore = preliminaryTrustScore ?? record.trustScore;
   const headlineBadge = getScoreBandLabel(headlineScore);
   const providerName = evidenceRows.find((row) => row.vendor)?.vendor ?? null;
@@ -182,6 +192,12 @@ export function CaarReportModal({
   ]);
   const m01Calculation = moduleId === "M01" ? deriveM01Calculation(calculationCitations, record.amount) : null;
   const m02Calculation = moduleId === "M02" ? deriveM02Calculation(calculationCitations, record.amount) : null;
+  const m01EvidenceWindow = moduleId === "M01" ? deriveM01EvidenceWindow(record.period) : null;
+  const releaseTitle = monthlyPreliminary
+    ? "Monthly Preliminary — final release pending"
+    : claimReady
+      ? "CAAR is ready for release"
+      : "CAAR requires remediation";
 
   function printCaarReport() {
     const report = reportRef.current;
@@ -269,9 +285,11 @@ export function CaarReportModal({
             period={record.period}
           />
         </CollapsibleSection>
-        <CollapsibleSection className="caar-print-exclude" defaultOpen eyebrow="Release Status" title={claimReady ? "CAAR is ready for release" : "CAAR requires remediation"}>
-          <ActionNotice title={claimReady ? "CAAR is ready for release" : "CAAR requires remediation"} tone={claimReady ? "success" : "danger"}>
-            {claimReady
+        <CollapsibleSection className="caar-print-exclude" defaultOpen eyebrow="Release Status" title={releaseTitle}>
+          <ActionNotice title={releaseTitle} tone={monthlyPreliminary ? "info" : claimReady ? "success" : "danger"}>
+            {monthlyPreliminary
+              ? `This is a Monthly Preliminary CAAR, not a final certification. ${effectiveRemediationSteps[0] ?? "Complete the following-month evidence package and run Monthly Final certification before release."}`
+              : claimReady
               ? `${record.amount} is backed by persisted evidence and sealed governance. ${custodyRows.filter((row) => row.status === "Hashed").length}/${custodyRows.length} custody records expose a hash.`
               : effectiveRemediationSteps[0] ?? "Review the evidence and rule findings below before release."}
           </ActionNotice>
@@ -307,7 +325,7 @@ export function CaarReportModal({
           <div className="rounded-[24px] border border-[var(--border)] bg-[var(--surface)] p-6">
             <div className="flex items-center justify-between gap-3">
               <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">
-                {weeklyPreliminary ? "Preliminary Trust Score" : "Trust Score"}
+                {monthlyPreliminary ? "Preliminary Trust Score" : "Trust Score"}
               </div>
               <span
                 className={`rounded-full px-3 py-1 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.14em] ${
@@ -328,27 +346,27 @@ export function CaarReportModal({
               <div className={`h-full rounded-full ${getScoreBar(headlineScore)}`} style={{ width: `${headlineScore}%` }} />
             </div>
             <p className="mt-4 text-sm leading-7 text-[var(--muted)]">
-              {weeklyPreliminary
-                ? "Weekly Preliminary runs expose an operational trust reading from the MQ6 dimensions while keeping the final release score separate until the monthly final gate is attempted."
+              {monthlyPreliminary
+                ? "Monthly Preliminary runs expose an operational trust reading from the MQ6 dimensions while keeping the final release score separate until the monthly final gate is attempted."
                 : traceabilityGap
                   ? "This CAAR headline exists, but the persisted certification-run lineage for this report is incomplete. The summary must not be treated as a defensible final record until traceability is restored."
                 : claimReady
                   ? "This CAAR is backed by persisted uploads, sealed governance records, and stored rule-engine outputs."
                   : "This CAAR is not yet fully supported by persisted evidence or sealed governance records for every required field."}
             </p>
-            {weeklyPreliminary ? (
+            {monthlyPreliminary ? (
               <div className="mt-4 grid gap-3 md:grid-cols-2">
                 <ScoreExplainCard
                   label="Preliminary Trust Score"
                   tone={headlineScore}
                   value={headlineScore}
-                  description="Operational confidence from the MQ6 dimension rollup for this weekly preliminary run."
+                  description="Operational confidence from the MQ6 dimension rollup for this monthly preliminary run."
                 />
                 <ScoreExplainCard
                   label="Final Release Score"
                   tone={finalReleaseScore ?? 0}
                   value={finalReleaseScore ?? 0}
-                  description="Certified release score. Weekly preliminary keeps this blocked until the monthly final cadence completes."
+                  description="Certified release score. Monthly preliminary keeps this blocked until the monthly final cadence completes."
                 />
               </div>
             ) : null}
@@ -423,6 +441,15 @@ export function CaarReportModal({
               <span className="font-semibold text-[var(--text)]">Uploaded evidence used:</span>{" "}
               {evidenceRows.filter((row) => row.status === "provided").map((row) => row.label).join(" · ") || "No persisted uploaded evidence is linked."}
             </div>
+            {m01EvidenceWindow ? (
+              <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-7 text-blue-950">
+                {monthlyPreliminary ? (
+                  <><strong>Preliminary activity window:</strong> This calculation uses the {m01EvidenceWindow.certificationLabel} payout evidence currently available and includes only rows whose <strong>Sales period start</strong> belongs to {m01EvidenceWindow.certificationLabel}. Earlier activity, including May rows settled in June, is excluded. The displayed variance is provisional until the {m01EvidenceWindow.followingLabel} payout export supplies any remaining {m01EvidenceWindow.certificationLabel} activity.</>
+                ) : (
+                  <><strong>Sliding evidence window:</strong> This {m01EvidenceWindow.certificationLabel} calculation uses payout exports uploaded for {m01EvidenceWindow.certificationLabel} and {m01EvidenceWindow.followingLabel}. Rows from either file are included only when <strong>Sales period start</strong> belongs to {m01EvidenceWindow.certificationLabel}; earlier and later activity is excluded.</>
+                )}{" "}The fee basis is the filtered <strong>Payments</strong> total and the transaction component uses the filtered <strong># Txns</strong> total.
+              </div>
+            ) : null}
             <div className="mb-3 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
               Values extracted from uploaded documents
             </div>
@@ -451,7 +478,7 @@ export function CaarReportModal({
               )}
               <br />
               Compared processor fees: {formatMoneyLike(m01Calculation.actualFees)} · Expected processor fees: {formatMoneyLike(m01Calculation.expectedFees)}
-              <br /><strong>Persisted certified recovery: {m01Calculation.certifiedRecoveryDisplay}</strong>
+              <br /><strong>{monthlyPreliminary ? "Provisional variance" : "Persisted certified recovery"}: {m01Calculation.certifiedRecoveryDisplay}</strong>
             </div>
             <ReconciliationBreakdown calculation={m01Calculation} />
             <details className="mt-4 rounded-2xl border border-[var(--border)] bg-white p-4">
@@ -723,9 +750,9 @@ export function CaarReportModal({
             ))}
           </div>
           <div className="mt-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--muted)]">
-            {weeklyPreliminary ? (
+            {monthlyPreliminary ? (
               <>
-                Preliminary Trust Score for this weekly report is <strong>{headlineScore}/100</strong>. Final Release
+                Preliminary Trust Score for this monthly preliminary report is <strong>{headlineScore}/100</strong>. Final Release
                 Score remains <strong>{finalReleaseScore ?? 0}/100</strong> until monthly-final bank tie-out and release
                 gates are evaluated.
               </>
@@ -1194,10 +1221,14 @@ function buildFormalIfThen(ruleId: string, fallback: string) {
   };
 }
 
-function isWeeklyPreliminaryRecord(record: CaarRecord, ruleSetVersion: string | null) {
+function isPreliminaryRecord(record: CaarRecord, ruleSetVersion: string | null) {
+  const period = record.period.toLowerCase();
+  const version = (ruleSetVersion ?? "").toLowerCase();
   return (
-    record.period.toLowerCase().includes("weekly preliminary") ||
-    (ruleSetVersion ?? "").toLowerCase().includes("weekly")
+    period.includes("monthly preliminary") ||
+    period.includes("weekly preliminary") ||
+    version.includes("monthly-prelim") ||
+    version.includes("weekly")
   );
 }
 

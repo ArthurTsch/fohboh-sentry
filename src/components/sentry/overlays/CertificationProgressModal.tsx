@@ -7,7 +7,7 @@ export function CertificationProgressModal({
   moduleId,
   phase,
 }: {
-  cadence: "monthly_final" | "weekly_preliminary";
+  cadence: "monthly_final" | "monthly_preliminary";
   certificationMonth: string;
   locationName: string;
   moduleId: "M01" | "M02";
@@ -40,7 +40,7 @@ export function CertificationProgressModal({
             Certifying {locationName}
           </div>
           <div className="mt-2 text-sm text-[var(--muted)]">
-            {moduleId} · {cadence === "weekly_preliminary" ? "Weekly Preliminary" : "Monthly Final"} · {certificationMonth}
+            {moduleId} · {cadence === "monthly_preliminary" ? "Monthly Preliminary" : "Monthly Final"} · {certificationMonth}
           </div>
         </div>
 
