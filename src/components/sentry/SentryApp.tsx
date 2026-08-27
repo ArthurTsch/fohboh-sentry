@@ -111,6 +111,23 @@ type PendingCertificationRequest = {
   selectableVendors: Array<{ key: string; name: string }>;
 };
 
+const NAVIGATION_SESSION_KEY = "fohboh-sentry-navigation-v1";
+
+type PersistedNavigationState = {
+  activeOnboardingLocation: string | null;
+  activeUploadLocation: {
+    accountId: string;
+    id: string;
+    name: string;
+    preferredArtifactKey?: string;
+    preferredModule?: "M01" | "M02";
+    preferredVendorKey?: string;
+    preferredVendorName?: string;
+  } | null;
+  activeView: ViewId;
+  activeWorkspaceLocationId: string | null;
+};
+
 type CertificationBlockerState = {
   blockers: string[];
   description?: string;
@@ -242,6 +259,7 @@ type PersistedAccessRequest = WgsApproval;
 type PersistedActivityLog = LogRecord;
 
 export function SentryApp({ initialSession = null }: { initialSession?: SessionState | null }) {
+  const navigationRestoredRef = useRef(false);
   const locationStatePersistenceStatusRef = useRef<"unknown" | "available" | "missing-table">(
     "unknown",
   );
@@ -311,6 +329,48 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
 
   const effectiveSession = session;
   const activeView = activeViewOverride ?? (effectiveSession?.role === "WGS Manager" ? "wgs" : "dashboard");
+
+  useEffect(() => {
+    if (!effectiveSession || navigationRestoredRef.current) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled || navigationRestoredRef.current) return;
+      navigationRestoredRef.current = true;
+      try {
+        const raw = window.sessionStorage.getItem(NAVIGATION_SESSION_KEY);
+        if (!raw) return;
+        const persisted = JSON.parse(raw) as Partial<PersistedNavigationState>;
+        if (persisted.activeView && persisted.activeView in viewMeta) {
+          setActiveViewOverride(persisted.activeView);
+        }
+        if (typeof persisted.activeWorkspaceLocationId === "string") {
+          setActiveWorkspaceLocationId(persisted.activeWorkspaceLocationId);
+        }
+        if (persisted.activeUploadLocation?.id && persisted.activeUploadLocation.accountId) {
+          setActiveUploadLocation(persisted.activeUploadLocation);
+        }
+        if (typeof persisted.activeOnboardingLocation === "string") {
+          setActiveOnboardingLocation(persisted.activeOnboardingLocation);
+        }
+      } catch {
+        window.sessionStorage.removeItem(NAVIGATION_SESSION_KEY);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveSession]);
+
+  useEffect(() => {
+    if (!effectiveSession || !navigationRestoredRef.current) return;
+    const navigationState: PersistedNavigationState = {
+      activeOnboardingLocation,
+      activeUploadLocation,
+      activeView,
+      activeWorkspaceLocationId,
+    };
+    window.sessionStorage.setItem(NAVIGATION_SESSION_KEY, JSON.stringify(navigationState));
+  }, [activeOnboardingLocation, activeUploadLocation, activeView, activeWorkspaceLocationId, effectiveSession]);
   const runtimeLocationState = effectiveSession
     ? applyLifecycleNotesToLocations({
         artifactContractState,
@@ -989,6 +1049,8 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     await fetch("/api/auth/logout", {
       method: "POST",
     }).catch(() => null);
+
+    window.sessionStorage.removeItem(NAVIGATION_SESSION_KEY);
 
     startTransition(() => {
       setSession(null);
