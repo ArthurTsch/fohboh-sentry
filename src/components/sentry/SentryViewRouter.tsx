@@ -152,6 +152,7 @@ export function SentryViewRouter({
     moduleId: "M01" | "M02",
     artifactKey: string,
     vendorKey: string,
+    evidenceMonth?: string,
   ) => Promise<void>;
   onResetLocationUploads: (locationId: string) => Promise<void>;
   onEnterSupportMode: (accountId: string) => void;

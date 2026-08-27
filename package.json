@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:app": "next dev",
+    "db:migrate": "node scripts/migrate-database.mjs",
+    "db:migrate:status": "node scripts/migrate-database.mjs --status-only",
     "build": "next build",
     "cleanup:upload-blobs": "tsx scripts/cleanup-upload-blobs.ts",
     "vercel-build": "prisma generate && next build",

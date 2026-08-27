@@ -1353,6 +1353,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     moduleId: "M01" | "M02",
     artifactKey: string,
     vendorKey: string,
+    evidenceMonth?: string,
   ) {
     const targetLocation = getUploadTargetLocation();
     if (!targetLocation) {
@@ -1361,7 +1362,14 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     }
 
     const accountId = targetLocation.accountId;
-    const intakeKey = getArtifactStateKey(accountId, targetLocation.id, moduleId, artifactKey, vendorKey);
+    const intakeKey = getArtifactStateKey(
+      accountId,
+      targetLocation.id,
+      moduleId,
+      artifactKey,
+      vendorKey,
+      artifactKey.includes("agreement") ? undefined : evidenceMonth,
+    );
     const intake = artifactIntakeState[intakeKey];
     if (!intake?.uploadId) {
       showToast("No saved upload was found for this document.");

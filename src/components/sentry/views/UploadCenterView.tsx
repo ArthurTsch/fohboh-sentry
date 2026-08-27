@@ -124,6 +124,7 @@ export function UploadCenterView({
     moduleId: "M01" | "M02",
     artifactKey: string,
     vendorKey: string,
+    evidenceMonth?: string,
   ) => Promise<void>;
   onResetLocationUploads: (locationId: string) => Promise<void>;
   onOpenSchema: () => void;
@@ -794,7 +795,7 @@ export function UploadCenterView({
                       }
                       onRemove={
                         settlementHasUpload
-                          ? () => onRemoveUpload(activeModule, settlementArtifactKey, vendor.key)
+                          ? () => onRemoveUpload(activeModule, settlementArtifactKey, vendor.key, evidenceMonth)
                           : undefined
                       }
                       onOpenSchema={onOpenSchema}
@@ -864,7 +865,7 @@ export function UploadCenterView({
                       }
                       onRemove={
                         posHasUpload && posArtifactKey
-                          ? () => onRemoveUpload(activeModule, posArtifactKey, vendor.key)
+                          ? () => onRemoveUpload(activeModule, posArtifactKey, vendor.key, evidenceMonth)
                           : undefined
                       }
                       onOpenSchema={onOpenSchema}
@@ -1008,7 +1009,7 @@ export function UploadCenterView({
                       }
                       onRemove={
                         bankHasUpload && bankArtifactKey
-                          ? () => onRemoveUpload(activeModule, bankArtifactKey, vendor.key)
+                          ? () => onRemoveUpload(activeModule, bankArtifactKey, vendor.key, evidenceMonth)
                           : undefined
                       }
                       onOpenSchema={onOpenSchema}
@@ -1081,7 +1082,7 @@ export function UploadCenterView({
                       }
                       onRemove={
                         settlementHasUpload
-                          ? () => onRemoveUpload(activeModule, settlementArtifactKey, vendor.key)
+                          ? () => onRemoveUpload(activeModule, settlementArtifactKey, vendor.key, evidenceMonth)
                           : undefined
                       }
                       onOpenSchema={onOpenSchema}
@@ -1151,7 +1152,7 @@ export function UploadCenterView({
                       }
                       onRemove={
                         posHasUpload && posArtifactKey
-                          ? () => onRemoveUpload(activeModule, posArtifactKey, vendor.key)
+                          ? () => onRemoveUpload(activeModule, posArtifactKey, vendor.key, evidenceMonth)
                           : undefined
                       }
                       onOpenSchema={onOpenSchema}
@@ -1295,7 +1296,7 @@ export function UploadCenterView({
                       }
                       onRemove={
                         bankHasUpload && bankArtifactKey
-                          ? () => onRemoveUpload(activeModule, bankArtifactKey, vendor.key)
+                          ? () => onRemoveUpload(activeModule, bankArtifactKey, vendor.key, evidenceMonth)
                           : undefined
                       }
                       onOpenSchema={onOpenSchema}
