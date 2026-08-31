@@ -58,6 +58,9 @@ function normalizeStringArray(value: unknown) {
     .filter(Boolean);
 }
 
+const SUPPORTED_NEW_LOCATION_POS = "toast";
+const SUPPORTED_NEW_LOCATION_PROCESSOR = "toast";
+
 export async function GET() {
   try {
     const session = await requireManagerSession();
@@ -223,6 +226,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Location name is required." }, { status: 400 });
     }
 
+    if (body.posSystem?.trim().toLowerCase() !== SUPPORTED_NEW_LOCATION_POS) {
+      return NextResponse.json(
+        { error: "Toast is the only POS system currently supported for new locations." },
+        { status: 400 },
+      );
+    }
+
     const unitId = body.unitId?.trim() || null;
     const createdBy = typeof session.managerId === "number" ? session.managerId : null;
     const teamAccountId =
@@ -279,6 +289,15 @@ export async function POST(request: Request) {
         ? (onboardingProgressRecord.selectedVendors as Record<string, unknown>)
         : null;
     const selectedM02Vendors = normalizeStringArray(selectedVendors?.m02);
+    const selectedM01Vendors = normalizeStringArray(selectedVendors?.m01).map((vendor) =>
+      resolveVendorKey("M01", vendor),
+    );
+    if (selectedM01Vendors.some((vendor) => vendor !== SUPPORTED_NEW_LOCATION_PROCESSOR)) {
+      return NextResponse.json(
+        { error: "Toast is the only card processor currently supported for new locations." },
+        { status: 400 },
+      );
+    }
     if (selectedM02Vendors.some((vendor) => !isVendorSupported("M02", vendor))) {
       return NextResponse.json({ error: "Grubhub and Slice formats are not supported yet." }, { status: 400 });
     }
@@ -311,9 +330,9 @@ export async function POST(request: Request) {
         onboardingProgress = {
           ...(onboardingProgressRecord ?? {}),
           selectedVendors: {
-            m01: normalizeStringArray(accessRequest.processors).map((value) =>
-              resolveVendorKey("M01", value),
-            ),
+            m01: normalizeStringArray(accessRequest.processors)
+              .map((value) => resolveVendorKey("M01", value))
+              .filter((value) => value === SUPPORTED_NEW_LOCATION_PROCESSOR),
             m02: normalizeStringArray(accessRequest.dsps)
               .map((value) => resolveVendorKey("M02", value))
               .filter((value) => isVendorSupported("M02", value)),

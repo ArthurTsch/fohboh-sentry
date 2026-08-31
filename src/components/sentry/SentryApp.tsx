@@ -1112,7 +1112,7 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
             dsps: payload.request.dsps?.length ? payload.request.dsps : [],
             m01: payload.request.m01 ?? false,
             m02: payload.request.m02 ?? false,
-            processor: payload.request.processor?.trim() || emptyAddLocationDraft.processor,
+            processor: emptyAddLocationDraft.processor,
           };
         }
       }

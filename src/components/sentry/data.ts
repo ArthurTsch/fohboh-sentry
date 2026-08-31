@@ -1140,7 +1140,7 @@ export const emptyAddLocationDraft: AddLocationDraft = {
   posSystem: "Toast",
   m01: true,
   m02: true,
-  processor: "Heartland",
+  processor: "Toast",
   dsps: ["DoorDash", "Uber Eats"],
 };
 

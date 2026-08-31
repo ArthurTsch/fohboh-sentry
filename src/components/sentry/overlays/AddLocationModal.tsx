@@ -7,8 +7,10 @@ import { getVendorCatalog } from "../vendor-catalog";
 
 const dspOptions = getVendorCatalog("M02").filter((vendor) => ["doordash", "ubereats", "grubhub", "slice"].includes(vendor.key));
 const bankOptions = getBankCatalog();
-const processorOptions = ["Heartland", "Toast", "Square", "Worldpay", "Chase Paymentech", "Other"];
+const processorOptions = ["Toast", "Heartland", "Square", "Worldpay", "Chase Paymentech", "Other"];
 const posOptions = ["Toast", "Square", "Heartland", "Worldpay", "Chase Paymentech", "Other"];
+const supportedPosSystem = "Toast";
+const supportedProcessor = "Toast";
 const stepHelp: {
   footerLabel: string;
   footerValue: string;
@@ -84,7 +86,11 @@ export function AddLocationModal({
   onSubmit: (draft: AddLocationDraft) => void;
 }) {
   const [step, setStep] = useState(1);
-  const [draft, setDraft] = useState<AddLocationDraft>(initialDraft);
+  const [draft, setDraft] = useState<AddLocationDraft>(() => ({
+    ...initialDraft,
+    posSystem: supportedPosSystem,
+    processor: supportedProcessor,
+  }));
 
   const plan = useMemo(() => {
     const items: string[] = [];
@@ -109,8 +115,8 @@ export function AddLocationModal({
     if (step === 1 && !draft.name.trim()) return;
     if (step === 2) {
       if (!draft.m01 && !draft.m02) return;
-      if (!draft.posSystem.trim() || !draft.bankProviderKey.trim()) return;
-      if (draft.m01 && !draft.processor.trim()) return;
+      if (draft.posSystem !== supportedPosSystem || !draft.bankProviderKey.trim()) return;
+      if (draft.m01 && draft.processor !== supportedProcessor) return;
       if (draft.m02 && draft.dsps.length === 0) return;
     }
     if (step === 3) {
@@ -266,8 +272,13 @@ export function AddLocationModal({
                     <label className="grid content-start gap-2">
                       <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">POS system</span>
                       <select value={draft.posSystem} onChange={(event) => setDraft((current) => ({ ...current, posSystem: event.target.value }))} className="rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm">
-                        {posOptions.map((option) => <option key={option}>{option}</option>)}
+                        {posOptions.map((option) => (
+                          <option key={option} disabled={option !== supportedPosSystem} value={option}>
+                            {option}{option !== supportedPosSystem ? " — Coming later" : ""}
+                          </option>
+                        ))}
                       </select>
+                      <span className="text-xs text-[var(--muted)]">Toast is the only POS format currently supported.</span>
                     </label>
                     <label className="grid content-start gap-2">
                       <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">Bank</span>
@@ -285,8 +296,13 @@ export function AddLocationModal({
                   <label className="mt-4 grid gap-2 md:max-w-[calc(50%-0.5rem)]">
                     <span className="font-[family-name:var(--font-mono)] text-[11px] font-bold uppercase tracking-[0.18em] text-[var(--muted)]">Card processor</span>
                     <select value={draft.processor} onChange={(event) => setDraft((current) => ({ ...current, processor: event.target.value }))} className="rounded-xl border border-[var(--border)] bg-white px-4 py-3 text-sm">
-                      {processorOptions.map((option) => <option key={option}>{option}</option>)}
+                      {processorOptions.map((option) => (
+                        <option key={option} disabled={option !== supportedProcessor} value={option}>
+                          {option}{option !== supportedProcessor ? " — Coming later" : ""}
+                        </option>
+                      ))}
                     </select>
+                    <span className="text-xs text-[var(--muted)]">Toast is the only card-processor format currently supported.</span>
                   </label>
                 </section>
               ) : null}
