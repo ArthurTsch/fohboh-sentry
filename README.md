@@ -28,7 +28,8 @@ Certifications are deliberately scoped.
 - DoorDash and Uber Eats uploads, schemas, contracts, certification runs, findings, and recovery values remain vendor-scoped.
 - Evidence from one M02 provider must not satisfy another provider's certification.
 - Monthly-final certification requires the governed evidence set, including bank evidence where applicable.
-- Weekly-preliminary certification can report an interim state but does not represent a monthly-final release.
+- M02 runs are strict by provider and activity month. For month `M`, the `M` settlement and POS exports are required. An `M-1` export is also merged when it actually contains activity dated in `M`; repeated rows are deduplicated. Only business/order dates in `M` are calculated, while later payouts remain only when linked to included orders.
+- An M02 monthly final requires that provider's current-window settlement/POS exports, the certification-month bank statement, and signed agreement. A previous-window export is optional unless it contributes target-month activity. Monthly preliminary can report an interim state but cannot represent a final release.
 - Invalid-schema evidence is excluded from recovery calculations.
 
 The principal server-side implementation is in [`src/lib/certification/service.ts`](src/lib/certification/service.ts), with deterministic evaluation in [`src/components/sentry/caar-engine.ts`](src/components/sentry/caar-engine.ts) and [`src/lib/mge/engine.ts`](src/lib/mge/engine.ts).

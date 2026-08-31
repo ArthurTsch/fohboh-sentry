@@ -80,6 +80,7 @@ export type CaarFieldAudit = {
 
 export type CaarEvidenceTrace = {
   artifactKey: string;
+  evidenceMonth?: string | null;
   fileName: string | null;
   label: string;
   matchPct: number | null;
@@ -246,6 +247,7 @@ export type IntakeStepKey = "uploaded" | "hash" | "schema" | "fields";
 
 export type IntakeState = {
   evidenceMonth?: string;
+  mergeLineageReady?: boolean;
   detectedFormatKey?: string;
   detectedFormatName?: string;
   uploadId?: number;

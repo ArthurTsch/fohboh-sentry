@@ -80,6 +80,11 @@ const UBER_EATS_ORDER_LEVEL_PAYOUT_HEADERS =
     ",",
   );
 
+const UBER_EATS_ORDER_LEVEL_PAYOUT_HEADERS_V2 =
+  "Store Name,External Store ID,Store UUID,Order ID,Workflow ID,Dining Mode,Payment Mode,Order Channel,Order Status,Order Date,Order Accept Time,Order Completion time,Customer Uber-Membership Status,Currency Code,Sales (excl. tax),Tax on Sales,Sales (incl. tax),Chargeback Amount,Tax on Chargeback Amount,Chargeback Amount (incl. tax),Price adjustments (excl. tax),Tax on Price Adjustments,Offers on items (incl. tax),Tax On Offers on items,Delivery Offer Redemptions (incl. tax),Tax On Delivery Offer Redemptions,Offer Redemption Fee,Bag Fee,Marketing Adjustment,Total Sales after Adjustments (incl tax),Marketplace Fee,Marketplace fee %,Tax on Marketplace Fee,Delivery Network Fee,Tax on Delivery Network Fee,Order Processing Fee,Delivery Fee,Tax On Delivery Fee,Tips,Capital payments,Container Deposit Fee,Other payments description,Other payments,Marketplace Facilitator Tax Adjustment,Marketplace Facilitator Tax,Backup Withholding Tax,Garnishment,Total payout,Payout Date,Markup Amount,Markup Tax,Retailer Loyalty ID,Payout reference ID".split(
+    ",",
+  );
+
 const VENDOR_ARTIFACT_HEADERS: Record<string, Record<string, string[]>> = {
   doordash: {
     "m02-settlement": DOORDASH_TRANSACTION_DETAIL_HEADERS,
@@ -135,6 +140,13 @@ const KNOWN_SOURCE_FORMATS: KnownSourceFormat[] = [
     headers: UBER_EATS_ORDER_LEVEL_PAYOUT_HEADERS,
     key: "ubereats-order-level-payout-v1",
     name: "Uber Eats Order-Level Payout",
+    sourceSystemKey: "ubereats",
+  },
+  {
+    artifactKey: "m02-settlement",
+    headers: UBER_EATS_ORDER_LEVEL_PAYOUT_HEADERS_V2,
+    key: "ubereats-order-level-payout-v2",
+    name: "Uber Eats Order-Level Payout v2",
     sourceSystemKey: "ubereats",
   },
   {

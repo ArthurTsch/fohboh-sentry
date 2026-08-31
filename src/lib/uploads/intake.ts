@@ -108,6 +108,8 @@ export type PersistedUploadValidation = {
   schema: boolean;
   sizeBytes: number;
   sourceSystemKey?: string;
+  sourceHeaders?: string[];
+  sourceRows?: string[][];
   unmatchedHeaders?: string[];
   updatedAt: string;
   uploaded: boolean;
@@ -194,6 +196,8 @@ export async function validateUploadArtifact({
   const schema = headers.length > 0 && (normalizedExpectedHeaders.length === 0 || matchPct >= 60);
   const fields = schema && rows > 0;
 
+  const metricRows = selectMetricRows(artifactKey, vendorKey, headers, dataRows);
+
   return {
     expectedColumns: normalizedExpectedHeaders.length || undefined,
     fields,
@@ -204,15 +208,13 @@ export async function validateUploadArtifact({
     matchPct,
     detectedFormatKey: detectedFormat?.format.key,
     detectedFormatName: detectedFormat?.format.name,
-    metrics: extractUploadMetrics(
-      artifactKey,
-      headers,
-      selectMetricRows(artifactKey, vendorKey, headers, dataRows),
-    ),
+    metrics: extractUploadMetrics(artifactKey, headers, metricRows),
     rows,
     schema,
     sizeBytes: buffer.byteLength,
     sourceSystemKey: detectedFormat?.format.sourceSystemKey,
+    sourceHeaders: artifactKey === "m02-settlement" || artifactKey === "m02-pos" ? headers : undefined,
+    sourceRows: artifactKey === "m02-settlement" || artifactKey === "m02-pos" ? metricRows : undefined,
     unmatchedHeaders: unmatchedHeaders.length > 0 ? unmatchedHeaders : undefined,
     updatedAt,
     uploaded: true,
@@ -295,7 +297,7 @@ function estimatePdfPageCount(buffer: Buffer) {
   return matches?.length || 1;
 }
 
-function extractUploadMetrics(artifactKey: string, headers: string[], rows: string[][]): UploadMetrics {
+export function extractUploadMetrics(artifactKey: string, headers: string[], rows: string[][]): UploadMetrics {
   const metrics: Required<UploadMetrics> = {
     adjustmentAmount: 0,
     basisAmount: 0,
@@ -633,6 +635,7 @@ function extractUploadMetrics(artifactKey: string, headers: string[], rows: stri
 
     if (read("refunds") > 0) metrics.refundCount += 1;
     if (read("chargebacks") > 0) metrics.chargebackCount += 1;
+    if (readAbs("chargeback amount", "order error adjustments") > 0) metrics.chargebackCount += 1;
 
     const disputeIndex = valueFor("dispute_id");
     if (disputeIndex >= 0 && String(row[disputeIndex] ?? "").trim()) {

@@ -232,6 +232,7 @@ function buildUploadResponse({
     matchedColumns: validation.matchedColumns,
     matchPct: validation.matchPct,
     metrics: validation.metrics,
+    mergeLineageReady: Array.isArray(validation.sourceHeaders) && Array.isArray(validation.sourceRows),
     moduleId,
     pageCount: validation.pageCount,
     parseWarnings: validation.parseWarnings,

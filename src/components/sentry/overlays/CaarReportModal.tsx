@@ -44,14 +44,15 @@ type Mq6Row = {
   whyMatters: string;
 };
 
-function deriveM01EvidenceWindow(period: string) {
+function deriveMonthlyEvidenceWindow(period: string) {
   const match = /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i.exec(period.trim());
   if (!match) return null;
   const source = new Date(`${match[1]} 1, ${match[2]} 00:00:00 UTC`);
   if (Number.isNaN(source.getTime())) return null;
+  const previous = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth() - 1, 1));
   const following = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth() + 1, 1));
   const format = (value: Date) => new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC", year: "numeric" }).format(value);
-  return { certificationLabel: format(source), followingLabel: format(following) };
+  return { certificationLabel: format(source), followingLabel: format(following), previousLabel: format(previous) };
 }
 
 export function CaarReportModal({
@@ -166,7 +167,7 @@ export function CaarReportModal({
   }));
   const evidenceTraceRows = evidenceRows.map((row) => ({
     assessment: buildEvidenceAssessment(row),
-    source: row.label,
+    source: row.fileName ? `${row.label}: ${row.fileName}` : row.label,
     status: row.status === "provided" ? "Provided" : row.status === "review" ? "Needs Review" : "Missing",
     trace: row.trace,
   }));
@@ -192,7 +193,8 @@ export function CaarReportModal({
   ]);
   const m01Calculation = moduleId === "M01" ? deriveM01Calculation(calculationCitations, record.amount) : null;
   const m02Calculation = moduleId === "M02" ? deriveM02Calculation(calculationCitations, record.amount) : null;
-  const m01EvidenceWindow = moduleId === "M01" ? deriveM01EvidenceWindow(record.period) : null;
+  const m01EvidenceWindow = moduleId === "M01" ? deriveMonthlyEvidenceWindow(record.period) : null;
+  const m02EvidenceWindow = moduleId === "M02" ? deriveMonthlyEvidenceWindow(record.period) : null;
   const releaseTitle = monthlyPreliminary
     ? "Monthly Preliminary — final release pending"
     : claimReady
@@ -521,6 +523,11 @@ export function CaarReportModal({
               <span className="font-semibold text-[var(--text)]">Uploaded evidence used:</span>{" "}
               {evidenceRows.filter((row) => row.status === "provided").map((row) => row.label).join(" · ") || "No persisted uploaded evidence is linked."}
             </div>
+            {m02EvidenceWindow ? (
+              <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-7 text-blue-950">
+                <strong>Strict monthly scope:</strong> This provider-specific CAAR uses the <strong>{m02EvidenceWindow.certificationLabel}</strong> settlement/POS export window. If the <strong>{m02EvidenceWindow.previousLabel}</strong> export also contains {m02EvidenceWindow.certificationLabel} activity, those rows are included and repeated source rows are removed. Only activity dated in <strong>{m02EvidenceWindow.certificationLabel}</strong> is calculated; later payouts remain only when linked to included orders.
+              </div>
+            ) : null}
             <div className="mb-3 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
               Values extracted from uploaded documents
             </div>
@@ -2192,6 +2199,7 @@ function resolveArtifactIntake(
 function buildEvidenceAssessment(row: CaarEvidenceTrace) {
   const details: string[] = [];
   if (row.vendor) details.push(`Vendor: ${row.vendor}`);
+  if (row.evidenceMonth) details.push(`Evidence month: ${row.evidenceMonth}`);
   if (typeof row.matchPct === "number") details.push(`Schema match: ${row.matchPct}%`);
   if (typeof row.rows === "number") details.push(`Rows: ${row.rows}`);
   if (typeof row.pageCount === "number") details.push(`Pages: ${row.pageCount}`);

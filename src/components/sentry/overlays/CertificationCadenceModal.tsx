@@ -259,10 +259,12 @@ export function CertificationCadenceModal({
               Monthly Preliminary
             </div>
             <div className="mt-3 font-[family-name:var(--font-display)] text-2xl font-bold tracking-[-0.04em] text-[var(--text)]">
-              Run before next-month evidence arrives
+              {selectedModules[0] === "M02" ? "Run with incomplete export windows" : "Run before next-month evidence arrives"}
             </div>
             <div className="mt-3 text-sm leading-7 text-[var(--muted)]">
-              Uses the evidence currently available and clearly marks the CAAR as preliminary. For M01, use this while the following month’s payout export is still unavailable.
+              {selectedModules[0] === "M02"
+                ? "Uses the provider evidence currently available when the selected export window is incomplete. The result is explicitly preliminary and cannot clear final release."
+                : "Uses the evidence currently available and clearly marks the CAAR as preliminary. For M01, use this while the following month's payout export is still unavailable."}
             </div>
           </button>
 

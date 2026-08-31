@@ -161,6 +161,7 @@ function deriveReconciliationExceptions({
   moduleId: "M01" | "M02";
   uploads: Array<{
     artifact_key: string;
+    evidence_month: string | null;
     file_name: string;
     id: number;
     location_id: number;
@@ -740,6 +741,7 @@ function buildEvidenceRows({
   moduleId: "M01" | "M02";
   uploads: Array<{
     artifact_key: string;
+    evidence_month: string | null;
     file_name: string;
     id: number;
     page_count: number | null;
@@ -752,7 +754,7 @@ function buildEvidenceRows({
 }): CaarEvidenceTrace[] {
   const latestByArtifact = new Map<string, (typeof uploads)[number]>();
   for (const upload of uploads) {
-    const key = `${upload.artifact_key}:${upload.vendor ?? "global"}`;
+    const key = `${upload.artifact_key}:${upload.vendor ?? "global"}:${upload.evidence_month ?? "reusable"}`;
     if (!latestByArtifact.has(key)) {
       latestByArtifact.set(key, upload);
     }
@@ -784,6 +786,7 @@ function buildEvidenceRows({
 
     return {
       artifactKey: upload.artifact_key,
+      evidenceMonth: upload.evidence_month,
       fileName: upload.file_name,
       label: getArtifactLabel(moduleId, upload.artifact_key),
       matchPct: typeof validation?.matchPct === "number" ? validation.matchPct : null,
@@ -805,6 +808,7 @@ function buildEvidenceRows({
     if (existingKeys.has(artifactKey)) continue;
     evidenceRows.push({
       artifactKey,
+      evidenceMonth: null,
       fileName: null,
       label: getArtifactLabel(moduleId, artifactKey),
       matchPct: null,
@@ -993,6 +997,7 @@ export async function GET(request: Request) {
           orderBy: [{ uploaded_at: "desc" }, { id: "desc" }],
           select: {
             artifact_key: true,
+            evidence_month: true,
             file_name: true,
             id: true,
             location_id: true,

@@ -1,0 +1,117 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 7 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1295 >>
+stream
+BT
+/F1 10 Tf
+48 748 Td
+15 TL
+(DOORDASH MERCHANT SERVICES AGREEMENT) Tj
+T* (Test Fixture - Executed Agreement) Tj
+T* () Tj
+T* (Agreement ID: DD-CBM-2026-001) Tj
+T* (Effective Date: March 1, 2026) Tj
+T* (Expiration / Renewal Date: February 28, 2027) Tj
+T* (Market: Dallas-Fort Worth, Texas) Tj
+T* () Tj
+T* (MERCHANT) Tj
+T* (Legal Name: Country Burger - Murphy) Tj
+T* (Location: 104 North Murphy Road, Suite 210, Murphy, TX 75094) Tj
+T* (DoorDash Business ID: 11717) Tj
+T* (DoorDash Store ID: 241736) Tj
+T* () Tj
+T* (SERVICE AND COMMISSION SCHEDULE) Tj
+T* (Commission Base: Order subtotal before tax) Tj
+T* (Canonical Commission Base: order_subtotal) Tj
+T* (Marketplace Delivery Commission Rate: 20.00%) Tj
+T* (DashPass Member Delivery Commission Rate: 15.00%) Tj
+T* (Pickup / Carryout Commission Rate: 6.00%) Tj
+T* (Catering / Group Order Commission Rate: 20.00%) Tj
+T* (Sponsored Listing Rate: 0.00%) Tj
+T* (Marketing Opt-In Fee: 0.00% unless separately authorized in writing) Tj
+T* (Error Charge Cap: $0.00 unless supported by order-level evidence) Tj
+T* () Tj
+T* (The commission base excludes sales tax, staff tips, refunds, cancelled) Tj
+T* (orders, marketplace-facilitator tax, and DoorDash-funded promotions.) Tj
+T* (Merchant-funded discounts reduce the commissionable order subtotal.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 7 0 R >> >> >>
+endobj
+6 0 obj
+<< /Length 1700 >>
+stream
+BT
+/F1 10 Tf
+48 748 Td
+15 TL
+(DOORDASH MERCHANT SERVICES AGREEMENT - CONTINUED) Tj
+T* (Agreement ID: DD-CBM-2026-001) Tj
+T* () Tj
+T* (SETTLEMENT AND TAX TERMS) Tj
+T* (Payout Frequency: Weekly) Tj
+T* (Payout Currency: USD) Tj
+T* (Tax Remittance by DSP: Yes) Tj
+T* (DoorDash acts as marketplace facilitator where applicable and remits the) Tj
+T* (marketplace-facilitator taxes identified in its settlement statements.) Tj
+T* (Each payout must include a unique Payout ID for bank reconciliation.) Tj
+T* () Tj
+T* (EVIDENCE AND AUDIT TERMS) Tj
+T* (DoorDash will provide native settlement CSV exports identifying order) Tj
+T* (subtotals, commissions, taxes, adjustments, error charges, net totals,) Tj
+T* (payout dates, payout statuses, and Payout IDs. These native exports are) Tj
+T* (the governing settlement evidence for the applicable certification period.) Tj
+T* (The Merchant may compare those exports to POS and bank deposit evidence.) Tj
+T* () Tj
+T* (TERM) Tj
+T* (This agreement remains effective through February 28, 2027 and renews for) Tj
+T* (successive one-year periods unless either party gives 30 days written notice.) Tj
+T* () Tj
+T* (EXECUTION) Tj
+T* (Merchant Signatory: Jordan Ellis, Authorized Officer) Tj
+T* (Merchant Signature: /s/ Jordan Ellis) Tj
+T* (Merchant Signature Date: February 20, 2026) Tj
+T* () Tj
+T* (DoorDash Signatory: Taylor Morgan, Merchant Services Representative) Tj
+T* (DoorDash Signature: /s/ Taylor Morgan) Tj
+T* (DoorDash Signature Date: February 20, 2026) Tj
+T* () Tj
+T* (TEST DATA NOTICE) Tj
+T* (This machine-readable agreement is a non-production fixture created solely) Tj
+T* (for deterministic application testing. It is not a real commercial contract.) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+8 0 obj
+<< /Title (FohBoh Test M02 DoorDash DSP Agreement 2026) /Author (FohBoh Sentry Test Fixtures) /Subject (Executed DoorDash DSP agreement fixture for M02 certification testing) /Creator (FohBoh Sentry fixture generator) >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000001594 00000 n 
+0000001720 00000 n 
+0000003472 00000 n 
+0000003542 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R /Info 8 0 R >>
+startxref
+3778
+%%EOF
