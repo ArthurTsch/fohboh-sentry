@@ -196,7 +196,7 @@ const m02Artifacts = [
     format: "Prosperity Bank machine-readable PDF (prosperity-bank-statement-v1)",
     source: "Prosperity Bank operating-account statement",
     purpose:
-      "Monthly-final payout reconciliation evidence tying marketplace settlement payout to actual bank deposit behavior. It reuses the location-level Prosperity Bank PDF and provider-specific parsed metrics rather than requiring another upload. Other bank layouts require their own versioned parser.",
+      "Monthly-final payout reconciliation evidence tying marketplace settlement payout references to actual bank deposits. For Uber Eats, month M and M+1 bank statements are combined with M and M+1 settlement references only to reconstruct a weekly payout spanning the boundary; sales, fees, orders, and POS remain scoped to M. The control is settlement-led: unmatched certification payouts fail, while additional bank deposits outside the certification payout set are ignored. Other bank layouts require their own versioned parser.",
   },
 ];
 

@@ -108,8 +108,6 @@ export type PersistedUploadValidation = {
   schema: boolean;
   sizeBytes: number;
   sourceSystemKey?: string;
-  sourceHeaders?: string[];
-  sourceRows?: string[][];
   unmatchedHeaders?: string[];
   updatedAt: string;
   uploaded: boolean;
@@ -213,8 +211,6 @@ export async function validateUploadArtifact({
     schema,
     sizeBytes: buffer.byteLength,
     sourceSystemKey: detectedFormat?.format.sourceSystemKey,
-    sourceHeaders: artifactKey === "m02-settlement" || artifactKey === "m02-pos" ? headers : undefined,
-    sourceRows: artifactKey === "m02-settlement" || artifactKey === "m02-pos" ? metricRows : undefined,
     unmatchedHeaders: unmatchedHeaders.length > 0 ? unmatchedHeaders : undefined,
     updatedAt,
     uploaded: true,

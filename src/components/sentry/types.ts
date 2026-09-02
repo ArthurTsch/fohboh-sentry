@@ -101,7 +101,7 @@ export type CaarRuleCitationSummary = {
   ruleId: string;
   ruleVersion: string;
   sampleEvidenceCount: number;
-  sampleEvidence: Record<string, string | number | boolean | null>[];
+  sampleEvidence: Record<string, unknown>[];
   varianceDisplay: string;
 };
 
@@ -247,7 +247,6 @@ export type IntakeStepKey = "uploaded" | "hash" | "schema" | "fields";
 
 export type IntakeState = {
   evidenceMonth?: string;
-  mergeLineageReady?: boolean;
   detectedFormatKey?: string;
   detectedFormatName?: string;
   uploadId?: number;
@@ -274,6 +273,15 @@ export type IntakeState = {
     chargebackCount?: number;
     commissionRateAppliedAvg?: number;
     depositAmount?: number;
+    depositReferenceRows?: Array<{
+      activityMonth?: string;
+      amount: number;
+      candidateAmounts?: number[];
+      externalRefId: string;
+      lineText?: string;
+      postedDate?: string;
+      settledDate?: string;
+    }>;
     deliveryFeeAmount?: number;
     deliveryBasisAmount?: number;
     deliveryCommissionAmount?: number;
@@ -310,7 +318,9 @@ export type IntakeState = {
     payoutReferenceRows?: Array<{
       activityMonth?: string;
       amount: number;
+      certificationMonthAmount?: number;
       externalRefId: string;
+      followingMonthAmount?: number;
       rowNumber?: number;
       settledDate?: string;
       type?: string;

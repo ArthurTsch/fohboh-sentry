@@ -113,7 +113,7 @@ const guidePhases: GuidePhase[] = [
       {
         id: "3.3",
         text:
-          "Upload Data is now reserved for source documents only. For M02, upload the DSP settlement export, POS summary by channel, signed DSP agreement, and matching-period bank statement here. Contract configuration is governed separately in DIY Access and Schema Registry workflows.",
+          "Upload Data is now reserved for source documents only. For M02, upload the DSP settlement export, POS summary by channel, signed DSP agreement, and matching-period bank statement here. An Uber Eats monthly final also needs the following month's settlement and bank statement to verify a weekly payout that crosses the month boundary; following-month activity is excluded from the commercial calculation. Contract configuration is governed separately in DIY Access and Schema Registry workflows.",
         title: "Enter M02 Contract Config",
         where: "Where: Upload Data -> M02 document cards; DIY Access for contract governance",
       },

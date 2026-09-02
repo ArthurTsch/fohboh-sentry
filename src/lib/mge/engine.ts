@@ -119,7 +119,9 @@ type ReferenceRow = {
   activityMonth?: string;
   amount: number;
   candidateAmounts?: number[];
+  certificationMonthAmount?: number;
   externalRefId: string;
+  followingMonthAmount?: number;
   postedDate?: string;
   rowNumber?: number;
   settledDate?: string;
@@ -1677,7 +1679,9 @@ export function scopeArtifactToCertificationMonth(
   const payoutReferenceRows = retainLegacyM02PayoutRows
     ? metrics.payoutReferenceRows
     : scopeReferenceRows(metrics.payoutReferenceRows, payoutRowsHaveActivityMonth);
-  const depositReferenceRows = scopeReferenceRows(metrics.depositReferenceRows);
+  const depositRowsUseActivityMonth = artifact.key === "m02-bank" &&
+    Boolean(metrics.depositReferenceRows?.some((row) => row.activityMonth));
+  const depositReferenceRows = scopeReferenceRows(metrics.depositReferenceRows, depositRowsUseActivityMonth);
 
   if (metrics.payoutReferenceRows?.length) {
     const amount = roundCurrency((payoutReferenceRows ?? []).reduce((sum, row) => sum + row.amount, 0));
@@ -2310,6 +2314,7 @@ function buildCanonicalTrustGateCitations({
       bank_difference: reconciliationBreakdown.bankDifference,
       bank_difference_percent: reconciliationBreakdown.bankDifferencePct,
       bank_match_count: reconciliationBreakdown.bankMatchCount,
+      bank_weekly_reconciliation: reconciliationBreakdown.bankWeeklyReconciliation,
       bank_score_contribution: reconciliationBreakdown.bankContribution,
       fee_score_contribution: reconciliationBreakdown.feeContribution,
       payout_basis: roundCurrency(reconciliationBreakdown.payoutAmount),
@@ -2968,10 +2973,10 @@ function resolveCrossSystemReconciliationBreakdown(context: RuleContext) {
   const statementFees = context.moduleId === "M01"
     ? resolveM01ComparableFee(context.statement?.metrics)
     : numberValue(context.statement?.metrics?.feeAmount);
-  const matchedToastDeposits = context.moduleId === "M01" ? reconcileToastBankDeposits(context) : null;
-  const bankDeposit = numberValue(matchedToastDeposits?.matchedDepositAmount ?? context.bank?.metrics?.depositAmount);
+  const matchedPayoutDeposits = reconcilePayoutBankDeposits(context);
+  const bankDeposit = numberValue(matchedPayoutDeposits?.matchedDepositAmount ?? context.bank?.metrics?.depositAmount);
   const payoutAmount = numberValue(
-    matchedToastDeposits?.matchedPayoutAmount ||
+    matchedPayoutDeposits?.matchedPayoutAmount ||
       context.pos?.metrics?.payoutAmount ||
       context.statement?.metrics?.payoutAmount,
   );
@@ -3027,21 +3032,21 @@ function resolveCrossSystemReconciliationBreakdown(context: RuleContext) {
     if (delta <= 0.05) {
       bankContribution = 50;
       detailParts.push(
-        matchedToastDeposits
-          ? `Toast payout-reference bank tie-out cleared within 5% across ${matchedToastDeposits.matchCount} matched deposits.`
+        matchedPayoutDeposits
+          ? `Payout-reference bank tie-out cleared within 5% across ${matchedPayoutDeposits.matchCount} matched deposits.`
           : "Settlement-to-bank tie-out cleared within 5%.",
       );
     } else if (delta <= 0.12) {
       bankContribution = 25;
       detailParts.push(
-        matchedToastDeposits
-          ? `Toast payout-reference bank tie-out remains outside final tolerance across ${matchedToastDeposits.matchCount} matched deposits.`
+        matchedPayoutDeposits
+          ? `Payout-reference bank tie-out remains outside final tolerance across ${matchedPayoutDeposits.matchCount} matched deposits.`
           : "Settlement-to-bank tie-out remains outside final tolerance.",
       );
     } else {
       detailParts.push(
-        matchedToastDeposits
-          ? "Toast payout-reference bank tie-out failed."
+        matchedPayoutDeposits
+          ? "Payout-reference bank tie-out failed."
           : "Settlement-to-bank tie-out failed.",
       );
     }
@@ -3057,7 +3062,8 @@ function resolveCrossSystemReconciliationBreakdown(context: RuleContext) {
       bankDeposit > 0 && payoutAmount > 0
         ? roundCurrency(relativeDelta(bankDeposit, payoutAmount) * 100)
         : null,
-    bankMatchCount: matchedToastDeposits?.matchCount ?? 0,
+    bankMatchCount: matchedPayoutDeposits?.matchCount ?? 0,
+    bankWeeklyReconciliation: matchedPayoutDeposits?.matches ?? [],
     detailParts,
     feeContribution,
     payoutAmount,
@@ -3068,8 +3074,10 @@ function resolveCrossSystemReconciliationBreakdown(context: RuleContext) {
   };
 }
 
-function reconcileToastBankDeposits(context: RuleContext) {
-  const payoutRows = context.pos?.metrics?.payoutReferenceRows ?? [];
+function reconcilePayoutBankDeposits(context: RuleContext) {
+  const payoutRows = context.moduleId === "M01"
+    ? context.pos?.metrics?.payoutReferenceRows ?? []
+    : context.statement?.metrics?.payoutReferenceRows ?? [];
   const depositRows = context.bank?.metrics?.depositReferenceRows ?? [];
 
   if (!payoutRows.length || !depositRows.length) {
@@ -3080,6 +3088,7 @@ function reconcileToastBankDeposits(context: RuleContext) {
   let matchedDepositAmount = 0;
   let matchedPayoutAmount = 0;
   let matchCount = 0;
+  const matches: Array<Record<string, string | number | null>> = [];
 
   for (const payoutRow of payoutRows) {
     const payoutRef = normalizeReferenceId(payoutRow.externalRefId);
@@ -3087,7 +3096,8 @@ function reconcileToastBankDeposits(context: RuleContext) {
 
     const depositIndex = depositRows.findIndex((depositRow, index) => {
       if (usedDeposits.has(index)) return false;
-      if (!referenceIdsMatch(payoutRef, normalizeReferenceId(depositRow.externalRefId))) return false;
+      const referencesMatch = referenceIdsMatch(payoutRef, normalizeReferenceId(depositRow.externalRefId));
+      if (!referencesMatch && context.moduleId !== "M02") return false;
       return resolveReferenceRowMatchedAmount(depositRow, payoutRow.amount) !== null;
     });
 
@@ -3095,8 +3105,18 @@ function reconcileToastBankDeposits(context: RuleContext) {
 
     usedDeposits.add(depositIndex);
     matchedPayoutAmount += payoutRow.amount;
-    matchedDepositAmount += resolveReferenceRowMatchedAmount(depositRows[depositIndex], payoutRow.amount) ?? 0;
+    const matchedAmount = resolveReferenceRowMatchedAmount(depositRows[depositIndex], payoutRow.amount) ?? 0;
+    matchedDepositAmount += matchedAmount;
     matchCount += 1;
+    matches.push({
+      bankDeposit: roundCurrency(matchedAmount),
+      bankPostedDate: depositRows[depositIndex].postedDate ?? depositRows[depositIndex].settledDate ?? null,
+      certificationMonthAmount: roundCurrency(payoutRow.certificationMonthAmount ?? payoutRow.amount),
+      followingMonthAmount: roundCurrency(payoutRow.followingMonthAmount ?? 0),
+      payoutAmount: roundCurrency(payoutRow.amount),
+      payoutReference: payoutRef,
+      payoutSettledDate: payoutRow.settledDate ?? null,
+    });
   }
 
   if (matchCount === 0) {
@@ -3105,6 +3125,7 @@ function reconcileToastBankDeposits(context: RuleContext) {
 
   return {
     matchCount,
+    matches,
     matchedDepositAmount: roundCurrency(matchedDepositAmount),
     matchedPayoutAmount: roundCurrency(matchedPayoutAmount),
   };

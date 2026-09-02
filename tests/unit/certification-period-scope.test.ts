@@ -214,4 +214,53 @@ describe("certification-period evidence scope", () => {
     expect(result.mq6.data_freshness.detail).toContain("2026-07");
     expect(result.ready).toBe(false);
   });
+
+  it("matches an Uber payout reconstructed across June and July without adding July commercial activity", () => {
+    const result = runDeterministicModuleEngine({
+      artifacts: [
+        artifact("m02-settlement", {
+          basisAmount: 4379.96,
+          feeAmount: 1015.01,
+          monthlyMetrics: {
+            "2026-06": { basisAmount: 4379.96, feeAmount: 1015.01, orderCount: 152, payoutAmount: 3656.82, transactionCount: 152 },
+          },
+          orderCount: 152,
+          payoutAmount: 4606.51,
+          payoutReferenceRows: [
+            { activityMonth: "2026-06", amount: 1120.27, externalRefId: "A" },
+            { activityMonth: "2026-06", amount: 804.5, externalRefId: "B" },
+            { activityMonth: "2026-06", amount: 850.26, externalRefId: "C" },
+            { activityMonth: "2026-06", amount: 789.22, externalRefId: "D" },
+            { activityMonth: "2026-06", amount: 1042.26, externalRefId: "E" },
+          ],
+        }),
+        artifact("m02-pos", {
+          monthlyMetrics: { "2026-06": { basisAmount: 4379.96, orderCount: 152, transactionCount: 152 } },
+        }),
+        artifact("m02-agreement", undefined),
+        artifact("m02-bank", {
+          depositAmount: 4606.51,
+          depositReferenceRows: [
+            { activityMonth: "2026-06", amount: 1120.27, externalRefId: "A" },
+            { activityMonth: "2026-06", amount: 804.5, externalRefId: "B" },
+            { activityMonth: "2026-06", amount: 850.26, externalRefId: "C" },
+            { activityMonth: "2026-06", amount: 789.22, externalRefId: "D" },
+            { activityMonth: "2026-06", amount: 1042.26, externalRefId: "E" },
+          ],
+        }),
+        {
+          ...artifact("m02-contract", undefined),
+          contractValues: { commission_base: "Subtotal before tax", delivery_active: "true", rate_delivery: "25" },
+          type: "Manual Entry",
+        },
+      ],
+      cadence: "monthly_final",
+      certificationMonth: "2026-06",
+      evaluationDate: new Date("2026-06-30T12:00:00.000Z"),
+      moduleId: "M02",
+    });
+
+    expect(result.dimensions["Cross-System Reconciliation"]).toBe(100);
+    expect(result.mq6.cross_system_reconciliation.detail).toContain("5 matched deposits");
+  });
 });

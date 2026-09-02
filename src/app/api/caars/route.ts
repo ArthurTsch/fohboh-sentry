@@ -34,6 +34,7 @@ function formatAmount(value: number) {
 }
 
 type ReferenceRow = {
+  activityMonth?: string;
   amount?: number;
   candidateAmounts?: number[];
   externalRefId?: string;
@@ -85,7 +86,7 @@ function parseCitationSamples(value: unknown) {
     : [];
 }
 
-function normalizeCitationSampleValue(value: unknown): string | number | boolean | null {
+export function normalizeCitationSampleValue(value: unknown): unknown {
   if (
     value === null ||
     typeof value === "string" ||
@@ -93,6 +94,19 @@ function normalizeCitationSampleValue(value: unknown): string | number | boolean
     typeof value === "boolean"
   ) {
     return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(normalizeCitationSampleValue);
+  }
+
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entryValue]) => [
+        key,
+        normalizeCitationSampleValue(entryValue),
+      ]),
+    );
   }
 
   return null;
@@ -152,7 +166,7 @@ function parseUploadMetrics(value: unknown): UploadMetricsLike | null {
   return metrics && typeof metrics === "object" ? (metrics as UploadMetricsLike) : null;
 }
 
-function deriveReconciliationExceptions({
+export function deriveReconciliationExceptions({
   certificationPeriod,
   moduleId,
   uploads,
@@ -174,8 +188,12 @@ function deriveReconciliationExceptions({
     vendor: string | null;
   }>;
 }) {
-  const posUpload = uploads.find((upload) => upload.artifact_key.endsWith("pos"));
-  const bankUpload = uploads.find((upload) => upload.artifact_key.endsWith("bank"));
+  const sourceUploads = uploads.filter((upload) =>
+    moduleId === "M02" ? upload.artifact_key.includes("settlement") : upload.artifact_key.endsWith("pos"),
+  );
+  const bankUploads = uploads.filter((upload) => upload.artifact_key.endsWith("bank"));
+  const posUpload = sourceUploads[0];
+  const bankUpload = bankUploads[0];
   if (!posUpload || !bankUpload) {
     return { exceptions: [], notes: [], warnings: [] };
   }
@@ -188,10 +206,24 @@ function deriveReconciliationExceptions({
     posValidation.detectedFormatKey.includes("payout")
     ? [`Document "${posUpload.file_name}" in the POS slot was detected as ${String(posValidation.detectedFormatName ?? "a payout export")}. Its gross settled-batch total is grouped by settlement date, while the processor card-volume total is grouped by fee-charge timing. Their difference is timing context, not a POS discrepancy or proven loss.`]
     : [];
-  const posMetrics = parseUploadMetrics(posUpload.validation_summary);
-  const bankMetrics = parseUploadMetrics(bankUpload.validation_summary);
-  const payoutRows = posMetrics?.payoutReferenceRows ?? [];
-  const depositRows = bankMetrics?.depositReferenceRows ?? [];
+  const targetMonth = getCertificationPeriodMonth(certificationPeriod);
+  const rawPayoutRows = sourceUploads.flatMap((upload) => parseUploadMetrics(upload.validation_summary)?.payoutReferenceRows ?? []);
+  const currentPayoutRows = moduleId === "M02" && targetMonth
+    ? rawPayoutRows.filter((row) => row.activityMonth === targetMonth)
+    : rawPayoutRows;
+  const currentRefs = new Set(currentPayoutRows.map((row) => normalizeReferenceId(row.externalRefId)));
+  const payoutRows = moduleId === "M02"
+    ? [...rawPayoutRows.filter((row) => currentRefs.has(normalizeReferenceId(row.externalRefId))).reduce((grouped, row) => {
+        const key = normalizeReferenceId(row.externalRefId);
+        if (!key || !currentRefs.has(key)) return grouped;
+        const existing = grouped.get(key);
+        grouped.set(key, { ...row, amount: Number(((existing?.amount ?? 0) + (row.amount ?? 0)).toFixed(2)) });
+        return grouped;
+      }, new Map<string, ReferenceRow>()).values()]
+    : currentPayoutRows;
+  const depositRows = bankUploads.flatMap((upload) => parseUploadMetrics(upload.validation_summary)?.depositReferenceRows ?? []);
+  const sourceFileNames = sourceUploads.map((upload) => upload.file_name).join("; ");
+  const bankFileNames = bankUploads.map((upload) => upload.file_name).join("; ");
   if (payoutRows.length === 0 && depositRows.length === 0) {
     return { exceptions: [], notes: [], warnings: settlementTimingWarning };
   }
@@ -210,12 +242,13 @@ function deriveReconciliationExceptions({
       .map((depositRow, index) => ({ depositRow, index }))
       .filter(({ depositRow, index }) => {
         if (usedDepositIndexes.has(index)) return false;
-        return referenceIdsMatch(payoutRef, normalizeReferenceId(depositRow.externalRefId));
+        return referenceIdsMatch(payoutRef, normalizeReferenceId(depositRow.externalRefId)) ||
+          (moduleId === "M02" && resolveReferenceRowMatchedAmount(depositRow, payoutAmount) !== null);
       });
 
     if (matchingDepositIndexes.length === 0) {
       exceptions.push(
-        `${moduleId} payout ID ${payoutRef} for ${formatAmount(payoutAmount)} was extracted from "${posUpload.file_name}" and was not found in bank statement "${bankUpload.file_name}".`,
+        `${moduleId} payout ID ${payoutRef} for ${formatAmount(payoutAmount)} was extracted from "${sourceFileNames}" and was not found in bank statement evidence "${bankFileNames}".`,
       );
       continue;
     }
@@ -255,6 +288,9 @@ function deriveReconciliationExceptions({
 
   depositRows.forEach((depositRow, index) => {
     if (usedDepositIndexes.has(index)) return;
+    // M02 reconciliation is settlement-led: every certification payout must
+    // reach the bank, but unrelated bank credits are outside this CAAR scope.
+    if (moduleId === "M02") return;
     const depositRef = normalizeReferenceId(depositRow.externalRefId);
     const depositAmount = typeof depositRow.amount === "number" ? depositRow.amount : 0;
     if (!depositRef || depositAmount <= 0) return;
@@ -266,7 +302,7 @@ function deriveReconciliationExceptions({
       );
     } else {
       exceptions.push(
-        `${moduleId} deposit ID ${depositRef} for ${formatAmount(depositAmount)} appears in bank statement "${bankUpload.file_name}" but not in payout export "${posUpload.file_name}".`,
+        `${moduleId} deposit ID ${depositRef} for ${formatAmount(depositAmount)} appears in bank statement evidence "${bankFileNames}" but not in the certification payout references from "${sourceFileNames}".`,
       );
     }
   });

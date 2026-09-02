@@ -3,6 +3,20 @@ import { describe, expect, it } from "vitest";
 import { extractPdfMetrics } from "@/lib/uploads/pdf";
 
 describe("processor PDF metric extraction", () => {
+  it("extracts Uber deposits and payout references from Prosperity statements", () => {
+    const result = extractPdfMetrics("m02-bank", `
+07/07/2026 External Deposit UBER USA 6787 FSM0IA5QM5SUT4L - EDI PAYMNT $1,042.26
+REF*TN*5F9MB3NA7V\\ 5F9MB3NA7V0EWNS
+07/14/2026 External Deposit Uber USA, LLC - PARTNER $835.07
+    `, "ubereats", "prosperity");
+
+    expect(result.metrics?.depositAmount).toBe(1877.33);
+    expect(result.metrics?.depositReferenceRows).toEqual([
+      expect.objectContaining({ amount: 1042.26, externalRefId: "5F9MB3NA7V0EWNS", postedDate: "07/07/2026" }),
+      expect.objectContaining({ amount: 835.07, postedDate: "07/14/2026" }),
+    ]);
+  });
+
   it("rejects bank layouts that are not explicitly supported", () => {
     const result = extractPdfMetrics("m01-bank", "Deposits and additions 1,234.56", null, "other-bank");
 

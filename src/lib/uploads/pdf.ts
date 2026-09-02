@@ -303,8 +303,12 @@ function extractBankMetrics(artifactKey: string, text: string, vendorKey?: strin
   const toastDepositRefs = artifactKey.startsWith("m01-bank") && (!normalizedVendor || normalizedVendor === "toast")
     ? extractToastBankDepositRows(lines)
     : [];
-  const depositMatches = toastDepositRefs.length > 0
-    ? toastDepositRefs.map((row) => row.amount)
+  const dspDepositRefs = artifactKey.startsWith("m02-bank")
+    ? extractDspBankDepositRows(lines, normalizedVendor)
+    : [];
+  const referenceRows = toastDepositRefs.length > 0 ? toastDepositRefs : dspDepositRefs;
+  const depositMatches = referenceRows.length > 0
+    ? referenceRows.map((row) => row.amount)
     : extractLegacyBankDepositMatches(artifactKey, lines, vendorKey);
 
   const fallbackSummary = extractSummaryFallback(artifactKey, text, vendorKey);
@@ -321,7 +325,7 @@ function extractBankMetrics(artifactKey: string, text: string, vendorKey?: strin
   return {
     metrics: {
       depositAmount,
-      depositReferenceRows: toastDepositRefs.length > 0 ? toastDepositRefs : undefined,
+      depositReferenceRows: referenceRows.length > 0 ? referenceRows : undefined,
       payoutAmount: depositAmount,
       transactionCount: depositMatches.length || undefined,
     },
@@ -550,6 +554,34 @@ function extractProcessorStatementMetrics(text: string): PdfMetricExtraction {
         : ["Processor-owned fee total was not detected separately from pass-through fees in this processor PDF."]),
     ],
   };
+}
+
+function extractDspBankDepositRows(lines: string[], normalizedVendor: string): PdfReferenceRow[] {
+  const descriptor = normalizedVendor === "ubereats"
+    ? /external deposit\s+uber/i
+    : normalizedVendor === "doordash"
+      ? /external deposit\s+doordash/i
+      : null;
+  if (!descriptor) return [];
+
+  const rows: PdfReferenceRow[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!descriptor.test(line) || /withdrawal/i.test(line)) continue;
+    const amount = extractCurrencyFromLine(line);
+    if (amount <= 0) continue;
+    const nearby = lines.slice(index, index + 3).join(" ");
+    const referenceMatch = nearby.match(/REF\*TN\*([A-Z0-9]+)(?:\\\s*([A-Z0-9]+))?/i);
+    const externalRefId = referenceMatch?.[2] ?? referenceMatch?.[1] ??
+      `${normalizedVendor}-${extractPostedDate(line) ?? index}-${roundCurrency(amount)}`;
+    rows.push({
+      amount: roundCurrency(amount),
+      externalRefId: normalizeReferenceId(externalRefId),
+      lineText: nearby,
+      postedDate: extractPostedDate(line),
+    });
+  }
+  return rows;
 }
 
 function findSummaryAmount(lines: string[], labelPattern: RegExp): number | undefined {

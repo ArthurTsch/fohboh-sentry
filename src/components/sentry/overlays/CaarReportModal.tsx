@@ -49,10 +49,9 @@ function deriveMonthlyEvidenceWindow(period: string) {
   if (!match) return null;
   const source = new Date(`${match[1]} 1, ${match[2]} 00:00:00 UTC`);
   if (Number.isNaN(source.getTime())) return null;
-  const previous = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth() - 1, 1));
   const following = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth() + 1, 1));
   const format = (value: Date) => new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC", year: "numeric" }).format(value);
-  return { certificationLabel: format(source), followingLabel: format(following), previousLabel: format(previous) };
+  return { certificationLabel: format(source), followingLabel: format(following) };
 }
 
 export function CaarReportModal({
@@ -525,7 +524,7 @@ export function CaarReportModal({
             </div>
             {m02EvidenceWindow ? (
               <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-7 text-blue-950">
-                <strong>Strict monthly scope:</strong> This provider-specific CAAR uses the <strong>{m02EvidenceWindow.certificationLabel}</strong> settlement/POS export window. If the <strong>{m02EvidenceWindow.previousLabel}</strong> export also contains {m02EvidenceWindow.certificationLabel} activity, those rows are included and repeated source rows are removed. Only activity dated in <strong>{m02EvidenceWindow.certificationLabel}</strong> is calculated; later payouts remain only when linked to included orders.
+                <strong>Strict commercial scope:</strong> This provider-specific CAAR calculates fees, sales, and orders only from <strong>{m02EvidenceWindow.certificationLabel}</strong> settlement and POS activity. For Uber Eats, the following month’s settlement and bank statement may be used only to reconstruct and verify a weekly payout spanning the month boundary; following-month commercial activity does not affect this CAAR’s fee or POS calculations.
               </div>
             ) : null}
             <div className="mb-3 font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
@@ -1571,7 +1570,7 @@ function describeRuleCitation(
   disposition: CitationDisposition,
 ): RuleCitationTip {
   const ruleId = row.ruleId;
-  const sample = row.sampleEvidence[0] ?? {};
+  const sample = (row.sampleEvidence[0] ?? {}) as RuleCitationSample;
   const override = RULE_TOOLTIP_OVERRIDES[ruleId];
   if (override) {
     return {
@@ -2408,6 +2407,36 @@ function ReconciliationBreakdown({
             <br />
             <strong>Cross-System Reconciliation: {calculation.reconciliationTotalScore}/100.</strong>
           </div>
+          {"weeklyBankReconciliation" in calculation && calculation.weeklyBankReconciliation.length > 0 ? (
+            <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">
+                Weekly payout-to-bank calculation
+              </div>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                Each row starts with a payout reference found in the certification-month settlement. When that weekly payout also contains following-month orders, Sentry adds only that matching reference’s following-month portion to reconstruct the amount deposited by the bank.
+              </p>
+              <div className="mt-3 overflow-x-auto">
+                <SimpleTable
+                  columns={["Payout reference", "Certification month", "Following-month tail", "Reconstructed payout", "Bank deposit", "Bank posted", "Result"]}
+                  rows={calculation.weeklyBankReconciliation.map((row) => [
+                    <span key={`${row.payoutReference}:reference`} className="font-[family-name:var(--font-mono)] text-xs">{row.payoutReference}</span>,
+                    formatMoneyLike(row.certificationMonthAmount),
+                    formatMoneyLike(row.followingMonthAmount),
+                    formatMoneyLike(row.payoutAmount),
+                    formatMoneyLike(row.bankDeposit),
+                    row.bankPostedDate ?? "Not persisted",
+                    <StatusText key={`${row.payoutReference}:result`} good={row.bankDeposit !== null && Math.abs(row.payoutAmount - row.bankDeposit) <= 0.01}>
+                      {row.bankDeposit !== null && Math.abs(row.payoutAmount - row.bankDeposit) <= 0.01 ? "Matched" : "Review"}
+                    </StatusText>,
+                  ])}
+                />
+              </div>
+              <div className="mt-3 rounded-lg border border-[var(--border)] bg-white px-3 py-2 font-[family-name:var(--font-mono)] text-xs leading-6 text-[var(--text)]">
+                reconstructed weekly payout = certification-month portion + matching following-month tail
+                <br />bank difference = |reconstructed weekly payout − deposited amount|
+              </div>
+            </div>
+          ) : null}
         </>
       ) : (
         <div className="mt-3 rounded-xl border border-[rgba(214,48,49,0.2)] bg-[rgba(214,48,49,0.05)] p-4 text-sm leading-7 text-[var(--accent)]">

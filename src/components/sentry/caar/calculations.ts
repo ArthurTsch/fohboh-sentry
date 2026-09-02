@@ -23,6 +23,22 @@ export function deriveM02Calculation(
     typeof reconciliationSample?.[key] === "number" ? reconciliationSample[key] as number : null;
   const reconciliationText = (key: string) =>
     typeof reconciliationSample?.[key] === "string" ? reconciliationSample[key] as string : null;
+  const weeklyBankReconciliation = Array.isArray(reconciliationSample?.bank_weekly_reconciliation)
+    ? reconciliationSample.bank_weekly_reconciliation.flatMap((value) => {
+        if (!value || typeof value !== "object") return [];
+        const row = value as Record<string, unknown>;
+        if (typeof row.payoutReference !== "string" || typeof row.payoutAmount !== "number") return [];
+        return [{
+          bankDeposit: typeof row.bankDeposit === "number" ? row.bankDeposit : null,
+          bankPostedDate: typeof row.bankPostedDate === "string" ? row.bankPostedDate : null,
+          certificationMonthAmount: typeof row.certificationMonthAmount === "number" ? row.certificationMonthAmount : row.payoutAmount,
+          followingMonthAmount: typeof row.followingMonthAmount === "number" ? row.followingMonthAmount : 0,
+          payoutAmount: row.payoutAmount,
+          payoutReference: row.payoutReference,
+          payoutSettledDate: typeof row.payoutSettledDate === "string" ? row.payoutSettledDate : null,
+        }];
+      })
+    : [];
   const reconciliationBasis = number("reconciliation_statement_basis");
   const posBasis = number("pos_basis_amount");
   const reconciliationDifference = number("reconciliation_difference");
@@ -47,6 +63,7 @@ export function deriveM02Calculation(
     reconciliationPct: reconciliationBasis > 0 ? (reconciliationDifference / reconciliationBasis) * 100 : 0,
     totalBasis: number("commission_base_amount"),
     tg04Score: reconciliationNumber("tg04_score"),
+    weeklyBankReconciliation,
     ...deriveBankReconciliation(reconciliationNumber),
   };
 }

@@ -28,8 +28,9 @@ Certifications are deliberately scoped.
 - DoorDash and Uber Eats uploads, schemas, contracts, certification runs, findings, and recovery values remain vendor-scoped.
 - Evidence from one M02 provider must not satisfy another provider's certification.
 - Monthly-final certification requires the governed evidence set, including bank evidence where applicable.
-- M02 runs are strict by provider and activity month. For month `M`, the `M` settlement and POS exports are required. An `M-1` export is also merged when it actually contains activity dated in `M`; repeated rows are deduplicated. Only business/order dates in `M` are calculated, while later payouts remain only when linked to included orders.
-- An M02 monthly final requires that provider's current-window settlement/POS exports, the certification-month bank statement, and signed agreement. A previous-window export is optional unless it contributes target-month activity. Monthly preliminary can report an interim state but cannot represent a final release.
+- M02 commercial calculations are strict by provider and calendar month. For month `M`, only settlement and POS activity dated in `M` contributes to sales, fees, orders, and recovery.
+- An Uber Eats M02 monthly final additionally requires the `M+1` settlement and bank statement. They are used only to reconstruct weekly payout references spanning the month boundary and match them against deposits in the `M` and `M+1` bank statements. `M+1` POS evidence and commercial activity do not participate in the `M` calculation. Monthly preliminary can report an incomplete package but cannot represent a final release.
+- M02 payout-to-bank reconciliation is settlement-led: every reconstructed payout belonging to the certification month must match a bank deposit. Additional bank deposits without a certification-month settlement reference are ignored because they may belong to another activity period or another source; they do not create CAAR warnings or deductions.
 - Invalid-schema evidence is excluded from recovery calculations.
 
 The principal server-side implementation is in [`src/lib/certification/service.ts`](src/lib/certification/service.ts), with deterministic evaluation in [`src/components/sentry/caar-engine.ts`](src/components/sentry/caar-engine.ts) and [`src/lib/mge/engine.ts`](src/lib/mge/engine.ts).

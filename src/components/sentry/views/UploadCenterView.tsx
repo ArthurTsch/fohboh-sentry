@@ -531,7 +531,7 @@ export function UploadCenterView({
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--accent)]">{activeModule === "M02" ? "Export window month" : "Evidence month"}</div>
-            <div className="mt-1 text-sm text-[var(--muted)]">{activeModule === "M02" ? "Choose the export's labeled window month. A final certification requires the selected window and automatically includes a previous window only when it contains activity for the certification month." : "Choose the month shown by the source report before uploading. Monthly files are kept separately."}</div>
+            <div className="mt-1 text-sm text-[var(--muted)]">{activeModule === "M02" ? "Choose the calendar month shown by the export. Each settlement and POS summary file is used only for that same certification month." : "Choose the month shown by the source report before uploading. Monthly files are kept separately."}</div>
           </div>
           <label className="grid gap-2">
             <span className="sr-only">Evidence month</span>
@@ -539,7 +539,7 @@ export function UploadCenterView({
           </label>
         </div>
         {activeModule === "M01" ? <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">A final M01 certification uses the selected certification month plus the following month’s payout export. Example: June final requires June and July payout files, but only rows with June sales-period dates are calculated.</div> : null}
-        {activeModule === "M02" ? <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">M02 is certified one provider and one activity month at a time. Upload that month’s settlement and POS exports. If the previous export also contains activity for the selected month, Sentry includes it and removes repeated rows automatically. The bank statement is required for the selected month, while the signed agreement is reusable.</div> : null}
+        {activeModule === "M02" ? <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900">M02 commercial activity is certified one provider and one calendar month at a time. Upload that month’s settlement and POS summary. For Uber Eats monthly final, also upload the following month’s settlement and bank statement so a weekly payout spanning the month boundary can be tied to the bank without adding next-month activity to the commercial calculation. The signed agreement is reusable.</div> : null}
       </div>
 
       <div className="border-b border-[var(--border)] bg-[var(--surface)] px-5 py-4">

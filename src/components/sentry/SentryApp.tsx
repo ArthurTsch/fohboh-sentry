@@ -210,7 +210,6 @@ type PersistedUploadRecord = {
   locationName: string;
   matchedColumns?: number;
   matchPct?: number;
-  mergeLineageReady?: boolean;
   metrics?: IntakeState["metrics"];
   moduleId: "M01" | "M02";
   pageCount?: number;
@@ -645,7 +644,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
         matchedColumns: upload.matchedColumns,
         expectedColumns: upload.expectedColumns,
         metrics: upload.metrics,
-        mergeLineageReady: upload.mergeLineageReady,
         parseWarnings: upload.parseWarnings,
         unmatchedHeaders: upload.unmatchedHeaders,
         updatedAt: upload.updatedAt,
@@ -1003,8 +1001,6 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
     const [year, month] = certificationMonth.split("-").map(Number);
     const followingDate = new Date(Date.UTC(year, month, 1));
     const followingMonth = `${followingDate.getUTCFullYear()}-${String(followingDate.getUTCMonth() + 1).padStart(2, "0")}`;
-    const previousDate = new Date(Date.UTC(year, month - 2, 1));
-    const previousMonth = `${previousDate.getUTCFullYear()}-${String(previousDate.getUTCMonth() + 1).padStart(2, "0")}`;
     const monthLabel = (value: string) => {
       const [labelYear, labelMonth] = value.split("-").map(Number);
       return new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC", year: "numeric" }).format(
@@ -1015,10 +1011,13 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
 
     for (const artifact of uploadModule.artifacts.filter((item) => item.type !== "Manual Entry")) {
       const scopedVendor = moduleId === "M02" ? vendorKey : undefined;
+      const isUberEats = moduleId === "M02" && vendorKey?.toLowerCase().replace(/[^a-z0-9]/g, "") === "ubereats";
       const requiredMonths = artifact.key.includes("agreement")
         ? [undefined]
         : moduleId === "M01" && artifact.key.startsWith("m01-pos")
           ? [certificationMonth, followingMonth]
+          : isUberEats && (artifact.key.startsWith("m02-settlement") || artifact.key.startsWith("m02-bank"))
+            ? [certificationMonth, followingMonth]
           : moduleId === "M02" &&
               (artifact.key.startsWith("m02-settlement") || artifact.key.startsWith("m02-pos"))
             ? [certificationMonth]
@@ -1040,35 +1039,9 @@ export function SentryApp({ initialSession = null }: { initialSession?: SessionS
           moduleId === "M02" &&
           evidenceMonth &&
           (artifact.key.startsWith("m02-settlement") || artifact.key.startsWith("m02-pos")) &&
-          !state.metrics?.monthlyMetrics?.[certificationMonth]
+          !state.metrics?.monthlyMetrics?.[evidenceMonth]
         ) {
-          missing.push(`${artifact.label} export for ${monthLabel(evidenceMonth)} contains no dated activity rows for ${monthLabel(certificationMonth)}.`);
-        } else if (
-          moduleId === "M02" &&
-          evidenceMonth &&
-          (artifact.key.startsWith("m02-settlement") || artifact.key.startsWith("m02-pos")) &&
-          !state.mergeLineageReady
-        ) {
-          missing.push(`${artifact.label} export for ${monthLabel(evidenceMonth)} must be re-uploaded for safe overlap deduplication.`);
-        }
-      }
-
-      if (
-        moduleId === "M02" &&
-        (artifact.key.startsWith("m02-settlement") || artifact.key.startsWith("m02-pos"))
-      ) {
-        const prefix = `${location.accountId}:${locationId}:${moduleId}:${artifact.key}:`;
-        const priorState = Object.entries(artifactIntakeState)
-          .filter(([key, value]) =>
-            key.startsWith(prefix) &&
-            value.uploaded &&
-            (!scopedVendor || value.vendorKey === scopedVendor) &&
-            value.evidenceMonth === previousMonth,
-          )
-          .map(([, value]) => value)
-          .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))[0];
-        if (priorState?.metrics?.monthlyMetrics?.[certificationMonth] && !priorState.mergeLineageReady) {
-          missing.push(`${artifact.label} export for ${monthLabel(previousMonth)} must be re-uploaded so its overlapping ${monthLabel(certificationMonth)} rows can be deduplicated safely.`);
+          missing.push(`${artifact.label} export for ${monthLabel(evidenceMonth)} contains no dated activity rows for ${monthLabel(evidenceMonth)}.`);
         }
       }
     }

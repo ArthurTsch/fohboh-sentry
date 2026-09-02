@@ -22,7 +22,6 @@ import { persistGeneratedCaar } from "@/lib/caar/persistence";
 import { ensureLocationV2ForRestaurant } from "@/lib/production/legacy-sync";
 import { getScopedRestaurantWhere } from "@/lib/auth/team-access";
 import type { SystemHealthFlag } from "@/lib/mge/engine";
-import { extractUploadMetrics } from "@/lib/uploads/intake";
 
 const BASE_UPLOAD_TEMPLATE_ACCOUNT_ID = "C001";
 const CERTIFICATION_TRANSACTION_MAX_WAIT_MS = 10_000;
@@ -67,8 +66,6 @@ type PersistedUploadValidation = {
   rows?: number;
   schema?: boolean;
   sizeBytes?: number;
-  sourceHeaders?: string[];
-  sourceRows?: string[][];
   unmatchedHeaders?: string[];
   updatedAt?: string;
   uploaded?: boolean;
@@ -119,57 +116,54 @@ function mergeM01PayoutValidations(validations: PersistedUploadValidation[]) {
   };
 }
 
-function getM02RowIdentity(artifactKey: string, headers: string[], row: string[]) {
-  const value = (...names: string[]) => {
-    const index = names.map((name) => headers.indexOf(name)).find((candidate) => candidate >= 0) ?? -1;
-    return index >= 0 ? String(row[index] ?? "").trim().toLowerCase() : "";
-  };
-  if (artifactKey.startsWith("m02-pos")) {
-    const date = value("business_day", "business day", "date");
-    const channel = value("channel", "order_source_name", "order source name");
-    if (date || channel) return `pos:${date}:${channel}`;
+export function mergeUberBankReconciliationTail(
+  current: PersistedUploadValidation,
+  following: PersistedUploadValidation,
+  certificationMonth: string,
+) {
+  const currentRows = (current.metrics?.payoutReferenceRows ?? [])
+    .filter((row) => row.activityMonth === certificationMonth);
+  const currentRefs = new Set(currentRows.map((row) => row.externalRefId));
+  const grouped = new Map<string, (typeof currentRows)[number]>();
+  for (const row of [
+    ...currentRows.map((row) => ({ ...row, certificationMonthAmount: row.amount, followingMonthAmount: 0 })),
+    ...(following.metrics?.payoutReferenceRows ?? [])
+      .filter((row) => currentRefs.has(row.externalRefId))
+      .map((row) => ({ ...row, certificationMonthAmount: 0, followingMonthAmount: row.amount })),
+  ]) {
+    const existing = grouped.get(row.externalRefId);
+    grouped.set(row.externalRefId, {
+      ...(existing ?? row),
+      activityMonth: certificationMonth,
+      amount: Number(((existing?.amount ?? 0) + row.amount).toFixed(2)),
+      certificationMonthAmount: Number(((existing?.certificationMonthAmount ?? 0) + row.certificationMonthAmount).toFixed(2)),
+      followingMonthAmount: Number(((existing?.followingMonthAmount ?? 0) + row.followingMonthAmount).toFixed(2)),
+    });
   }
-  const transactionId = value(
-    "doordash_transaction_id",
-    "doordash transaction id",
-    "transaction_id",
-    "transaction id",
-    "workflow_id",
-    "workflow id",
-  );
-  if (transactionId) return `transaction:${transactionId}`;
-  const orderId = value(
-    "doordash_order_id",
-    "doordash order id",
-    "order_id",
-    "order id",
-    "delivery_uuid",
-    "delivery uuid",
-  );
-  if (orderId) return `order:${orderId}`;
-  return `row:${createHash("sha256").update(row.join("\u001f")).digest("hex")}`;
+  const payoutReferenceRows = [...grouped.values()];
+  return {
+    ...current.metrics,
+    payoutAmount: Number(payoutReferenceRows.reduce((sum, row) => sum + row.amount, 0).toFixed(2)),
+    payoutReferenceRows,
+  } satisfies IntakeState["metrics"];
 }
 
-export function mergeM02WindowValidations(
-  artifactKey: string,
-  validations: PersistedUploadValidation[],
+export function mergeBankStatementMetrics(
+  current: PersistedUploadValidation,
+  following: PersistedUploadValidation,
+  certificationMonth: string,
 ) {
-  const source = validations.find((validation) => validation.sourceHeaders?.length && validation.sourceRows?.length);
-  if (!source?.sourceHeaders) return null;
-  const headers = [...new Set(validations.flatMap((validation) => validation.sourceHeaders ?? []))];
-  const rows = new Map<string, string[]>();
-  for (const validation of validations) {
-    if (!validation.sourceHeaders) return null;
-    const sourceIndex = new Map(validation.sourceHeaders.map((header, index) => [header, index]));
-    for (const row of validation.sourceRows ?? []) {
-      const normalizedRow = headers.map((header) => row[sourceIndex.get(header) ?? -1] ?? "");
-      rows.set(getM02RowIdentity(artifactKey, headers, normalizedRow), normalizedRow);
-    }
-  }
+  const depositReferenceRows = [
+    ...(current.metrics?.depositReferenceRows ?? []),
+    ...(following.metrics?.depositReferenceRows ?? []),
+  ].map((row) => ({ ...row, activityMonth: certificationMonth }));
+  const depositAmount = Number(depositReferenceRows.reduce((sum, row) => sum + row.amount, 0).toFixed(2));
   return {
-    duplicateRowsRemoved: validations.reduce((sum, validation) => sum + (validation.sourceRows?.length ?? 0), 0) - rows.size,
-    metrics: extractUploadMetrics(artifactKey, headers, [...rows.values()]),
-  };
+    ...current.metrics,
+    depositAmount,
+    depositReferenceRows,
+    payoutAmount: depositAmount,
+  } satisfies IntakeState["metrics"];
 }
 
 type CertificationExecutionResult = {
@@ -903,12 +897,8 @@ export async function executePersistedCertification({
     (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "") ===
       certificationVendor.replace(/[^a-z0-9]/g, "");
   const followingMonth = addCalendarMonth(certificationMonth, 1);
-  const previousMonth = addCalendarMonth(certificationMonth, -1);
-  const containsCertificationMonthActivity = (row: (typeof uploadRows)[number]) => {
-    if (!row.validation_summary || typeof row.validation_summary !== "object") return false;
-    const validation = row.validation_summary as unknown as PersistedUploadValidation;
-    return Boolean(validation.metrics?.monthlyMetrics?.[certificationMonth]);
-  };
+  const useUberBankTail = cadence === "monthly_final" &&
+    certificationVendor?.replace(/[^a-z0-9]/g, "") === "ubereats";
   const scopedUploadRows = uploadRows.filter((row) => {
     if (row.module === "M02" && !vendorMatches(row.vendor)) return false;
     if (row.artifact_key.includes("agreement")) return true;
@@ -920,7 +910,16 @@ export async function executePersistedCertification({
       (row.artifact_key.startsWith("m02-settlement") || row.artifact_key.startsWith("m02-pos"))
     ) {
       return row.evidence_month === certificationMonth ||
-        (row.evidence_month === previousMonth && containsCertificationMonthActivity(row));
+        (useUberBankTail &&
+          row.artifact_key.startsWith("m02-settlement") &&
+          row.evidence_month === followingMonth);
+    }
+    if (
+      row.module === "M02" &&
+      row.artifact_key.startsWith("m02-bank") &&
+      useUberBankTail
+    ) {
+      return row.evidence_month === certificationMonth || row.evidence_month === followingMonth;
     }
     return row.evidence_month === certificationMonth;
   });
@@ -936,7 +935,7 @@ export async function executePersistedCertification({
     }
   }
   if (requestedModules[0] === "M02" && cadence === "monthly_final") {
-    const blockers = getM02MonthlyFinalEvidenceBlockers(scopedUploadRows, certificationMonth);
+    const blockers = getM02MonthlyFinalEvidenceBlockers(scopedUploadRows, certificationMonth, certificationVendor);
     if (blockers.length > 0) {
       throw new Error(
         `M02 final certification for ${certificationMonth} requires a complete provider-specific monthly evidence package. ${blockers.join(" ")} Run a monthly preliminary certification until the missing evidence is uploaded.`,
@@ -960,13 +959,14 @@ export async function executePersistedCertification({
   const m01PayoutUploads = scopedUploadRows.filter(
     (upload) => upload.module === "M01" && upload.artifact_key.startsWith("m01-pos"),
   );
-  const m02WindowUploads = scopedUploadRows.filter(
-    (upload) =>
-      upload.module === "M02" &&
-      (upload.artifact_key.startsWith("m02-settlement") || upload.artifact_key.startsWith("m02-pos")),
-  );
+  const uberTailUploads = useUberBankTail
+    ? scopedUploadRows.filter((upload) =>
+        upload.module === "M02" &&
+        (upload.artifact_key.startsWith("m02-settlement") || upload.artifact_key.startsWith("m02-bank")),
+      )
+    : [];
   for (const upload of scopedUploadRows.filter(
-    (row) => !m01PayoutUploads.includes(row) && !m02WindowUploads.includes(row),
+    (row) => !m01PayoutUploads.includes(row) && !uberTailUploads.includes(row),
   )) {
     const validation =
       upload.validation_summary && typeof upload.validation_summary === "object"
@@ -1039,45 +1039,43 @@ export async function executePersistedCertification({
       vendorName: first.vendor ?? undefined,
     };
   }
-  for (const artifactKey of [...new Set(m02WindowUploads.map((upload) => upload.artifact_key))]) {
-    const uploadsForArtifact = m02WindowUploads.filter((upload) => upload.artifact_key === artifactKey);
-    const validations = uploadsForArtifact
-      .map((upload) => upload.validation_summary && typeof upload.validation_summary === "object"
-        ? upload.validation_summary as unknown as PersistedUploadValidation
-        : null)
-      .filter((validation): validation is PersistedUploadValidation => Boolean(validation));
-    const merged = mergeM02WindowValidations(artifactKey, validations);
-    const preliminaryFallbackUpload = cadence === "monthly_preliminary"
-      ? uploadsForArtifact.find((upload) => upload.evidence_month === certificationMonth) ?? uploadsForArtifact[0]
+  for (const artifactKey of [...new Set(uberTailUploads.map((upload) => upload.artifact_key))]) {
+    const currentUpload = uberTailUploads.find((upload) =>
+      upload.artifact_key === artifactKey && upload.evidence_month === certificationMonth,
+    );
+    const followingUpload = uberTailUploads.find((upload) =>
+      upload.artifact_key === artifactKey && upload.evidence_month === followingMonth,
+    );
+    const currentValidation = currentUpload?.validation_summary && typeof currentUpload.validation_summary === "object"
+      ? currentUpload.validation_summary as unknown as PersistedUploadValidation
       : null;
-    const preliminaryFallback = preliminaryFallbackUpload?.validation_summary &&
-      typeof preliminaryFallbackUpload.validation_summary === "object"
-        ? preliminaryFallbackUpload.validation_summary as unknown as PersistedUploadValidation
-        : null;
-    const first = uploadsForArtifact[0];
-    const mergedMetrics = merged?.metrics ?? preliminaryFallback?.metrics;
-    if (!mergedMetrics || !first || validations.length === 0) continue;
+    const followingValidation = followingUpload?.validation_summary && typeof followingUpload.validation_summary === "object"
+      ? followingUpload.validation_summary as unknown as PersistedUploadValidation
+      : null;
+    if (!currentUpload || !followingUpload || !currentValidation || !followingValidation) continue;
+    const metrics = artifactKey.startsWith("m02-settlement")
+      ? mergeUberBankReconciliationTail(currentValidation, followingValidation, certificationMonth)
+      : mergeBankStatementMetrics(currentValidation, followingValidation, certificationMonth);
     artifactIntakeState[getArtifactStateKey(
       restaurant.accountId,
       restaurant.locationId,
       "M02",
       artifactKey,
-      first.vendor,
+      currentUpload.vendor,
     )] = {
-      detectedFormatKey: validations[0].detectedFormatKey,
-      detectedFormatName: validations[0].detectedFormatName,
-      evidenceMonth: `${previousMonth}+${certificationMonth}`,
-      fields: validations.every((validation) => Boolean(validation.fields)),
-      fileName: uploadsForArtifact.map((upload) => `${upload.evidence_month}: ${upload.file_name}`).join("; "),
-      hash: validations.every((validation) => Boolean(validation.hash ?? validation.hashValue)),
-      metrics: mergedMetrics,
-      schema: validations.every((validation) => Boolean(validation.schema)),
+      detectedFormatKey: currentValidation.detectedFormatKey,
+      detectedFormatName: currentValidation.detectedFormatName,
+      evidenceMonth: `${certificationMonth}+${followingMonth} bank verification`,
+      fields: Boolean(currentValidation.fields && followingValidation.fields),
+      fileName: `${certificationMonth}: ${currentUpload.file_name}; ${followingMonth}: ${followingUpload.file_name}`,
+      hash: Boolean((currentValidation.hash ?? currentValidation.hashValue) && (followingValidation.hash ?? followingValidation.hashValue)),
+      metrics,
+      schema: Boolean(currentValidation.schema && followingValidation.schema),
       uploaded: true,
-      vendorKey: first.vendor ?? undefined,
-      vendorName: first.vendor ?? undefined,
+      vendorKey: currentUpload.vendor ?? undefined,
+      vendorName: currentUpload.vendor ?? undefined,
     };
   }
-
   const artifactContractState: Record<string, Record<string, string>> = {};
   for (const contract of contractRows) {
     const payload =
