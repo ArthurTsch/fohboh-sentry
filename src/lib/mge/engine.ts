@@ -23,6 +23,7 @@ type Metrics = {
   depositReferenceRows?: ReferenceRow[];
   deliveryFeeAmount?: number;
   deliveryBasisAmount?: number;
+  deliveryCommissionableBasisRows?: number[];
   deliveryCommissionAmount?: number;
   deliveryOrderCount?: number;
   duplicateOrderCount?: number;
@@ -48,6 +49,7 @@ type Metrics = {
   orderCount?: number;
   pickupOrderCount?: number;
   pickupBasisAmount?: number;
+  pickupCommissionableBasisRows?: number[];
   pickupCommissionAmount?: number;
   promoOrderCount?: number;
   payoutAmount?: number;
@@ -94,6 +96,7 @@ type MonthlyMetrics = {
   basisAmount?: number;
   chargebackCount?: number;
   deliveryBasisAmount?: number;
+  deliveryCommissionableBasisRows?: number[];
   deliveryCommissionAmount?: number;
   deliveryFeeAmount?: number;
   deliveryOrderCount?: number;
@@ -107,6 +110,7 @@ type MonthlyMetrics = {
   otherFeeAmount?: number;
   payoutAmount?: number;
   pickupBasisAmount?: number;
+  pickupCommissionableBasisRows?: number[];
   pickupCommissionAmount?: number;
   pickupOrderCount?: number;
   promoOrderCount?: number;
@@ -889,10 +893,11 @@ const M02_RULES: DeterministicRule[] = [
       const actualCommission = computeActualM02Commission(statement);
       const expectedRate = computeExpectedM02Rate(contract, statement);
       const basisAmount = resolveM02ContractBase(statement, context.pos?.metrics, contract);
+      const expectedCommission = computeExpectedM02Commission(statement, contract);
       if (actualCommission <= 0 || expectedRate <= 0 || basisAmount <= 0 || residualVariance <= 1) return null;
       const observedRate = (actualCommission / Math.max(basisAmount, 1)) * 100;
       const variance = Math.min(
-        roundCurrency(Math.max(0, actualCommission - basisAmount * (expectedRate / 100))),
+        roundCurrency(Math.max(0, actualCommission - expectedCommission)),
         residualVariance,
       );
       if (observedRate <= expectedRate + 0.5 || variance <= 1) return null;
@@ -1124,12 +1129,13 @@ const M02_RULES: DeterministicRule[] = [
       const actualCommission = computeActualM02Commission(statement);
       const basisAmount = numberValue(statement.basisAmount);
       const expectedRate = computeExpectedM02Rate(contract, statement);
+      const expectedCommission = computeExpectedM02Commission(statement, contract);
       if (actualCommission <= 0 || basisAmount <= 0 || expectedRate <= 0 || residualVariance <= 1) return null;
       const observedRate = (actualCommission / Math.max(basisAmount, 1)) * 100;
       const varianceBand = Math.abs(observedRate - expectedRate);
       if (varianceBand <= 1) return null;
       const variance = Math.min(
-        roundCurrency(Math.max(0, actualCommission - basisAmount * (expectedRate / 100))),
+        roundCurrency(Math.max(0, actualCommission - expectedCommission)),
         residualVariance,
       );
       if (variance <= 1) return null;
@@ -1615,6 +1621,7 @@ export function scopeArtifactToCertificationMonth(
       basisAmount: numberValue(matchingMetrics?.basisAmount),
       chargebackCount: numberValue(matchingMetrics?.chargebackCount),
       deliveryBasisAmount: numberValue(matchingMetrics?.deliveryBasisAmount),
+      deliveryCommissionableBasisRows: matchingMetrics?.deliveryCommissionableBasisRows ?? [],
       deliveryCommissionAmount: numberValue(matchingMetrics?.deliveryCommissionAmount),
       deliveryFeeAmount: numberValue(matchingMetrics?.deliveryFeeAmount),
       deliveryOrderCount: numberValue(matchingMetrics?.deliveryOrderCount),
@@ -1643,6 +1650,7 @@ export function scopeArtifactToCertificationMonth(
             ? numberValue(metrics.payoutAmount)
             : 0,
       pickupBasisAmount: numberValue(matchingMetrics?.pickupBasisAmount),
+      pickupCommissionableBasisRows: matchingMetrics?.pickupCommissionableBasisRows ?? [],
       pickupCommissionAmount: numberValue(matchingMetrics?.pickupCommissionAmount),
       pickupOrderCount: numberValue(matchingMetrics?.pickupOrderCount),
       promoOrderCount: numberValue(matchingMetrics?.promoOrderCount),
@@ -3665,14 +3673,31 @@ function buildSupplementalM02CanonicalCitations(
     const pickupBasis = numberValue(statement.pickupBasisAmount);
     const deliveryRate = numberValue(contract.rate_delivery);
     const pickupRate = numberValue(contract.rate_pickup) || deliveryRate;
-    const expectedDeliveryCommission = roundCurrency(deliveryBasis * (deliveryRate / 100));
-    const expectedPickupCommission = roundCurrency(pickupBasis * (pickupRate / 100));
+    const deliveryCommissionableRows = statement.deliveryCommissionableBasisRows ?? [];
+    const pickupCommissionableRows = statement.pickupCommissionableBasisRows ?? [];
+    const adjustedDeliveryBasis = deliveryCommissionableRows.length > 0
+      ? roundCurrency(deliveryCommissionableRows.reduce((sum, value) => sum + numberValue(value), 0))
+      : deliveryBasis;
+    const adjustedPickupBasis = pickupCommissionableRows.length > 0
+      ? roundCurrency(pickupCommissionableRows.reduce((sum, value) => sum + numberValue(value), 0))
+      : pickupBasis;
+    const expectedDeliveryCommission = computePerOrderM02Commission(
+      deliveryCommissionableRows,
+      deliveryBasis,
+      deliveryRate,
+    );
+    const expectedPickupCommission = computePerOrderM02Commission(
+      pickupCommissionableRows,
+      pickupBasis,
+      pickupRate,
+    );
     const expectedCommission = roundCurrency(expectedDeliveryCommission + expectedPickupCommission);
     citations.push(buildNarrativeCitation("R016", {
       actual_commission: actualCommission,
       commission_base_amount: basisAmount,
       detail: "Commission basis was reconstructed from governed settlement and POS source evidence.",
       delivery_basis_amount: deliveryBasis,
+      delivery_commissionable_basis_amount: adjustedDeliveryBasis,
       delivery_rate_pct: deliveryRate,
       expected_commission: expectedCommission,
       expected_delivery_commission: expectedDeliveryCommission,
@@ -3680,10 +3705,14 @@ function buildSupplementalM02CanonicalCitations(
       expected_rate_pct: expectedRate,
       observed_commission: actualCommission,
       pickup_basis_amount: pickupBasis,
+      pickup_commissionable_basis_amount: adjustedPickupBasis,
       pickup_rate_pct: pickupRate,
       pos_basis_amount: posBasis,
       reconciliation_difference: roundCurrency(Math.abs(statementBasis - posBasis)),
       reconciliation_statement_basis: statementBasis,
+      merchant_funded_discount_amount: roundCurrency(
+        deliveryBasis + pickupBasis - adjustedDeliveryBasis - adjustedPickupBasis,
+      ),
     }));
   }
   if (observedRate > expectedRate + 0.5 && expectedRate > 0) {
@@ -4039,6 +4068,53 @@ function computeActualM02Commission(metrics: Metrics) {
   return Math.max(0, roundCurrency(numberValue(metrics.basisAmount) - numberValue(metrics.payoutAmount)));
 }
 
+function computePerOrderM02Commission(
+  commissionableBasisRows: number[],
+  fallbackAggregateBasis: number,
+  ratePct: number,
+) {
+  if (commissionableBasisRows.length === 0) {
+    return roundCurrency(fallbackAggregateBasis * (ratePct / 100));
+  }
+  return roundCurrency(
+    commissionableBasisRows.reduce(
+      (sum, basis) => sum + roundM02OrderCommission(numberValue(basis), ratePct),
+      0,
+    ),
+  );
+}
+
+function roundM02OrderCommission(basis: number, ratePct: number) {
+  // Currency exports use decimal half-up rounding. A small epsilon prevents
+  // binary floating-point values such as 1.214999999999 from losing a cent.
+  return Math.round((basis * (ratePct / 100) + 1e-9) * 100) / 100;
+}
+
+function computeExpectedM02Commission(
+  statement: Metrics,
+  contract: Record<string, string>,
+) {
+  const deliveryBasis = numberValue(statement.deliveryBasisAmount);
+  const pickupBasis = numberValue(statement.pickupBasisAmount);
+  const deliveryRate = numberValue(contract.rate_delivery);
+  const pickupRate = numberValue(contract.rate_pickup) || deliveryRate;
+  const classifiedBasis = deliveryBasis + pickupBasis;
+  const unclassifiedBasis = Math.max(0, numberValue(statement.basisAmount) - classifiedBasis);
+  return roundCurrency(
+    computePerOrderM02Commission(
+      statement.deliveryCommissionableBasisRows ?? [],
+      deliveryBasis,
+      deliveryRate,
+    ) +
+      computePerOrderM02Commission(
+        statement.pickupCommissionableBasisRows ?? [],
+        pickupBasis,
+        pickupRate,
+      ) +
+      roundCurrency(unclassifiedBasis * (deliveryRate / 100)),
+  );
+}
+
 function resolveM02ContractBase(
   statement?: Metrics,
   pos?: Metrics,
@@ -4113,14 +4189,13 @@ function resolveComparableM02OrderCounts(statement?: Metrics, pos?: Metrics) {
 
 function computeM02Recovery(
   statement?: Metrics,
-  pos?: Metrics,
+  _pos?: Metrics,
   contract?: Record<string, string> | null,
 ) {
   if (!statement || !contract) return 0;
-  const basisAmount = resolveM02ContractBase(statement, pos, contract);
   const actualCommission = computeActualM02Commission(statement);
-  const expectedRate = computeExpectedM02Rate(contract, statement);
-  return Math.max(0, roundCurrency(actualCommission - basisAmount * (expectedRate / 100)));
+  const expectedCommission = computeExpectedM02Commission(statement, contract);
+  return Math.max(0, roundCurrency(actualCommission - expectedCommission));
 }
 
 function resolveM03ExcludedSales(

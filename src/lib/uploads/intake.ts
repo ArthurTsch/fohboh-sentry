@@ -16,6 +16,7 @@ type UploadMetrics = {
   depositReferenceRows?: UploadReferenceRow[];
   deliveryFeeAmount?: number;
   deliveryBasisAmount?: number;
+  deliveryCommissionableBasisRows?: number[];
   deliveryCommissionAmount?: number;
   deliveryOrderCount?: number;
   duplicateOrderCount?: number;
@@ -37,6 +38,7 @@ type UploadMetrics = {
   payoutAmount?: number;
   payoutReferenceRows?: UploadReferenceRow[];
   pickupBasisAmount?: number;
+  pickupCommissionableBasisRows?: number[];
   pickupCommissionAmount?: number;
   pickupOrderCount?: number;
   promoOrderCount?: number;
@@ -60,6 +62,7 @@ type UploadMonthlyMetrics = {
   basisAmount: number;
   chargebackCount: number;
   deliveryBasisAmount: number;
+  deliveryCommissionableBasisRows: number[];
   deliveryCommissionAmount: number;
   deliveryFeeAmount: number;
   deliveryOrderCount: number;
@@ -73,6 +76,7 @@ type UploadMonthlyMetrics = {
   otherFeeAmount: number;
   payoutAmount: number;
   pickupBasisAmount: number;
+  pickupCommissionableBasisRows: number[];
   pickupCommissionAmount: number;
   pickupOrderCount: number;
   promoOrderCount: number;
@@ -303,6 +307,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
     depositReferenceRows: [],
     deliveryFeeAmount: 0,
     deliveryBasisAmount: 0,
+    deliveryCommissionableBasisRows: [],
     deliveryCommissionAmount: 0,
     deliveryOrderCount: 0,
     duplicateOrderCount: 0,
@@ -324,6 +329,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
     payoutAmount: 0,
     payoutReferenceRows: [],
     pickupBasisAmount: 0,
+    pickupCommissionableBasisRows: [],
     pickupCommissionAmount: 0,
     pickupOrderCount: 0,
     promoOrderCount: 0,
@@ -406,6 +412,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
           basisAmount: 0,
           chargebackCount: 0,
           deliveryBasisAmount: 0,
+          deliveryCommissionableBasisRows: [],
           deliveryCommissionAmount: 0,
           deliveryFeeAmount: 0,
           deliveryOrderCount: 0,
@@ -419,6 +426,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
           otherFeeAmount: 0,
           payoutAmount: 0,
           pickupBasisAmount: 0,
+          pickupCommissionableBasisRows: [],
           pickupCommissionAmount: 0,
           pickupOrderCount: 0,
           promoOrderCount: 0,
@@ -453,12 +461,22 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
     metrics.feeAmount += rowCommissionAmount;
     const fulfillmentType =
       artifactKey === "m02-settlement" ? resolveM02FulfillmentType(headers, row) : null;
+    // DoorDash's governed commission base is the order subtotal after any
+    // merchant-funded promotion. DoorDash-funded and third-party-funded
+    // promotions do not reduce this basis. Preserve each row so the engine can
+    // apply the contract rate and the processor's cent-level per-order rounding.
+    const merchantFundedDiscount = Math.abs(read(
+      "customer discounts from marketing | (funded by you)",
+    ));
+    const commissionableRowBasis = roundTo2(Math.max(0, rowBasisAmount - merchantFundedDiscount));
     if (fulfillmentType === "delivery") {
       metrics.deliveryBasisAmount += rowBasisAmount;
+      metrics.deliveryCommissionableBasisRows.push(commissionableRowBasis);
       metrics.deliveryCommissionAmount += rowCommissionAmount;
       metrics.deliveryOrderCount += 1;
     } else if (fulfillmentType === "pickup") {
       metrics.pickupBasisAmount += rowBasisAmount;
+      metrics.pickupCommissionableBasisRows.push(commissionableRowBasis);
       metrics.pickupCommissionAmount += rowCommissionAmount;
       metrics.pickupOrderCount += 1;
     }
@@ -468,6 +486,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
         basisAmount: 0,
         chargebackCount: 0,
         deliveryBasisAmount: 0,
+        deliveryCommissionableBasisRows: [],
         deliveryCommissionAmount: 0,
         deliveryFeeAmount: 0,
         deliveryOrderCount: 0,
@@ -481,6 +500,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
         otherFeeAmount: 0,
         payoutAmount: 0,
         pickupBasisAmount: 0,
+        pickupCommissionableBasisRows: [],
         pickupCommissionAmount: 0,
         pickupOrderCount: 0,
         promoOrderCount: 0,
@@ -494,10 +514,12 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
       bucket.transactionCount += 1;
       if (fulfillmentType === "delivery") {
         bucket.deliveryBasisAmount += rowBasisAmount;
+        bucket.deliveryCommissionableBasisRows.push(commissionableRowBasis);
         bucket.deliveryCommissionAmount += rowCommissionAmount;
         bucket.deliveryOrderCount += 1;
       } else if (fulfillmentType === "pickup") {
         bucket.pickupBasisAmount += rowBasisAmount;
+        bucket.pickupCommissionableBasisRows.push(commissionableRowBasis);
         bucket.pickupCommissionAmount += rowCommissionAmount;
         bucket.pickupOrderCount += 1;
       }
@@ -748,6 +770,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
         basisAmount: roundTo2(bucket.basisAmount),
         chargebackCount: round(bucket.chargebackCount),
         deliveryBasisAmount: roundTo2(bucket.deliveryBasisAmount),
+        deliveryCommissionableBasisRows: bucket.deliveryCommissionableBasisRows.map(roundTo2),
         deliveryCommissionAmount: roundTo2(bucket.deliveryCommissionAmount),
         deliveryFeeAmount: roundTo2(bucket.deliveryFeeAmount),
         deliveryOrderCount: round(bucket.deliveryOrderCount),
@@ -761,6 +784,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
         otherFeeAmount: roundTo2(bucket.otherFeeAmount),
         payoutAmount: roundTo2(bucket.payoutAmount),
         pickupBasisAmount: roundTo2(bucket.pickupBasisAmount),
+        pickupCommissionableBasisRows: bucket.pickupCommissionableBasisRows.map(roundTo2),
         pickupCommissionAmount: roundTo2(bucket.pickupCommissionAmount),
         pickupOrderCount: round(bucket.pickupOrderCount),
         promoOrderCount: round(bucket.promoOrderCount),

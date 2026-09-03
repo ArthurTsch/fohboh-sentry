@@ -284,6 +284,7 @@ export type IntakeState = {
     }>;
     deliveryFeeAmount?: number;
     deliveryBasisAmount?: number;
+    deliveryCommissionableBasisRows?: number[];
     deliveryCommissionAmount?: number;
     deliveryOrderCount?: number;
     duplicateOrderCount?: number;
@@ -297,12 +298,14 @@ export type IntakeState = {
       adjustmentAmount?: number;
       basisAmount?: number;
       deliveryBasisAmount?: number;
+      deliveryCommissionableBasisRows?: number[];
       deliveryCommissionAmount?: number;
       deliveryOrderCount?: number;
       feeAmount?: number;
       orderCount?: number;
       payoutAmount?: number;
       pickupBasisAmount?: number;
+      pickupCommissionableBasisRows?: number[];
       pickupCommissionAmount?: number;
       pickupOrderCount?: number;
       transactionCount?: number;
@@ -326,6 +329,7 @@ export type IntakeState = {
       type?: string;
     }>;
     pickupBasisAmount?: number;
+    pickupCommissionableBasisRows?: number[];
     pickupCommissionAmount?: number;
     refundCount?: number;
     serviceFeeAmount?: number;

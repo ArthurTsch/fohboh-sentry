@@ -268,7 +268,8 @@ const workflowCards = [
     items: [
       "Contract Config is the governed legal fee model used by the engine.",
       "For M01 it includes values like `markup_bps`, `txn_fee`, `monthly_fee`, card-brand rate fields, pricing model, and chargeback fee.",
-      "For M02 it includes separate delivery and pickup commission rates, commission base, and marketplace remittance logic. Expected commission is reconstructed from the classified delivery and pickup bases rather than an averaged rate.",
+      "For M02 it includes separate delivery and pickup commission rates, commission base, and marketplace remittance logic. Expected commission is reconstructed per order from its classified delivery or pickup basis rather than an averaged rate.",
+      "For DoorDash, merchant-funded discounts reduce the order subtotal used as the commissionable basis. DoorDash-funded and third-party-funded promotions do not. The engine rounds each order's expected commission to cents before summing the certification-month total.",
       "Sealing the contract config creates the governed fee baseline used in certification math and in TG08 formula integrity checks.",
     ],
   },

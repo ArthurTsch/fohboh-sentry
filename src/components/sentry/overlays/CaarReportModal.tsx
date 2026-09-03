@@ -531,8 +531,8 @@ export function CaarReportModal({
               Values extracted from uploaded documents
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <ValueChip label="Delivery basis" value={formatMoneyLike(m02Calculation.deliveryBasis)} />
-              <ValueChip label="Pickup basis" value={formatMoneyLike(m02Calculation.pickupBasis)} />
+              <ValueChip label="Gross delivery sales" value={formatMoneyLike(m02Calculation.deliveryBasis)} />
+              <ValueChip label="Gross pickup sales" value={formatMoneyLike(m02Calculation.pickupBasis)} />
               <ValueChip label="Comparable POS basis" value={formatMoneyLike(m02Calculation.posBasis)} />
               <ValueChip label="Actual DSP commission" value={formatMoneyLike(m02Calculation.actualCommission)} />
             </div>
@@ -545,18 +545,23 @@ export function CaarReportModal({
                   Contract fee calculation
                 </div>
                 <div className="mt-2">
-                  Delivery: {formatMoneyLike(m02Calculation.deliveryBasis)} × {m02Calculation.deliveryRate.toFixed(2)}% = {formatMoneyLike(m02Calculation.expectedDeliveryCommission)}
+                  Delivery: {formatMoneyLike(m02Calculation.deliveryCommissionableBasis)} adjusted basis × {m02Calculation.deliveryRate.toFixed(2)}% per order = {formatMoneyLike(m02Calculation.expectedDeliveryCommission)}
                 </div>
                 <div>
-                  Pickup: {formatMoneyLike(m02Calculation.pickupBasis)} × {m02Calculation.pickupRate.toFixed(2)}% = {formatMoneyLike(m02Calculation.expectedPickupCommission)}
+                  Pickup: {formatMoneyLike(m02Calculation.pickupCommissionableBasis)} adjusted basis × {m02Calculation.pickupRate.toFixed(2)}% per order = {formatMoneyLike(m02Calculation.expectedPickupCommission)}
                 </div>
+                {m02Calculation.merchantFundedDiscount > 0 ? (
+                  <div className="mt-2 text-[var(--muted)]">
+                    Merchant-funded discounts reducing the commissionable basis: −{formatMoneyLike(m02Calculation.merchantFundedDiscount)}. DoorDash-funded and third-party-funded promotions are excluded from this adjustment.
+                  </div>
+                ) : null}
                 <div className="mt-2 font-semibold">
                   Expected commission: {formatMoneyLike(m02Calculation.expectedCommission)} · Actual commission: {formatMoneyLike(m02Calculation.actualCommission)}
                 </div>
                 <div className="mt-1 font-semibold text-[var(--accent)]">
                   Persisted certified recovery: {m02Calculation.certifiedRecoveryDisplay}
                 </div>
-                <div className="mt-1 text-xs text-[var(--muted)]">This is the exact cent-level amount stored by the certification engine. It is not recalculated from rounded display totals.</div>
+                <div className="mt-1 text-xs text-[var(--muted)]">Expected commission is calculated and rounded to cents per order, matching the settlement method. The recovery is the exact cent-level amount stored by the certification engine.</div>
               </div>
               <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 text-sm leading-7 text-[var(--text)]">
                 <div className="font-[family-name:var(--font-mono)] text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--muted)]">

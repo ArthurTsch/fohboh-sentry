@@ -21,6 +21,54 @@ function artifact(
 }
 
 describe("M02 citation consistency", () => {
+  it("uses merchant-discount-adjusted order bases and per-order rounding", () => {
+    const result = runDeterministicModuleEngine({
+      artifacts: [
+        artifact("m02-settlement", "CSV", {
+          metrics: {
+            basisAmount: 40.59,
+            deliveryBasisAmount: 20.59,
+            deliveryCommissionableBasisRows: [4.49, 8.1],
+            deliveryCommissionAmount: 1.89,
+            deliveryOrderCount: 2,
+            feeAmount: 3.09,
+            orderCount: 3,
+            pickupBasisAmount: 20,
+            pickupCommissionableBasisRows: [20],
+            pickupCommissionAmount: 1.2,
+            pickupOrderCount: 1,
+            transactionCount: 3,
+          },
+        }),
+        artifact("m02-pos", "CSV", { metrics: { basisAmount: 40.59, orderCount: 3 } }),
+        artifact("m02-agreement", "PDF"),
+        artifact("m02-bank", "PDF", { metrics: { depositAmount: 40.59 } }),
+        artifact("m02-contract", "Manual Entry", {
+          contractValues: {
+            commission_base: "order_subtotal",
+            delivery_active: "true",
+            rate_delivery: "15",
+            rate_pickup: "6",
+          },
+        }),
+      ],
+      cadence: "monthly_final",
+      certificationMonth: "2026-06",
+      evaluationDate: new Date("2026-06-30T12:00:00.000Z"),
+      moduleId: "M02",
+    });
+
+    const evidence = result.ruleCitations.find((row) => row.ruleId === "R016")?.sampleEvidence[0];
+    expect(result.recoveryValue).toBe(0);
+    expect(evidence).toMatchObject({
+      actual_commission: 3.09,
+      delivery_commissionable_basis_amount: 12.59,
+      expected_commission: 3.09,
+      merchant_funded_discount_amount: 8,
+      pickup_commissionable_basis_amount: 20,
+    });
+  });
+
   it("does not fire R123 when the DSP-to-POS comparison is not evaluable", () => {
     const result = runDeterministicModuleEngine({
       artifacts: [

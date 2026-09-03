@@ -741,6 +741,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
     depositAmount: 0,
     deliveryFeeAmount: 0,
     deliveryBasisAmount: 0,
+    deliveryCommissionableBasisRows: [] as number[],
     deliveryCommissionAmount: 0,
     deliveryOrderCount: 0,
     errorChargeAmount: 0,
@@ -758,6 +759,7 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
     promoOrderCount: 0,
     payoutAmount: 0,
     pickupBasisAmount: 0,
+    pickupCommissionableBasisRows: [] as number[],
     pickupCommissionAmount: 0,
     refundCount: 0,
     serviceFeeAmount: 0,
@@ -820,12 +822,18 @@ export function extractUploadMetrics(artifactKey: string, headers: string[], row
       artifactKey === "m02-settlement"
         ? resolveM02FulfillmentType(normalizedHeaders, row)
         : null;
+    const merchantFundedDiscount = Math.abs(read(
+      "customer discounts from marketing | (funded by you)",
+    ));
+    const commissionableRowBasis = Math.round(Math.max(0, rowBasisAmount - merchantFundedDiscount) * 100) / 100;
     if (fulfillmentType === "delivery") {
       metrics.deliveryBasisAmount += rowBasisAmount;
+      metrics.deliveryCommissionableBasisRows.push(commissionableRowBasis);
       metrics.deliveryCommissionAmount += rowCommissionAmount;
       metrics.deliveryOrderCount += 1;
     } else if (fulfillmentType === "pickup") {
       metrics.pickupBasisAmount += rowBasisAmount;
+      metrics.pickupCommissionableBasisRows.push(commissionableRowBasis);
       metrics.pickupCommissionAmount += rowCommissionAmount;
       metrics.pickupOrderCount += 1;
     }
