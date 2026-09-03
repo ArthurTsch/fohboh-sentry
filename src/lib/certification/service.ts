@@ -1071,6 +1071,10 @@ export async function executePersistedCertification({
       hash: Boolean((currentValidation.hash ?? currentValidation.hashValue) && (followingValidation.hash ?? followingValidation.hashValue)),
       metrics,
       schema: Boolean(currentValidation.schema && followingValidation.schema),
+      updatedAt:
+        currentValidation.updatedAt ??
+        currentUpload.uploaded_at?.toISOString() ??
+        undefined,
       uploaded: true,
       vendorKey: currentUpload.vendor ?? undefined,
       vendorName: currentUpload.vendor ?? undefined,

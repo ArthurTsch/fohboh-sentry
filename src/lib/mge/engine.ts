@@ -2082,9 +2082,14 @@ function buildCanonicalIngestionCitations(context: RuleContext) {
     numberValue(statementMetrics?.errorChargeAmount) < 0 ||
     numberValue(statementMetrics?.payoutAmount) < 0 ||
     numberValue(bank?.metrics?.depositAmount) < 0;
+  const hasCertifiedPeriodCoverage =
+    (statementMetrics?.certificationPeriodDetectedMonths?.length ?? 0) > 0 &&
+    statementMetrics?.certificationPeriodMismatch !== true;
+  const hasMonthBuckets = Object.keys(statementMetrics?.monthlyMetrics ?? {}).length > 0;
   const hasDateRange =
+    hasCertifiedPeriodCoverage ||
     numberValue(statementMetrics?.settlementLagDaysAvg) > 0 ||
-    numberValue(statement?.updatedAt ? 1 : 0) > 0;
+    (!hasMonthBuckets && Boolean(statement?.updatedAt));
 
   const citations = [
     buildNarrativeCitation("R001", {
@@ -2154,6 +2159,8 @@ function buildCanonicalIngestionCitations(context: RuleContext) {
         ? "Date-range validation produced a usable governed certification window."
         : "Date-range validation could not be confirmed from the active governed package.",
       date_range_ready: hasDateRange,
+      detected_months: statementMetrics?.certificationPeriodDetectedMonths?.join(", ") ?? null,
+      period_mismatch: statementMetrics?.certificationPeriodMismatch === true,
       settlement_lag_days_avg: numberValue(statementMetrics?.settlementLagDaysAvg),
     }),
     buildNarrativeCitation("R012", {

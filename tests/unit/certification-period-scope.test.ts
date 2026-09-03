@@ -262,5 +262,13 @@ describe("certification-period evidence scope", () => {
 
     expect(result.dimensions["Cross-System Reconciliation"]).toBe(100);
     expect(result.mq6.cross_system_reconciliation.detail).toContain("5 matched deposits");
+    expect(result.ruleCitations.find((citation) => citation.ruleId === "R011")).toMatchObject({
+      disposition: "passed",
+      sampleEvidence: [expect.objectContaining({
+        date_range_ready: true,
+        detected_months: "2026-06",
+        period_mismatch: false,
+      })],
+    });
   });
 });

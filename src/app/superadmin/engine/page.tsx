@@ -97,7 +97,7 @@ const architectureSteps = [
     step: "1",
     title: "Source Intake",
     text:
-      "The app receives raw evidence per location and governed provider scope. CSV uploads are hashed, parsed, schema-checked, and reduced into numeric metrics. M02 CSVs also preserve certification-month buckets; undated POS summary rows are excluded from metrics. PDF uploads use coordinate-aware, all-page text extraction. A bank statement is uploaded once per location and linked to each configured module/provider evidence set while remaining one stored object.",
+      "The app receives raw evidence per location and governed provider scope. CSV uploads are hashed, parsed, schema-checked, and reduced into numeric metrics. M02 CSVs preserve certification-month buckets used by R011 date-range validation; undated POS summary rows are excluded from metrics. PDF uploads use coordinate-aware, all-page text extraction. A bank statement is uploaded once per location and linked to each configured module/provider evidence set while remaining one stored object.",
   },
   {
     step: "2",
