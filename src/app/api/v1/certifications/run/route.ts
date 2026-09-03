@@ -25,6 +25,20 @@ function isMissingCertificationSchema(error: unknown) {
   );
 }
 
+export function isCertificationConflict(error: unknown): error is Error {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message === "Location not found." ||
+    error.message.startsWith("Certification cannot run yet:") ||
+    error.message.startsWith("M01 final certification for ") ||
+    error.message.startsWith("M02 final certification for ") ||
+    error.message.includes("missing an account assignment") ||
+    error.message.includes("no active certification modules configured") ||
+    error.message.includes("requested modules are enabled") ||
+    error.message.includes("missing a database-backed manager identity")
+  );
+}
+
 export async function POST(request: Request) {
   const requestContext = getRequestContextFromRequest(request);
   try {
@@ -173,17 +187,8 @@ export async function POST(request: Request) {
       return withRequestHeaders(authResponse, requestContext);
     }
 
-    if (error instanceof Error) {
-      if (
-        error.message === "Location not found." ||
-        error.message.startsWith("Certification cannot run yet:") ||
-        error.message.includes("missing an account assignment") ||
-        error.message.includes("no active certification modules configured") ||
-        error.message.includes("requested modules are enabled") ||
-        error.message.includes("missing a database-backed manager identity")
-      ) {
-        return withRequestHeaders(NextResponse.json({ error: error.message }, { status: 409 }), requestContext);
-      }
+    if (isCertificationConflict(error)) {
+      return withRequestHeaders(NextResponse.json({ error: error.message }, { status: 409 }), requestContext);
     }
 
     if (isMissingCertificationSchema(error)) {
